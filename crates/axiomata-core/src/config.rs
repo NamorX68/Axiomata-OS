@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+pub use axiomata_harness::Effort;
 use axiomata_roster::Engine;
 use serde::{Deserialize, Serialize};
 
@@ -327,12 +328,53 @@ pub struct GlutSettings {
     /// Off: the MCP tools are offered directly, as before Glut 2.
     #[serde(default = "default_true")]
     pub codemode: bool,
+    /// How hard the chat's model reasons on Glut (`docs/plans/glut-effort.md`, E1); unset: `effort` in
+    /// `~/.axh/settings.json`, else the provider's default. A chat's `/effort` wins for its conversation.
+    #[serde(
+        default,
+        deserialize_with = "known_effort",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub chat_effort: Option<Effort>,
+    /// The same for skill and routine runs; a skill's own `effort:` wins.
+    #[serde(
+        default,
+        deserialize_with = "known_effort",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub skill_effort: Option<Effort>,
 }
 
 impl Default for GlutSettings {
     fn default() -> Self {
-        Self { codemode: true }
+        Self {
+            codemode: true,
+            chat_effort: None,
+            skill_effort: None,
+        }
     }
+}
+
+/// An effort level from `config.toml`: one the harness does not know, or a value that is no text at all, is no level,
+/// with a warning — a typo here must not keep the whole config from loading.
+fn known_effort<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Effort>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Written {
+        Text(String),
+        Other(serde::de::IgnoredAny),
+    }
+    let reason = match Written::deserialize(deserializer)? {
+        Written::Text(text) => match Effort::parse_or_explain(&text) {
+            Ok(effort) => return Ok(Some(effort)),
+            Err(reason) => reason,
+        },
+        Written::Other(_) => "an effort is written as text".to_owned(),
+    };
+    tracing::warn!(reason, "agents.glut: effort left unset");
+    Ok(None)
 }
 
 fn default_true() -> bool {
@@ -1247,6 +1289,40 @@ mod tests {
 
         let old: Config = toml::from_str("owner = \"x\"\n").unwrap();
         assert!(old.agents.engines.is_empty());
+    }
+
+    #[test]
+    fn glut_efforts_round_trip_and_a_typo_leaves_them_unset_without_failing_the_load() {
+        let mut config = Config::default();
+        config.agents.glut.skill_effort = Some(Effort::Xhigh);
+        let text = toml::to_string_pretty(&config).unwrap();
+        assert!(text.contains("skill_effort = \"xhigh\""), "{text}");
+        assert!(
+            !text.contains("chat_effort"),
+            "an unset level is not written: {text}"
+        );
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.agents.glut, config.agents.glut);
+
+        let typo: Config = toml::from_str(
+            "owner = \"x\"\n[agents.glut]\nchat_effort = \"hihg\"\nskill_effort = \"LOW\"\n",
+        )
+        .unwrap();
+        assert_eq!(typo.agents.glut.chat_effort, None);
+        assert_eq!(typo.agents.glut.skill_effort, Some(Effort::Low));
+        let other: Config =
+            toml::from_str("[agents.glut]\nchat_effort = 3\nskill_effort = [\"high\"]\n").unwrap();
+        assert_eq!(
+            (
+                other.agents.glut.chat_effort,
+                other.agents.glut.skill_effort
+            ),
+            (None, None)
+        );
+        assert!(
+            typo.agents.glut.codemode,
+            "the rest of the section keeps its defaults"
+        );
     }
 
     #[test]

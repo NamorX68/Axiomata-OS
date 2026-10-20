@@ -2,7 +2,7 @@
  * The `/` command router behind the assistant bar, in three levels (`docs/plans/slash-commands.md`, S1):
  *
  * 1. **Conversation** — the same name on every chat harness, the app maps each to the engine:
- *    /help /clear /compact /model /plan /build /skills /cost /resume /undo /do
+ *    /help /clear /compact /model /effort /plan /build /skills /cost /resume /undo /do (`/effort` on Glut only)
  * 2. **App control** — /tile (add, remove, module actions), /theme, /open, /newfile, /brain
  * 3. **Engine commands** — what the chat's harness itself offers (`engineCommands`, filled by `chat_commands`):
  *    under their own name, or `/glut:` `/oc:` `/cc:` + name where a level 1/2 name is taken (S2).
@@ -14,14 +14,14 @@
 import { get, writable } from "svelte/store";
 
 import { emit } from "./bus";
-import { busy, newSession, planMode, send, sessionId, turnModel, turns } from "./chat";
+import { busy, newSession, planMode, send, sessionId, turnEffort, turnModel, turns } from "./chat";
 import { createInstance, destroyInstance } from "./lifecycle";
 import { loadModelCatalog, modelCatalog, providerOptions } from "./modelCatalog";
 import { getModule, invokeAction, listModules } from "./registry";
 import { openFilePanel } from "./staging";
 import { instances } from "./stores";
 import { THEMES, applyTheme, isTheme } from "./themes";
-import { type ConfigView, type Skill, invokeBackend } from "./backend";
+import { type ConfigView, EFFORT_LEVELS, type Skill, invokeBackend, isEffortLevel } from "./backend";
 
 /** Where a command comes from: the app itself, or the chat's harness. */
 export type CommandSource = "app" | "glut" | "oc" | "cc";
@@ -101,6 +101,12 @@ const CONVERSATION: AppCommand[] = [
   { name: "clear", level: 1, description: "Start a new conversation" },
   { name: "compact", level: 1, description: "Summarise the conversation so far to free context" },
   { name: "model", level: 1, hint: "[model]", description: "Show or change this conversation's model" },
+  {
+    name: "effort",
+    level: 1,
+    hint: "[level]",
+    description: "Show or change how hard Glut's model reasons in this conversation",
+  },
   { name: "plan", level: 1, description: "Plan mode: the agent reads and plans, changes nothing" },
   { name: "build", level: 1, description: "Build mode: the agent may carry the plan out" },
   { name: "skills", level: 1, hint: "[run <name>]", description: "List the skills, or run one" },
@@ -290,6 +296,9 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
     case "model":
       return model(args);
 
+    case "effort":
+      return effort(args);
+
     case "compact":
       return compact();
 
@@ -396,6 +405,43 @@ async function model(args: string[]): Promise<CommandResult> {
   }
   turnModel.set(wanted);
   return { ok: true, message: `Model for this conversation: ${wanted}.` };
+}
+
+/** `/effort` shows this conversation's level and the configured one; `/effort <level>` switches, `/effort default`
+ *  goes back. Only Glut reads it: on another harness the command says so and changes nothing. */
+async function effort(args: string[]): Promise<CommandResult> {
+  let config: ConfigView;
+  try {
+    config = await invokeBackend<ConfigView>("get_config");
+  } catch (err) {
+    return { ok: false, message: String(err) };
+  }
+  if (config.agents.chat_harness !== "axh") {
+    return { ok: false, message: "/effort is Glut's: the chat runs on another harness." };
+  }
+  const configured = config.agents.chat_effort;
+  const configuredText = configured ?? "Glut's own setting, else the provider's default";
+  const wanted = args[0]?.toLowerCase();
+  if (!wanted) {
+    const current = get(turnEffort);
+    const head = current
+      ? `**Effort** — \`${current}\` for this conversation (configured: ${configuredText}, \`/effort default\` goes back)`
+      : `**Effort** — ${configured ? `\`${configured}\`, the configured chat effort` : configuredText}`;
+    return {
+      ok: true,
+      message: `Effort: ${current ?? configured ?? "default"}`,
+      detail: `${head}\n\nLevels: ${EFFORT_LEVELS.map((level) => `\`${level}\``).join(" ")}`,
+    };
+  }
+  if (wanted === "default") {
+    turnEffort.set(null);
+    return { ok: true, message: `Effort: ${configured ?? "default"} (configured).` };
+  }
+  if (!isEffortLevel(wanted)) {
+    return { ok: false, message: `"${args[0]}" is no effort level — ${EFFORT_LEVELS.join(", ")}` };
+  }
+  turnEffort.set(wanted);
+  return { ok: true, message: `Effort for this conversation: ${wanted}.` };
 }
 
 /** `/compact`: the conversation's harness summarises it, the next turns build on the summary. */

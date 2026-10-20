@@ -687,7 +687,11 @@ nothing a script calls escapes a rule. Only what the script prints or returns co
 process, the run's deadline and cancel interrupt it, a script waiting on nothing ends at once. **A chat turn keeps the
 MCP tools behind code** (45 tools → 15, 16.9k → 3.5k input tokens a step); **a skill that declares its tools keeps
 them direct** and gets `codemode` only when it names it — measured on the calendar digest, whose output *is* its
-data. `[agents.glut] codemode` switches it. **Nothing is cut** (Glut lean, `docs/plans/glut-lean.md`; Glut 2's
+data. `[agents.glut] codemode` switches it. **Effort** (`docs/plans/glut-effort.md`): `ModelEndpoint.effort` goes to
+OpenRouter as `reasoning.effort`, elsewhere as `reasoning_effort`; Glut's own sources (`effort:` frontmatter,
+`--effort`, `~/.axh/settings.json`) come first, Axiomata's `/effort` and `[agents.glut] chat_effort|skill_effort` sit
+on top; the reasoning a provider sends is kept on the message and sent back only after the latest user message.
+**Nothing is cut** (Glut lean, `docs/plans/glut-lean.md`; Glut 2's
 shrinking of old results is gone): a result over 30,000 characters enters the conversation as head + tail with a note,
 the whole text in the run's `ResultStore` (`results.rs`), read back in parts with `read_full_result` (always offered;
 a chat's store sits beside its session file, `<session>.results/`, so later turns read the ids too); `bash` keeps the
@@ -1498,6 +1502,9 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **Glut lean built** (2026-10-20, `docs/plans/glut-lean.md`): no cutting (relocation into the run's store), compact
   outputs of frequent commands, unchanged re-reads as a pointer, `read_file` outlines. §5 "Glut 2". Round 2 the same
   day: chains compacted part by part, the savings counted (`axh gain`), pipes counted only.
+- **Glut effort built** (2026-10-21, `docs/plans/glut-effort.md`): the reasoning level from a command's or skill's
+  `effort:`, `axh --effort`, the chat's `/effort`, `[agents.glut]`, `~/.axh/settings.json`; the model's thinking goes
+  back while it works on the same prompt. §5 "Glut 2".
 - **Durable Glut runs built** (2026-10-20, `docs/plans/durable.md`): a journal per Glut run, resume on the owner's
   click (skills, routines' skills, chat turns, `axh resume`), replay only of what reads, every run's row from its start
   and `interrupted` after a lost process. §5 "Durable Glut runs".

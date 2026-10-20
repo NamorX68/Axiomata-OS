@@ -31,6 +31,7 @@ import type {
   MemoryStatus,
   NewRoutine,
   ProviderId,
+  EffortLevel,
   HarnessId,
   ClaudeLoginStatus,
   Routine,
@@ -77,6 +78,8 @@ let configState: {
     skill_provider: ProviderId;
     chat_harness: HarnessId;
     skill_harness: HarnessId;
+    chat_effort: EffortLevel | null;
+    skill_effort: EffortLevel | null;
     providers: Record<ProviderId, MockProvider>;
     daily_usd_cap: number | null;
     web: { exa: string | null; tinyfish: string | null; tavily: string | null; daily: number; tavilyMonthly: number };
@@ -92,6 +95,8 @@ let configState: {
     skill_provider: "anthropic",
     chat_harness: "opencode",
     skill_harness: "opencode",
+    chat_effort: null,
+    skill_effort: null,
     providers: {
       anthropic: { base_url: null, api_key: null, chat_model: "claude-sonnet-5", skill_model: "claude-haiku-5-5" },
       open_router: { base_url: "https://openrouter.ai/api", api_key: null, chat_model: "", skill_model: "" },
@@ -125,6 +130,8 @@ function configView(): ConfigView {
       skill_provider: a.skill_provider,
       chat_harness: a.chat_harness,
       skill_harness: a.skill_harness,
+      chat_effort: a.chat_effort,
+      skill_effort: a.skill_effort,
       daily_usd_cap: a.daily_usd_cap,
       web: {
         has_exa_key: !!a.web.exa,
@@ -1367,6 +1374,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       a.skill_provider = next.agents.skill_provider;
       a.chat_harness = next.agents.chat_harness;
       a.skill_harness = next.agents.skill_harness;
+      a.chat_effort = next.agents.chat_effort;
+      a.skill_effort = next.agents.skill_effort;
       a.daily_usd_cap = next.agents.daily_usd_cap;
       const key = (stored: string | null, u: ConfigUpdate["agents"]["web"]["exa_api_key"]) =>
         u.kind === "keep" ? stored : u.kind === "set" ? u.value : null;

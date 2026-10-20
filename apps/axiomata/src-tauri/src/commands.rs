@@ -12,7 +12,7 @@ use axiomata_core::agents::{self, ChatMode, ChatReply};
 use axiomata_core::board;
 use axiomata_core::board_mirror;
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
-use axiomata_core::config::{Config, HarnessId, ProviderId, ProviderSettings, WebSettings};
+use axiomata_core::config::{Config, Effort, HarnessId, ProviderId, ProviderSettings, WebSettings};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::editor_settings::{self, LoadedEditorSettings};
 use axiomata_core::editor_vi;
@@ -120,6 +120,10 @@ pub struct AgentDefaultsView {
     /// The harness of each role (`docs/plans/harness-choice.md`).
     pub chat_harness: HarnessId,
     pub skill_harness: HarnessId,
+    /// How hard Glut's model reasons per role (`[agents.glut]`, `docs/plans/glut-effort.md`); `None`: Glut's own
+    /// settings, else the provider's default.
+    pub chat_effort: Option<Effort>,
+    pub skill_effort: Option<Effort>,
     pub daily_usd_cap: Option<f64>,
     /// Glut's web search: key presence and limits (`docs/plans/glut-round.md`, W5).
     pub web: WebSettingsView,
@@ -165,6 +169,8 @@ impl ConfigView {
                 skill_provider: c.agents.skill_provider,
                 chat_harness: c.agents.chat_harness,
                 skill_harness: c.agents.skill_harness,
+                chat_effort: c.agents.glut.chat_effort,
+                skill_effort: c.agents.glut.skill_effort,
                 daily_usd_cap: c.agents.daily_usd_cap,
                 web: WebSettingsView::from_settings(&c.agents.web),
                 claude_env_keys: c.agents.claude_env.keys().cloned().collect(),
@@ -225,6 +231,11 @@ pub struct AgentDefaultsUpdate {
     pub skill_provider: ProviderId,
     pub chat_harness: HarnessId,
     pub skill_harness: HarnessId,
+    /// A level Glut does not know refuses the save.
+    #[serde(default)]
+    pub chat_effort: Option<Effort>,
+    #[serde(default)]
+    pub skill_effort: Option<Effort>,
     pub daily_usd_cap: Option<f64>,
     pub web: WebSettingsUpdate,
 }
@@ -252,6 +263,8 @@ fn merge_view_update(current: &Config, update: ConfigUpdate) -> Config {
     merged.agents.skill_provider = update.agents.skill_provider;
     merged.agents.chat_harness = update.agents.chat_harness;
     merged.agents.skill_harness = update.agents.skill_harness;
+    merged.agents.glut.chat_effort = update.agents.chat_effort;
+    merged.agents.glut.skill_effort = update.agents.skill_effort;
     let web = update.agents.web;
     let stored = &current.agents.web;
     merged.agents.web = WebSettings {
@@ -530,6 +543,8 @@ mod tests {
                 skill_provider: ProviderId::OpenRouter,
                 chat_harness: HarnessId::Opencode,
                 skill_harness: HarnessId::Opencode,
+                chat_effort: None,
+                skill_effort: None,
                 daily_usd_cap: current.agents.daily_usd_cap,
                 web: keep_web(),
                 providers: BTreeMap::from([(
@@ -575,6 +590,27 @@ mod tests {
 
         let cleared = merge_view_update(&current, base_update(KeyUpdate::Clear));
         assert_eq!(or(&cleared), None);
+
+        // Glut's efforts are set and cleared by the save, under `[agents.glut]`, beside its code mode.
+        let mut efforts = base_update(KeyUpdate::Keep);
+        efforts.agents.skill_effort = Some(Effort::High);
+        let saved = merge_view_update(&current, efforts);
+        assert_eq!(saved.agents.glut.skill_effort, Some(Effort::High));
+        assert_eq!(saved.agents.glut.chat_effort, None);
+        assert_eq!(saved.agents.glut.codemode, current.agents.glut.codemode);
+        assert_eq!(
+            ConfigView::from_config(&saved).agents.skill_effort,
+            Some(Effort::High)
+        );
+    }
+
+    /// The webview sends a level by name; one Glut does not know refuses the save instead of landing in the file.
+    #[test]
+    fn an_effort_update_takes_a_known_level_or_none() {
+        let level = |json: &str| serde_json::from_str::<Option<Effort>>(json);
+        assert_eq!(level("\"xhigh\"").unwrap(), Some(Effort::Xhigh));
+        assert_eq!(level("null").unwrap(), None);
+        assert!(level("\"extreme\"").is_err());
     }
 
     #[test]
@@ -604,6 +640,8 @@ mod tests {
                 skill_provider: ProviderId::OpenRouter,
                 chat_harness: HarnessId::Opencode,
                 skill_harness: HarnessId::Opencode,
+                chat_effort: None,
+                skill_effort: None,
                 daily_usd_cap: Some(2.0),
                 web: keep_web(),
                 providers: BTreeMap::from([(
@@ -641,6 +679,8 @@ mod tests {
                 skill_provider: ProviderId::Anthropic,
                 chat_harness: HarnessId::Opencode,
                 skill_harness: HarnessId::Opencode,
+                chat_effort: None,
+                skill_effort: None,
                 daily_usd_cap: Some(2.0),
                 web: WebSettingsUpdate {
                     exa_api_key: KeyUpdate::Set {
@@ -694,6 +734,8 @@ mod tests {
                 skill_provider: ProviderId::Anthropic,
                 chat_harness: HarnessId::ClaudeCode,
                 skill_harness: HarnessId::Opencode,
+                chat_effort: None,
+                skill_effort: None,
                 daily_usd_cap: Some(2.0),
                 web: keep_web(),
                 providers: BTreeMap::new(),
@@ -1436,7 +1478,8 @@ pub fn complete_module_action(response: ActionResponse) -> Result<(), String> {
 /// Slash commands (#108, `docs/plans/slash-commands.md`): `model` runs the turn on that model of the chat provider
 /// instead of its chat model (this conversation only); `command` makes the turn one of the chat harness's commands
 /// (`{"kind": "run", "name": …}`, `message` its arguments) or a compaction (`{"kind": "compact"}`). Names are checked
-/// in the core; nothing here starts a process of its own.
+/// in the core; nothing here starts a process of its own. `effort` is the conversation's `/effort` level, which only
+/// Glut reads (`docs/plans/glut-effort.md`); the core checks it is one.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Each is a named field of the webview's call; a struct would only rename them.
 pub async fn assistant_send(
@@ -1448,6 +1491,7 @@ pub async fn assistant_send(
     model: Option<String>,
     command: Option<ChatCommandArg>,
     resume: Option<String>,
+    effort: Option<String>,
 ) -> Result<ChatReply, String> {
     let mode = match mode.as_str() {
         "chat" => ChatMode::Chat,
@@ -1462,6 +1506,7 @@ pub async fn assistant_send(
             ChatCommandArg::Compact => agents::ChatCommand::Compact,
         }),
         resume,
+        effort,
     };
     let config = read_config(&state.config);
     agents::chat_and_record_with(

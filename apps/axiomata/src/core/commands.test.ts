@@ -13,7 +13,7 @@ import {
   runCommand,
   suggestions,
 } from "./commands";
-import { busy, planMode, sessionId, turnModel, turns } from "./chat";
+import { busy, newSession, planMode, sessionId, turnEffort, turnModel, turns } from "./chat";
 import { modelCatalog } from "./modelCatalog";
 import { activeTheme, instances, loadInstances } from "./stores";
 import { staged } from "./staging";
@@ -287,6 +287,29 @@ describe("the conversation commands that reach the backend (#108)", () => {
     expect((await runCommand("model", [])).detail).toContain("`allowed/two` for this conversation");
     await runCommand("model", ["default"]);
     expect(get(turnModel)).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("/effort is Glut's: it switches this conversation's level, goes back, and refuses elsewhere", async () => {
+    const spy = await backend();
+    const glut = { ...config, agents: { ...config.agents, chat_harness: "axh", chat_effort: "medium" } };
+    spy.mockResolvedValue(glut);
+    turnEffort.set(null);
+    expect((await runCommand("effort", [])).detail).toContain("`medium`, the configured chat effort");
+    expect((await runCommand("effort", ["hard"])).message).toMatch(/no effort level/);
+    expect(get(turnEffort)).toBeNull();
+    expect((await runCommand("effort", ["XHigh"])).ok).toBe(true);
+    expect(get(turnEffort)).toBe("xhigh");
+    expect((await runCommand("effort", [])).detail).toContain("`xhigh` for this conversation");
+    await runCommand("effort", ["default"]);
+    expect(get(turnEffort)).toBeNull();
+    turnEffort.set("low");
+    newSession();
+    expect(get(turnEffort), "a new conversation goes back to the configured level").toBeNull();
+    spy.mockResolvedValue({ ...config, agents: { ...config.agents, chat_harness: "opencode" } });
+    const elsewhere = await runCommand("effort", ["high"]);
+    expect(elsewhere.ok).toBe(false);
+    expect(get(turnEffort)).toBeNull();
     spy.mockRestore();
   });
 

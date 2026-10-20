@@ -13,6 +13,7 @@
     type ClaudeLoginStatus,
     type ConfigUpdate,
     type ConfigView,
+    EFFORT_LEVELS,
     type KeyUpdate,
     type HarnessId,
     type ProviderId,
@@ -163,6 +164,8 @@
         skill_provider: c.agents.skill_provider,
         chat_harness: c.agents.chat_harness,
         skill_harness: c.agents.skill_harness,
+        chat_effort: c.agents.chat_effort,
+        skill_effort: c.agents.skill_effort,
         daily_usd_cap: c.agents.daily_usd_cap,
         web: webUpdate(c.agents.web, webKeyEdits),
       },
@@ -769,6 +772,22 @@
                       </select>
                     {/if}
                   </label>
+                  {#if harness === "axh"}
+                    <label class="field">
+                      <span>Effort for {r.label}</span>
+                      {#if r.role === "chat"}
+                        <select bind:value={config.agents.chat_effort}>
+                          <option value={null}>Glut's own setting</option>
+                          {#each EFFORT_LEVELS as level (level)}<option value={level}>{level}</option>{/each}
+                        </select>
+                      {:else}
+                        <select bind:value={config.agents.skill_effort}>
+                          <option value={null}>Glut's own setting</option>
+                          {#each EFFORT_LEVELS as level (level)}<option value={level}>{level}</option>{/each}
+                        </select>
+                      {/if}
+                    </label>
+                  {/if}
                   <p class="hint">{HARNESSES.find((h) => h.id === harness)?.blurb}</p>
                 </div>
               {/each}

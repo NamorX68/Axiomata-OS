@@ -39,8 +39,8 @@ use axiomata_harness::permissions::{Gate, Mode, Nobody, Rule, RuleSet};
 use axiomata_harness::setup;
 use axiomata_harness::skills;
 use axiomata_harness::{
-    Cancel, Event, EventSink, FinishReason, McpStatus, Message, ModelEndpoint, OpenAiCompat,
-    RunConfig, SharedSink,
+    Cancel, Effort, Event, EventSink, FinishReason, McpStatus, Message, ModelEndpoint,
+    OpenAiCompat, RunConfig, SharedSink,
 };
 
 use crate::agents::claude_code::{bash_rule, is_shell_rule};
@@ -60,7 +60,12 @@ use crate::paths::global_skills_dir;
 pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResult, AxiomataError> {
     // B1: the endpoint as the skill provider has it — before a single token
     // is spent, a provider without a base URL fails here.
-    let endpoint = endpoint(config, ProviderRole::Skill, request.model.clone())?;
+    let endpoint = endpoint(
+        config,
+        ProviderRole::Skill,
+        request.model.clone(),
+        request.effort.as_deref(),
+    )?;
     // The harness's home (`~/.axh`, overridable as `AXH_HOME`): its settings,
     // approvals, MCP config and the owner's own `skills/` folder live there.
     let home = settings::home_dir()?;
@@ -97,7 +102,11 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     // cancels a recorded run from here — the timeout ends it.
     let cancel = Cancel::new();
     let started = Instant::now();
-    let model = OpenAiCompat::new(endpoint)?;
+    // Unset by the run and by `[agents.glut]`: the harness's own `effort` from `~/.axh/settings.json` (E1).
+    let model = OpenAiCompat::new(ModelEndpoint {
+        effort: endpoint.effort.or(harness.effort),
+        ..endpoint
+    })?;
     let (mut outcome, conversation) =
         match request.journal.as_ref().filter(|journal| journal.resume) {
             Some(journal) => axiomata_harness::resume(
@@ -189,7 +198,12 @@ pub(crate) async fn chat(
     request: ChatRequest,
     config: &Config,
 ) -> Result<ChatReply, AxiomataError> {
-    let endpoint = endpoint(config, ProviderRole::Chat, request.model.clone())?;
+    let endpoint = endpoint(
+        config,
+        ProviderRole::Chat,
+        request.model.clone(),
+        request.effort.as_deref(),
+    )?;
     let home = settings::home_dir()?;
     let sessions = sessions_dir();
     let session_id = request
@@ -301,7 +315,10 @@ pub(crate) async fn chat(
     });
     let continuing = !earlier.is_empty();
     let started = Instant::now();
-    let model = OpenAiCompat::new(endpoint)?;
+    let model = OpenAiCompat::new(ModelEndpoint {
+        effort: endpoint.effort.or(harness.effort),
+        ..endpoint
+    })?;
     let (outcome, conversation) = match &request.resume {
         Some(run) => axiomata_harness::resume(
             &harness.run_config,
@@ -731,6 +748,8 @@ struct Harness {
     tools: axiomata_harness::Toolbox,
     notes: Notes,
     sink: SharedSink,
+    /// The owner's `effort` in `~/.axh/settings.json`: the run's when neither the run nor `[agents.glut]` names one.
+    effort: Option<Effort>,
 }
 
 impl Harness {
@@ -828,6 +847,7 @@ impl Harness {
             tools,
             notes,
             sink,
+            effort: loaded.effort,
         })
     }
 }
@@ -998,7 +1018,9 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
 
 /// The model endpoint of an `axh` run (B1): the base URL and key of `role`'s
 /// provider (the skill provider for a run, the chat provider for a chat turn),
-/// and the run's model — bare, as the API names it (D2).
+/// and the run's model — bare, as the API names it (D2). The effort is the run's own (a skill's `effort:`, a
+/// chat's `/effort`), else `[agents.glut]`'s for the role; unset, the harness's `~/.axh/settings.json` decides
+/// ([`Harness::prepare`]).
 ///
 /// # Errors
 ///
@@ -1006,11 +1028,12 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
 /// from the config, has no base URL (Anthropic: no OpenAI-compatible API yet,
 /// H4), has no key where one is needed (OpenRouter), or when the run carries
 /// no model — a config gap must fail loudly, never silently bill another
-/// endpoint.
+/// endpoint — or when the run's effort is no level the harness knows.
 pub(crate) fn endpoint(
     config: &Config,
     role: ProviderRole,
     model: Option<String>,
+    effort: Option<&str>,
 ) -> Result<ModelEndpoint, AxiomataError> {
     let id = config.agents.provider_for(role);
     let gap = |reason: String| AxiomataError::InvalidAgentModel { reason };
@@ -1061,10 +1084,18 @@ pub(crate) fn endpoint(
                 }
             })
         })?;
+    let effort = match effort.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(text) => Some(Effort::parse_or_explain(text).map_err(gap)?),
+        None => match role {
+            ProviderRole::Skill => config.agents.glut.skill_effort,
+            ProviderRole::Chat => config.agents.glut.chat_effort,
+        },
+    };
     Ok(ModelEndpoint {
         base_url,
         api_key,
         model,
+        effort,
     })
 }
 
@@ -1271,6 +1302,7 @@ mod tests {
             &Config::default(),
             ProviderRole::Skill,
             Some("claude-haiku-5-5".into()),
+            None,
         )
         .unwrap_err();
         let message = err.to_string();
@@ -1282,6 +1314,7 @@ mod tests {
             &openrouter,
             ProviderRole::Skill,
             Some("deepseek/deepseek-chat".into()),
+            None,
         )
         .unwrap();
         assert_eq!(resolved.base_url, "https://openrouter.ai/api");
@@ -1292,7 +1325,7 @@ mod tests {
         let mut keyless = openrouter_settings();
         keyless.api_key = None;
         let keyless = config_with_provider(ProviderId::OpenRouter, keyless);
-        assert!(endpoint(&keyless, ProviderRole::Skill, Some("m".into())).is_err());
+        assert!(endpoint(&keyless, ProviderRole::Skill, Some("m".into()), None).is_err());
 
         // A local Ollama needs no key.
         let ollama = config_with_provider(
@@ -1305,15 +1338,48 @@ mod tests {
             },
         );
         assert_eq!(
-            endpoint(&ollama, ProviderRole::Skill, Some("qwen3:8b".into()))
+            endpoint(&ollama, ProviderRole::Skill, Some("qwen3:8b".into()), None)
                 .unwrap()
                 .model,
             "qwen3:8b"
         );
 
         // No model on the request (nothing resolved) is an error, not a guess.
-        assert!(endpoint(&ollama, ProviderRole::Skill, None).is_err());
-        assert!(endpoint(&ollama, ProviderRole::Skill, Some("  ".into())).is_err());
+        assert!(endpoint(&ollama, ProviderRole::Skill, None, None).is_err());
+        assert!(endpoint(&ollama, ProviderRole::Skill, Some("  ".into()), None).is_err());
+    }
+
+    /// E1: the run's own effort first (a skill's `effort:`, a chat's `/effort`), else `[agents.glut]`'s for the
+    /// role; a level the harness does not know refuses the run before it spends anything.
+    #[test]
+    fn the_runs_effort_wins_over_the_roles_and_an_unknown_one_fails() {
+        let mut config = config_with_provider(ProviderId::OpenRouter, openrouter_settings());
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.glut.skill_effort = Some(Effort::Low);
+        config.agents.glut.chat_effort = Some(Effort::High);
+        let effort = |role, own: Option<&str>| {
+            endpoint(&config, role, Some("m".into()), own).map(|endpoint| endpoint.effort)
+        };
+        assert_eq!(
+            effort(ProviderRole::Skill, None).unwrap(),
+            Some(Effort::Low)
+        );
+        assert_eq!(
+            effort(ProviderRole::Chat, None).unwrap(),
+            Some(Effort::High)
+        );
+        assert_eq!(
+            effort(ProviderRole::Skill, Some(" max ")).unwrap(),
+            Some(Effort::Max)
+        );
+        assert_eq!(
+            effort(ProviderRole::Chat, Some("")).unwrap(),
+            Some(Effort::High)
+        );
+        let err = effort(ProviderRole::Skill, Some("hard"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown effort \"hard\""), "{err}");
     }
 
     /// `access: read` on Glut (glut-round CP1): reads, the shared read commands and the declared MCP tool run; edits,
@@ -1940,6 +2006,7 @@ mod tests {
             allowed_tools: None,
             command: None,
             resume: None,
+            effort: None,
         };
 
         let first = chat(request("Remember GLUTHEX.", None), &fx.config)
@@ -2034,6 +2101,7 @@ mod tests {
                 allowed_tools: None,
                 command,
                 resume: None,
+                effort: None,
             };
         let names: Vec<String> = chat_commands(&fx.config.workspace_root)
             .unwrap()
@@ -2182,6 +2250,7 @@ mod tests {
             allowed_tools: None,
             command: None,
             resume: None,
+            effort: None,
         };
         let err = chat(request, &fx.config).await.unwrap_err();
         assert!(matches!(err, AxiomataError::AgentApi { .. }), "{err:?}");

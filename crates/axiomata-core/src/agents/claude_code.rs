@@ -1780,6 +1780,7 @@ mod tests {
             expects_json: false,
             read_only: false,
             journal: None,
+            effort: None,
         };
         assert!(matches!(
             run(request).await,

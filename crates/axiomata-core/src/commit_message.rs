@@ -63,7 +63,7 @@ pub async fn suggest(core: &AxiomataCore, staged: &StagedChange) -> Result<Strin
         .get(&provider)
         .map(|settings| settings.skill_model.trim().to_string());
     // The skill-run wording of this error ("backend axh needs …") would puzzle at a button in the Git panel.
-    let endpoint = crate::agents::axh::endpoint(&config, ProviderRole::Skill, model).map_err(|err| {
+    let endpoint = crate::agents::axh::endpoint(&config, ProviderRole::Skill, model, None).map_err(|err| {
         AxiomataError::InvalidAgentModel {
             reason: format!(
                 "commit messages are written by the skill provider's model through its API, which needs \

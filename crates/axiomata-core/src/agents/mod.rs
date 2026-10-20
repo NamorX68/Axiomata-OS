@@ -357,6 +357,9 @@ pub struct ChatRequest {
     pub command: Option<ChatCommand>,
     /// Durable runs: the journal of an interrupted Glut chat turn this turn finishes, instead of a new message.
     pub resume: Option<String>,
+    /// The conversation's `/effort` (`docs/plans/glut-effort.md`, E1): only Glut reads it, over `[agents.glut]
+    /// chat_effort`.
+    pub effort: Option<String>,
 }
 
 /// A chat turn that is a command rather than a prompt (`docs/plans/slash-commands.md`, S8/S9).
@@ -395,6 +398,8 @@ pub struct ChatExtras {
     pub command: Option<ChatCommand>,
     /// Finish the interrupted Glut chat turn of this journal ([`interrupted_chat_turns`]).
     pub resume: Option<String>,
+    /// The conversation's `/effort` level; Glut alone reads it.
+    pub effort: Option<String>,
 }
 
 /// Which harness offers a chat command: the source chip of the bar's list (S10).
@@ -684,6 +689,7 @@ pub async fn chat(
         allowed_tools,
         command: extras.command,
         resume: extras.resume,
+        effort: extras.effort,
     };
     match harness {
         HarnessId::Opencode => {
@@ -864,6 +870,9 @@ pub struct AgentRequest {
     /// The run's journal (durable runs, `docs/plans/durable.md`): only `axh` keeps one, so a run the app lost goes
     /// on from its last step; with `resume` the run goes on from it instead of starting. Other backends ignore it.
     pub journal: Option<RunJournal>,
+    /// The skill's `effort:` frontmatter (`docs/plans/glut-effort.md`, E1): only `axh` reads it, over
+    /// `[agents.glut] skill_effort`; a level it does not know fails the run before it starts.
+    pub effort: Option<String>,
 }
 
 /// A run's journal id, and whether the run goes on from it (`resume`) or starts it.

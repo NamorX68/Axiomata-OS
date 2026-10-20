@@ -65,6 +65,9 @@ export interface AgentDefaultsView {
   chat_harness: HarnessId;
   /** Harness driving skill / routine runs that name none. */
   skill_harness: HarnessId;
+  /** How hard Glut's model reasons in the chat / in skill runs (`[agents.glut]`); `null`: Glut's own setting. */
+  chat_effort: EffortLevel | null;
+  skill_effort: EffortLevel | null;
   /** Daily USD spend cap for a paid provider; `null` disables it. */
   daily_usd_cap: number | null;
   /** Glut's web search: whether each key is stored (never its value), and the limits. */
@@ -99,8 +102,18 @@ export interface AgentDefaultsUpdate {
   skill_provider: ProviderId;
   chat_harness: HarnessId;
   skill_harness: HarnessId;
+  chat_effort: EffortLevel | null;
+  skill_effort: EffortLevel | null;
   daily_usd_cap: number | null;
   web: WebSettingsUpdate;
+}
+
+/** How hard a reasoning model thinks before it answers — Glut's levels (`axiomata_harness::Effort`), least first. */
+export const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
+export function isEffortLevel(text: string): text is EffortLevel {
+  return (EFFORT_LEVELS as readonly string[]).includes(text);
 }
 
 /** Mirrors the Tauri `WebSettingsView` (`docs/plans/glut-round.md`, W5). */

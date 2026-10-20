@@ -77,6 +77,7 @@ describe("the plan switch", () => {
       sessionId: null,
       mode: "plan",
       model: null,
+      effort: null,
       command: null,
       resume: null,
     });

@@ -6,7 +6,7 @@
 
 import { get, writable } from "svelte/store";
 
-import { type ChatMode, type ChatReply, invokeBackend } from "./backend";
+import { type ChatMode, type ChatReply, type EffortLevel, invokeBackend } from "./backend";
 
 export type TurnRole = "user" | "assistant" | "instruction" | "error";
 
@@ -43,6 +43,9 @@ export const planMode = writable(false);
 /** `/model <id>` (#108, S5): the chat provider's model this conversation runs on instead of its chat model; `null`
  *  is the configured one. A new conversation goes back to it. */
 export const turnModel = writable<string | null>(null);
+/** `/effort <level>` (`docs/plans/glut-effort.md`): how hard Glut's model reasons in this conversation; `null` is the
+ *  configured level. Only Glut reads it; a new conversation goes back to the configured one. */
+export const turnEffort = writable<EffortLevel | null>(null);
 
 /** A Glut chat turn the app lost before it answered (durable runs): finished on the owner's click. */
 export interface InterruptedTurn {
@@ -121,6 +124,7 @@ export function newSession(): void {
   turns.set([]);
   sessionId.set(null);
   turnModel.set(null);
+  turnEffort.set(null);
 }
 
 /** What the transcript shows for the owner's line. */
@@ -133,7 +137,7 @@ function typedLine(message: string, mode: ChatMode, command?: ChatCommand, resum
 
 /** One turn against the agent. `chat` continues the panel's session — as `plan` while the plan switch is on;
  *  `instruct` is a one-shot instruction that also lands in the transcript. A `command` makes the chat turn one of
- *  the harness's commands (`message` its arguments) or a compaction; `/model`'s choice rides along. */
+ *  the harness's commands (`message` its arguments) or a compaction; `/model`'s and `/effort`'s choices ride along. */
 export async function send(
   message: string,
   asked: ChatMode,
@@ -152,6 +156,7 @@ export async function send(
       sessionId: get(sessionId),
       mode,
       model: get(turnModel),
+      effort: get(turnEffort),
       command: command ?? null,
       resume: resume ?? null,
     });

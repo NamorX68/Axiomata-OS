@@ -121,6 +121,7 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
             timeout_secs: skill.timeout_secs,
             expects_json: skill.expects_json,
             read_only: skill.read_only,
+            effort: skill.effort.clone(),
         },
     )
     .await
@@ -388,6 +389,8 @@ struct RunOptions {
     expects_json: bool,
     /// The skill's `access: read`.
     read_only: bool,
+    /// The skill's `effort:`.
+    effort: Option<String>,
 }
 
 /// Shared tail of [`execute_skill`] / [`execute_prompt`]: claims `name` for
@@ -531,6 +534,7 @@ fn request_for(
     );
     request.expects_json = options.expects_json;
     request.read_only = options.read_only;
+    request.effort = options.effort;
     request
 }
 
@@ -568,6 +572,7 @@ fn agent_request(
         expects_json: false,
         read_only: false,
         journal: RUN_JOURNAL.try_with(Clone::clone).ok(),
+        effort: None,
     }
 }
 
@@ -896,11 +901,17 @@ mod tests {
             timeout_secs: Some(600),
             expects_json: true,
             read_only: true,
+            effort: Some("high".to_string()),
         };
         let req = request_for("s", "p".to_string(), &config, None, options);
         assert!(req.expects_json);
         assert!(req.read_only, "access: read reaches the backend");
         assert_eq!(req.allowed_tools.as_deref(), Some("mcp__x__y"));
+        assert_eq!(
+            req.effort.as_deref(),
+            Some("high"),
+            "a skill's effort: reaches the backend"
+        );
         assert_eq!(req.timeout, Duration::from_secs(600));
         // The run's name travels along — the `axh` gate names it in a refusal (B3).
         assert_eq!(req.name.as_deref(), Some("s"));

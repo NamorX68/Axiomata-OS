@@ -33,7 +33,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat,
   todo/plan-build/snapshots/LSP errors), and "Glut lean" (2026-10-20, `docs/plans/glut-lean.md`: nothing cut, compact
   outputs of frequent commands — a chain part by part —, unchanged re-reads as a pointer, `read_file` outlines, the
-  savings counted in `~/.axh/lean.jsonl`, `axh gain`), and slash commands in the chat
+  savings counted in `~/.axh/lean.jsonl`, `axh gain`), and "Glut effort" (2026-10-21, `docs/plans/glut-effort.md`:
+  the reasoning level, Glut's own sources first), and slash commands in the chat
   (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
   (`docs/plans/durable.md`: a journal per run, resume on click). LocalBrain was built, measured and not taken over
   (`docs/plans/localbrain.md`, "Outcome").
@@ -286,6 +287,9 @@ from the code itself:
   (`a && b; c`) runs with a random mark printed before each part (`output::marked`/`unmark` in `shell.rs`) — the only
   place Glut touches a command: the gate, the hooks and the events see the command and the output as written, never
   the marks; keep it that way when changing either side.
+- **Glut becomes an application of its own** (owner, 2026-10-21): a new Glut setting starts in the harness — its own
+  `~/.axh/settings.json`, an `axh` flag or frontmatter — and Axiomata's setting only passes a value on top
+  (`docs/plans/glut-effort.md` E1 is the pattern). Never a Glut option only `axiomata-core` can reach.
 - **Hooks veto, they never permit** (HS7, `docs/plans/harness-hs7.md`): the `hooks` of
   `~/.axh/settings.json` (Claude's shape) may only *block* a call or the answer — `allow`/`ask` parse and
   are no-ops (the gate stays the only decider), a crash/timeout/odd exit is a fail-open `Event::Hook` note,

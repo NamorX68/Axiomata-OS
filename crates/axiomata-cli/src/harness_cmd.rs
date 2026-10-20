@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
 use axiomata_harness::commands::{PermissionsView, Registry};
@@ -18,8 +18,8 @@ use axiomata_harness::permissions::{
 use axiomata_harness::setup::{self, Draft, Prepared};
 use axiomata_harness::skills;
 use axiomata_harness::{
-    Cancel, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat, RunConfig,
-    SharedSink, SkillHow,
+    Cancel, Effort, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat,
+    RunConfig, SharedSink, SkillHow,
 };
 use clap::{Args, Subcommand, ValueEnum};
 
@@ -50,6 +50,10 @@ pub struct RunFlags {
     /// The model; default: the provider's skill model.
     #[arg(long)]
     model: Option<String>,
+    /// How hard the model reasons: none, minimal, low, medium, high, xhigh or max. Otherwise a skill's or a
+    /// command's `effort:`, else `[agents.glut] skill_effort`, else `effort` in ~/.axh/settings.json.
+    #[arg(long)]
+    effort: Option<String>,
     /// The folder the run works in.
     #[arg(long, default_value = ".")]
     cwd: PathBuf,
@@ -111,6 +115,7 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     let RunFlags {
         provider,
         model,
+        effort,
         cwd,
         max_turns,
         json,
@@ -129,7 +134,11 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         bail!("name a prompt, or run a skill with --skill <name>");
     }
     let config = crate::read_config(core);
-    let endpoint = endpoint(&config, provider, model)?;
+    let mut endpoint = endpoint(&config, provider, model)?;
+    if let Some(text) = effort {
+        endpoint.effort =
+            Some(Effort::parse_or_explain(&text).map_err(|reason| anyhow!("--effort: {reason}"))?);
+    }
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("cannot use {}", cwd.display()))?;
@@ -170,6 +179,12 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     run_config.snapshots = Some(home.join(".axh").join("snapshots"));
     // Glut lean (N9): what the run saves is counted with the app's runs.
     run_config.savings = Some(home.join(".axh").join(axiomata_harness::lean::FILE));
+    // The flag, else the app's skill effort, else the harness's own settings; a skill's or a command's `effort:`
+    // still wins in `prepare`.
+    endpoint.effort = endpoint
+        .effort
+        .or(config.agents.glut.skill_effort)
+        .or(built.effort);
     let mut draft = Draft {
         config: run_config,
         endpoint,
@@ -354,6 +369,7 @@ fn endpoint(
         base_url,
         api_key,
         model,
+        effort: None,
     })
 }
 
