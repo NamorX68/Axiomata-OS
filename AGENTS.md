@@ -32,7 +32,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   `docs/plans/glut-round.md`: web fetch/search, fewer tokens, cached tokens metered apart, streaming, skills that name
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat,
   todo/plan-build/snapshots/LSP errors), and "Glut lean" (2026-10-20, `docs/plans/glut-lean.md`: nothing cut, compact
-  outputs of frequent commands, unchanged re-reads as a pointer, `read_file` outlines), and slash commands in the chat
+  outputs of frequent commands — a chain part by part —, unchanged re-reads as a pointer, `read_file` outlines, the
+  savings counted in `~/.axh/lean.jsonl`, `axh gain`), and slash commands in the chat
   (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
   (`docs/plans/durable.md`: a journal per run, resume on click). LocalBrain was built, measured and not taken over
   (`docs/plans/localbrain.md`, "Outcome").
@@ -281,7 +282,10 @@ from the code itself:
   enters the conversation (`results::bounded`: head + tail, the whole in the run's `ResultStore`) — never cap inside a
   tool. A compact-output filter (`tools/output.rs`) rewrites only the *output* of a simple command, keeps Glut's own
   `[…]` notes and the `error: ` prefix, and puts the raw output in the store; a new filter needs a real output as a
-  test fixture (`tools/output/fixtures/`, anonymised) and must leave the model's own format flags alone.
+  test fixture (`tools/output/fixtures/`, anonymised) and must leave the model's own format flags alone. A chain
+  (`a && b; c`) runs with a random mark printed before each part (`output::marked`/`unmark` in `shell.rs`) — the only
+  place Glut touches a command: the gate, the hooks and the events see the command and the output as written, never
+  the marks; keep it that way when changing either side.
 - **Hooks veto, they never permit** (HS7, `docs/plans/harness-hs7.md`): the `hooks` of
   `~/.axh/settings.json` (Claude's shape) may only *block* a call or the answer — `allow`/`ask` parse and
   are no-ops (the gate stays the only decider), a crash/timeout/odd exit is a fail-open `Event::Hook` note,

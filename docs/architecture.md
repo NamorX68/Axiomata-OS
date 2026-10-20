@@ -694,7 +694,11 @@ a chat's store sits beside its session file, `<session>.results/`, so later turn
 start *and* the end of a long output. **Compact outputs** (`tools/output.rs`): a simple `bash` command Glut knows —
 git status/diff/log/show, cargo, npm/pnpm, pytest, pip/uv, swift, xcodebuild, make/cmake, find/ls/tree — gets its
 output's content-free lines left out (progress, passing tests, hints, colour codes, a diff's unchanged lines beyond
-one), the raw output in the store; the model's own format flags, pipes and redirections leave it alone. An **unchanged
+one), the raw output in the store; the model's own format flags, pipes and redirections leave it alone. A **chain** of
+simple commands (`cargo fmt && cargo test`) runs with a random mark before each part and is compacted part by part;
+the gate judges the command as written, the marks never reach the hooks, the events or the store. What every
+mechanism spares is an `Event::Lean` and a line in `~/.axh/lean.jsonl` (all Glut runs, the app's too; a known command
+in front of a pipe is counted, not compacted), summed by `axh gain` / `axiomata-cli harness gain`. An **unchanged
 re-read** of a file whose result is still in the conversation is answered with a pointer to it, and `read_file` has an
 **outline** mode (`tools/outline.rs`: declarations with line numbers, one line-based reader per Studio language).
 **From Opencode**: `todo_write` (`Event::Todo`), `exit_plan` from Plan mode (the owner's answer switches the gate to the
@@ -1492,7 +1496,8 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   tool results shrinking over a budget, `todo_write`, Plan/Build with `exit_plan` and the chat's switch, snapshots
   with `axh undo`, the language server's errors after an edit. §5 "Glut 2".
 - **Glut lean built** (2026-10-20, `docs/plans/glut-lean.md`): no cutting (relocation into the run's store), compact
-  outputs of frequent commands, unchanged re-reads as a pointer, `read_file` outlines. §5 "Glut 2".
+  outputs of frequent commands, unchanged re-reads as a pointer, `read_file` outlines. §5 "Glut 2". Round 2 the same
+  day: chains compacted part by part, the savings counted (`axh gain`), pipes counted only.
 - **Durable Glut runs built** (2026-10-20, `docs/plans/durable.md`): a journal per Glut run, resume on the owner's
   click (skills, routines' skills, chat turns, `axh resume`), replay only of what reads, every run's row from its start
   and `interrupted` after a lost process. §5 "Durable Glut runs".

@@ -21,7 +21,7 @@ use axiomata_harness::{
     Cancel, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat, RunConfig,
     SharedSink, SkillHow,
 };
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 
 use crate::board_flow::owner_only;
 
@@ -31,48 +31,59 @@ const PREVIEW_CHARS: usize = 160;
 #[derive(Debug, Subcommand)]
 pub enum HarnessAction {
     /// Run one prompt in a folder; prints each step, or JSON lines with `--json`.
-    Run {
-        /// The provider whose base URL and key are used; default: the skill provider, else OpenRouter.
-        #[arg(long, value_enum)]
-        provider: Option<Provider>,
-        /// The model; default: the provider's skill model.
+    Run(Box<RunFlags>),
+    /// What Glut lean saved (`docs/plans/glut-lean.md`, N9): compacted outputs, unchanged re-reads and relocated
+    /// results per kind — every Glut run's, from `~/.axh/lean.jsonl`; the same table as `axh gain`.
+    Gain {
+        /// Only the last N days.
         #[arg(long)]
-        model: Option<String>,
-        /// The folder the run works in.
-        #[arg(long, default_value = ".")]
-        cwd: PathBuf,
-        #[arg(long)]
-        max_turns: Option<u32>,
-        /// Print the events as JSON lines, as `axh` does.
-        #[arg(long)]
-        json: bool,
-        /// default, accept_edits, plan, dont_ask or auto; otherwise the settings files', else default.
-        #[arg(long)]
-        permission_mode: Option<String>,
-        /// A rule the run allows (`Bash(cargo test:*)`, `Edit(src/**)`); repeatable.
-        #[arg(long)]
-        allow: Vec<String>,
-        /// A rule the run asks about; repeatable.
-        #[arg(long)]
-        ask: Vec<String>,
-        /// A rule the run refuses; repeatable.
-        #[arg(long)]
-        deny: Vec<String>,
-        /// Take a role's `permissions` (`~/.axiomata/agents/<role>/AGENT.md`) as allow rules.
-        #[arg(long)]
-        role: Option<String>,
-        /// Run a skill as the run's task (HS6, K1.1): its SKILL.md body becomes the run's instructions, and its
-        /// frontmatter may narrow the tools, pick the model and set the time limit (K5).
-        #[arg(long)]
-        skill: Option<String>,
-        /// A folder of skills beside the app's `~/.axiomata/skills` (HS6, K2); repeatable.
-        #[arg(long)]
-        skill_dir: Vec<PathBuf>,
-        /// The prompt — extra text beside `--skill`, or a slash command (`/review src/`) of `~/.axh/commands/`
-        /// and, in a trusted folder, the project's `.axh/commands/` (HS4). Without `--skill` a prompt is required;
-        /// with one it defaults to "Run the skill.".
-        prompt: Option<String>,
+        days: Option<u32>,
     },
+}
+
+/// `harness run`'s flags.
+#[derive(Debug, Args)]
+pub struct RunFlags {
+    /// The provider whose base URL and key are used; default: the skill provider, else OpenRouter.
+    #[arg(long, value_enum)]
+    provider: Option<Provider>,
+    /// The model; default: the provider's skill model.
+    #[arg(long)]
+    model: Option<String>,
+    /// The folder the run works in.
+    #[arg(long, default_value = ".")]
+    cwd: PathBuf,
+    #[arg(long)]
+    max_turns: Option<u32>,
+    /// Print the events as JSON lines, as `axh` does.
+    #[arg(long)]
+    json: bool,
+    /// default, accept_edits, plan, dont_ask or auto; otherwise the settings files', else default.
+    #[arg(long)]
+    permission_mode: Option<String>,
+    /// A rule the run allows (`Bash(cargo test:*)`, `Edit(src/**)`); repeatable.
+    #[arg(long)]
+    allow: Vec<String>,
+    /// A rule the run asks about; repeatable.
+    #[arg(long)]
+    ask: Vec<String>,
+    /// A rule the run refuses; repeatable.
+    #[arg(long)]
+    deny: Vec<String>,
+    /// Take a role's `permissions` (`~/.axiomata/agents/<role>/AGENT.md`) as allow rules.
+    #[arg(long)]
+    role: Option<String>,
+    /// Run a skill as the run's task (HS6, K1.1): its SKILL.md body becomes the run's instructions, and its
+    /// frontmatter may narrow the tools, pick the model and set the time limit (K5).
+    #[arg(long)]
+    skill: Option<String>,
+    /// A folder of skills beside the app's `~/.axiomata/skills` (HS6, K2); repeatable.
+    #[arg(long)]
+    skill_dir: Vec<PathBuf>,
+    /// The prompt — extra text beside `--skill`, or a slash command (`/review src/`) of `~/.axh/commands/`
+    /// and, in a trusted folder, the project's `.axh/commands/` (HS4). Without `--skill` a prompt is required;
+    /// with one it defaults to "Run the skill.".
+    prompt: Option<String>,
 }
 
 /// The providers the harness can talk to today: the OpenAI-compatible ones (H4). Anthropic follows with its own
@@ -93,7 +104,11 @@ impl Provider {
 }
 
 pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
-    let HarnessAction::Run {
+    let flags = match action {
+        HarnessAction::Run(flags) => *flags,
+        HarnessAction::Gain { days } => return gain(days),
+    };
+    let RunFlags {
         provider,
         model,
         cwd,
@@ -107,7 +122,7 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         skill,
         skill_dir,
         prompt,
-    } = action;
+    } = flags;
     // It spends the owner's money with the owner's key: not something an agent session starts by itself.
     owner_only("running the own harness")?;
     if prompt.is_none() && skill.is_none() {
@@ -153,6 +168,8 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     run_config.mcp_behind_code = skill.is_none();
     // Glut 2 (D): snapshots before changes, in the harness's own store, for `axh undo`.
     run_config.snapshots = Some(home.join(".axh").join("snapshots"));
+    // Glut lean (N9): what the run saves is counted with the app's runs.
+    run_config.savings = Some(home.join(".axh").join(axiomata_harness::lean::FILE));
     let mut draft = Draft {
         config: run_config,
         endpoint,
@@ -373,6 +390,19 @@ impl EventSink for Readable {
     }
 }
 
+/// `harness gain`: the count of savings as a table — from the folder `harness run` counts into (`$HOME/.axh`).
+fn gain(days: Option<u32>) -> Result<()> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .context("HOME is not set to an absolute folder")?;
+    let path = home.join(".axh").join(axiomata_harness::lean::FILE);
+    let table = axiomata_harness::lean::report(&path, days)
+        .with_context(|| format!("reading {}", path.display()))?;
+    print!("{table}");
+    Ok(())
+}
+
 /// One event's line for the terminal, `None` for what is not printed: a `Usage` (as before) and an
 /// `Error` (stderr's, [`emit`] takes those before this is asked).
 fn render(event: &Event) -> Option<String> {
@@ -444,6 +474,13 @@ fn render(event: &Event) -> Option<String> {
             format!("☐ todo · {open} open of {}", items.len())
         }
         Event::ModeChanged { mode, .. } => format!("◆ plan approved · mode {}", plain(mode)),
+        // Glut lean (N9): what a call spared.
+        Event::Lean {
+            what,
+            chars_before,
+            chars_after,
+            ..
+        } => format!("  ≈ {} · {chars_before} → {chars_after} chars", plain(what)),
         Event::Snapshot { turn, run, .. } => format!(
             "⟲ snapshot before step {turn} · axh undo --run {}",
             plain(run)

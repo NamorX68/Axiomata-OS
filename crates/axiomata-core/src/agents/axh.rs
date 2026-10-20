@@ -773,6 +773,8 @@ impl Harness {
         // the tool, ~57k without.
         // Glut 2 (D): snapshots before changes, in the harness's own store (`axh undo` puts a folder back).
         run_config.snapshots = Some(home.join(".axh").join("snapshots"));
+        // Glut lean (N9): what the run saves is counted beside `axh`'s and the Studio's runs, for `axh gain`.
+        run_config.savings = Some(home.join(".axh").join(axiomata_harness::lean::FILE));
         run_config.codemode = config.agents.glut.codemode
             && (rights.declared.is_empty()
                 || rights

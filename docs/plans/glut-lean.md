@@ -1,7 +1,7 @@
 # Glut lean — less goes to the model, nothing is cut away
 
-Status: grilled 2026-10-20 (N1–N6, owner's answers below); **CP1–CP5 done** (2026-10-20, branch `glut-lean`); see
-"CP5 — measured".
+Status: grilled 2026-10-20 (N1–N6, owner's answers below); **CP1–CP5 done** (2026-10-20), see "CP5 — measured";
+**round 2 (N7–N10) built** the same day, see "Round 2".
 
 ## Why
 
@@ -108,3 +108,42 @@ neither caused by this plan. Every code session ended with the tests green and c
   own `-U10`/`-W` and a diff's trailing spaces were not respected; a relocated text was gone in a chat's next turn
   (now a chat's store sits beside its session file); a one-line file's pointer was longer than the file; a character
   at the seam of `bash`'s head and tail was broken.
+
+## Round 2 — chains and counting (owner's go 2026-10-20)
+
+Looking at RTK (`rtk-ai/rtk`, a CLI proxy doing N3's job by rewriting the agent's commands) confirmed the chain idea
+CP5 had named and added one: count what is saved. RTK's large numbers come from cutting (a diff capped at 100 lines a
+hunk, `head`/`tail`/`max_lines` stages, the raw output kept on failure only) — not taken over; no code of it is used.
+
+- **N7 — a chain is compacted command by command.** `git status && cargo test`, `cargo fmt; cargo clippy`, `a || b`:
+  when every part is a simple command (N3's test, `cd dir` parts allowed) and one of them is a command Glut knows, the
+  `bash` tool runs the chain with a mark printed before each part (`{ printf '<mark k>'; <part> }`, the operators
+  unchanged, so `&&`/`||`/`;` and a `cd` keep their meaning) and takes the marks out again: the gate, the hooks, the
+  events and the store see the output as the command printed it; the marks only say where each part's output starts.
+  The gate judges the command the model wrote, never the marked one. A mark lost (an output so long its middle was
+  relocated, a part that hides its output) leaves the whole output as it is. The mark holds a random number of the
+  run's, so no output can fake one. This is the one place Glut touches a command, and only by those marks.
+- **N8 — pipes are counted, not compacted.** A known command in front of a pipe (`cargo test 2>&1 | tail -30`) would
+  need a filter process inside the pipe; first the count (N9) shows whether it is worth one.
+- **N9 — the savings are counted.** Each compaction, unchanged re-read and relocation is an `Event::Lean` (what,
+  characters before and after) and a line in `~/.axh/lean.jsonl` (kept under 4 MB, oldest lines out), written by every
+  Glut run — the app's, `axh`'s, the Studio's; a known command in front of a pipe is a line too. `axh gain [--days N]`
+  and `axiomata-cli harness gain` sum it per kind.
+- **N10 — filters as files: not now.** No command misses a filter today; a project's own filters would need a
+  confirmation of their own (like `tasks.json`). Noted in #111.
+
+Built 2026-10-20. Tried live on DeepSeek V4.1 Flash in all three places (the app's chat, `axiomata-cli harness run`,
+`axh run`): `git status && cargo build` compacted the `git status` part 437 → 125 characters, `git status && git diff`
+both parts (437 → 125, 231 → 119); the events showed the output as printed, no mark. Once (CLI) the model read the raw
+output back with `read_full_result` before answering — one step more for a question the compact form answered too.
+On the way: the journal's resume lock is tried again for 200 ms — a process started at the moment a run closed its
+journal holds a copy of the file until it starts its program, and under load (the test suite) a finished run read as
+one still going (two to three of the journal tests failed per full run on `main` already).
+Review findings fixed before the commit (sonnet review + security audit): a `#` comment in a chain would have run the
+text after it once the parts sat on lines of their own (`git status # x && rm …` — the gate reads a comment as opaque
+and asks, the owner would have approved dead text that then ran), so a chain is marked only when the gate's own reader
+vouches for every bit of it and it holds no `$`, `\` or `#`; `$?` and `$_` would have seen the mark's `printf`;
+keywords, groups and subshells split at `;` broke the braces into a syntax error; a part printing `env` showed the
+marks (now printed as two words, so the command text holds none); a lost middle or a part `||` passed over misplaced
+the parts; `lean.jsonl` is opened like the journal (no link, no pipe, the owner's, 0600, folder 0700) and halved
+through a file moved over it; the resume lock waits on a blocking thread.
