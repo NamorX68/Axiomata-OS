@@ -687,7 +687,8 @@ nothing a script calls escapes a rule. Only what the script prints or returns co
 process, the run's deadline and cancel interrupt it, a script waiting on nothing ends at once. **A chat turn keeps the
 MCP tools behind code** (45 tools → 15, 16.9k → 3.5k input tokens a step); **a skill that declares its tools keeps
 them direct** and gets `codemode` only when it names it — measured on the calendar digest, whose output *is* its
-data. `[agents.glut] codemode` switches it. **Old tool results shrink** (`history.rs`) once the conversation is over
+data. `[agents.glut] codemode` switches it. **Old tool results can shrink** (`history.rs`, `RunConfig.shrink_results`, **off by default** since the news-web
+measurement saved nothing in total) once the conversation is over
 ~80,000 characters, oldest first down to 60 %, the whole text behind `read_full_result` (ids carry the run's tag).
 **From Opencode**: `todo_write` (`Event::Todo`), `exit_plan` from Plan mode (the owner's answer switches the gate to the
 run's build mode; the app chat gets a **Plan/Build switch**, `ChatMode::Plan` on Glut, Claude Code and new Opencode

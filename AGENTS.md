@@ -31,7 +31,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (#37, `docs/plans/harness.md`; HS1–HS8 built), made one to keep a role on in "Glut rund" (2026-10-19,
   `docs/plans/glut-round.md`: web fetch/search, fewer tokens, cached tokens metered apart, streaming, skills that name
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat, results
-  shrinking over a budget, todo/plan-build/snapshots/LSP errors). Next: plans for Pi-Durable-like runs and LocalBrain.
+  shrinking over a budget — off by default, todo/plan-build/snapshots/LSP errors). Next: plans for Pi-Durable-like runs and LocalBrain.
   Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial

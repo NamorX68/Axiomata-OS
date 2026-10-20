@@ -96,6 +96,10 @@ search inside the script. A skill that declares MCP tools gets them through code
 - **G6 — revised 2026-10-20**: results shrink only while the conversation is over ~80,000 characters, oldest first —
   shrinking as soon as the model answered sent a data-gathering task (the digest) fetching its results back until the
   turn limit.
+- **G6 — off by default, 2026-10-20 (owner)**: on news-web the context a step halved (~40k → ~18k) but the runs took
+  30–33 steps instead of 13, so the total stayed (520k → 629k/535k), and a weaker model may not notice what it lost.
+  `RunConfig.shrink_results` is `false`; on again only after an A/B measurement (several news-web runs each way, counting
+  the `read_full_result` calls) shows it pays.
 - **G8 — code mode is on for every Glut run**: `[agents.glut] codemode = true`; off, the MCP tools are offered directly
   as today.
 - **G9 — Pi's limits**: 256 MB per script, no time or call limit of its own — the run's own limits (time, steps, spend)
