@@ -278,6 +278,12 @@ pub(crate) async fn chat(
     // in the app's chat, so there the model presents its plan and the owner flips the switch.
     harness.run_config.build_mode = chat_mode(&declared, request.auto_approve_tools);
     harness.run_config.instructions = instructions;
+    // Glut lean (N2): a result too long for the conversation is kept beside it, so a later turn of this
+    // conversation still reads back what an earlier turn's note names.
+    harness.run_config.results = Some(axiomata_harness::results::StoreSpec {
+        dir: sessions.join(format!("{session_id}.results")),
+        tag: session_id.clone(),
+    });
     // Durable runs: the turn journals its steps; one the app lost is finished from them on the owner's click.
     let journal = request
         .resume

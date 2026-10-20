@@ -1,6 +1,7 @@
 # Glut lean — less goes to the model, nothing is cut away
 
-Status: grilled 2026-10-20 (N1–N6, owner's answers below); built after the owner's go.
+Status: grilled 2026-10-20 (N1–N6, owner's answers below); **CP1–CP4 built** (2026-10-20, branch `glut-lean`), CP5
+(the measurement) next.
 
 ## Why
 
@@ -55,8 +56,8 @@ the todo reminder rides in `todo_write`'s answer, not in the system prompt.
   earlier text is still in the conversation (after `/compact` it is not, so the file is sent again).
 - **N5 — outline before reading** (owner: build it now): `read_file` with `outline: true` gives a file's declarations
   with line numbers (and the file's length), the model then reads the ranges it needs with `offset`/`limit`. Its own
-  declaration reader per language (Rust, TS/JS/Svelte, Python, Swift, C/C++, Lua, Go; doc lines and attributes stay
-  with their item, bodies go) — no new native dependency and no language server started for it (LocalBrain's lesson;
+  declaration reader per language (Rust, TS/JS/Svelte, Python, Swift, C/C++, Lua, Go; the declaration's own line,
+  bodies, doc lines and attributes go) — no new native dependency and no language server started for it (LocalBrain's lesson;
   the servers stay for diagnostics). A file of a language it does not know gets no outline but a clear answer. The
   tool's description tells the model to use it on files longer than a few hundred lines.
 - **N6 — measure** with LocalBrain's CP4 set-up (own `AXIOMATA_HOME` per arm, a git worktree per code session, three
@@ -71,3 +72,17 @@ the todo reminder rides in `todo_write`'s answer, not in the system prompt.
 - **CP3 — N4**: the re-read check (file path + range + content hash per conversation).
 - **CP4 — N5**: the outline, with tests per language from real files of this repo.
 - **CP5 — N6**: measure; the plan records the numbers.
+
+## What building it taught (2026-10-20)
+
+- **A diff is mostly content**: on this repo's commits ~80 % of a code diff are changed lines, which all stay, so the
+  `index`/`---`/`+++` lines alone saved under 20 % and the diff filter also trims unchanged lines to one around each
+  change; diffs are compacted from a 10 % saving on (other outputs from 20 %). A small edit in a large file saves most.
+- **Many outputs are already lean**: vitest's non-interactive summary and svelte-check's diagnostics stay whole — the
+  filter only pays where progress or passing lines dominate (cargo, swift, xcodebuild, pip/uv, pnpm, cmake, listings).
+- **Review findings fixed before the commit**: `read_full_result`'s answer was bounded a second time (its middle was
+  hidden); `git show` lost its commit header and `git show rev:path` its file; `[exit code N]` and the `error: ` prefix
+  got lost in the git filters; `find -exec cat {} +` had another program's output treated as a listing; the model's
+  own `-U10`/`-W` and a diff's trailing spaces were not respected; a relocated text was gone in a chat's next turn
+  (now a chat's store sits beside its session file); a one-line file's pointer was longer than the file; a character
+  at the seam of `bash`'s head and tail was broken.

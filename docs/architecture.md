@@ -687,9 +687,16 @@ nothing a script calls escapes a rule. Only what the script prints or returns co
 process, the run's deadline and cancel interrupt it, a script waiting on nothing ends at once. **A chat turn keeps the
 MCP tools behind code** (45 tools → 15, 16.9k → 3.5k input tokens a step); **a skill that declares its tools keeps
 them direct** and gets `codemode` only when it names it — measured on the calendar digest, whose output *is* its
-data. `[agents.glut] codemode` switches it. **Old tool results can shrink** (`history.rs`, `RunConfig.shrink_results`, **off by default** since the news-web
-measurement saved nothing in total) once the conversation is over
-~80,000 characters, oldest first down to 60 %, the whole text behind `read_full_result` (ids carry the run's tag).
+data. `[agents.glut] codemode` switches it. **Nothing is cut** (Glut lean, `docs/plans/glut-lean.md`; Glut 2's
+shrinking of old results is gone): a result over 30,000 characters enters the conversation as head + tail with a note,
+the whole text in the run's `ResultStore` (`results.rs`), read back in parts with `read_full_result` (always offered;
+a chat's store sits beside its session file, `<session>.results/`, so later turns read the ids too); `bash` keeps the
+start *and* the end of a long output. **Compact outputs** (`tools/output.rs`): a simple `bash` command Glut knows —
+git status/diff/log/show, cargo, npm/pnpm, pytest, pip/uv, swift, xcodebuild, make/cmake, find/ls/tree — gets its
+output's content-free lines left out (progress, passing tests, hints, colour codes, a diff's unchanged lines beyond
+one), the raw output in the store; the model's own format flags, pipes and redirections leave it alone. An **unchanged
+re-read** of a file whose result is still in the conversation is answered with a pointer to it, and `read_file` has an
+**outline** mode (`tools/outline.rs`: declarations with line numbers, one line-based reader per Studio language).
 **From Opencode**: `todo_write` (`Event::Todo`), `exit_plan` from Plan mode (the owner's answer switches the gate to the
 run's build mode; the app chat gets a **Plan/Build switch**, `ChatMode::Plan` on Glut, Claude Code and new Opencode
 sessions — a session whose switch no longer matches goes on in a new one), **snapshots** before every changing step in
@@ -1484,6 +1491,8 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **Glut 2 built** (2026-10-20, `docs/plans/glut-2.md`): code mode in QuickJS with MCP behind code in the chat, old
   tool results shrinking over a budget, `todo_write`, Plan/Build with `exit_plan` and the chat's switch, snapshots
   with `axh undo`, the language server's errors after an edit. §5 "Glut 2".
+- **Glut lean built** (2026-10-20, `docs/plans/glut-lean.md`): no cutting (relocation into the run's store), compact
+  outputs of frequent commands, unchanged re-reads as a pointer, `read_file` outlines. §5 "Glut 2".
 - **Durable Glut runs built** (2026-10-20, `docs/plans/durable.md`): a journal per Glut run, resume on the owner's
   click (skills, routines' skills, chat turns, `axh resume`), replay only of what reads, every run's row from its start
   and `interrupted` after a lost process. §5 "Durable Glut runs".
