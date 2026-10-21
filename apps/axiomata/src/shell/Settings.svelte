@@ -13,13 +13,15 @@
     type ClaudeLoginStatus,
     type ConfigUpdate,
     type ConfigView,
-    EFFORT_LEVELS,
     type KeyUpdate,
     type HarnessId,
     type ProviderId,
     type SpendSummary,
+    CONFIG_SAVED,
     invokeBackend,
+    isEffortLevel,
   } from "../core/backend";
+  import { emit } from "../core/bus";
   import { HARNESSES, providerAfterHarnessChange, providersFor, usesClaudeCode } from "../core/harness";
   import { WEB_KEYS, type WebKeyId, webUpdate } from "../core/webSettings";
   import { brainView, SHINES, SPEED_MAX } from "../core/brainView";
@@ -29,6 +31,7 @@
   import Icon from "../ui/Icon.svelte";
   import ModelPicker from "../ui/ModelPicker.svelte";
   import { loadModelCatalog, modelCatalog, providerOptions, refreshModelCatalog } from "../core/modelCatalog";
+  import { offeredLevels, reasoningOf, takesLevel, unlistedNote } from "../core/effortLevels";
   import { playCue, unlockAudio } from "./soundPlayer";
   import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
@@ -172,6 +175,14 @@
     };
   }
 
+  /** A role's Glut effort picked; `""` is Glut's own setting. */
+  function setEffort(role: "chat" | "skill", value: string) {
+    if (!config) return;
+    const level = isEffortLevel(value) ? value : null;
+    if (role === "chat") config.agents.chat_effort = level;
+    else config.agents.skill_effort = level;
+  }
+
   /** A role's harness changed: its provider follows when the new harness cannot serve it (the matrix of
    *  `core/harness.ts`; Rust's `validate_for_save` refuses the pair otherwise). */
   function setHarness(role: "chat" | "skill", harness: HarnessId) {
@@ -244,7 +255,9 @@
    *  workspace root (everything else applies live). */
   async function persist(): Promise<boolean> {
     if (!config) return false;
-    return invokeBackend<boolean>("save_config", { newConfig: buildUpdate(config) });
+    const restart = await invokeBackend<boolean>("save_config", { newConfig: buildUpdate(config) });
+    emit(CONFIG_SAVED);
+    return restart;
   }
 
   async function saveVault() {
@@ -773,20 +786,25 @@
                     {/if}
                   </label>
                   {#if harness === "axh"}
+                    {@const role = r.role as "chat" | "skill"}
+                    {@const provider = role === "chat" ? config.agents.chat_provider : config.agents.skill_provider}
+                    {@const settings = config.agents.providers[provider]}
+                    {@const model = (role === "chat" ? settings?.chat_model : settings?.skill_model) ?? ""}
+                    {@const reasoning = reasoningOf($modelCatalog, provider, model)}
+                    {@const stored = role === "chat" ? config.agents.chat_effort : config.agents.skill_effort}
+                    {@const note = unlistedNote(reasoning, stored)}
                     <label class="field">
                       <span>Effort for {r.label}</span>
-                      {#if r.role === "chat"}
-                        <select bind:value={config.agents.chat_effort}>
-                          <option value={null}>Glut's own setting</option>
-                          {#each EFFORT_LEVELS as level (level)}<option value={level}>{level}</option>{/each}
-                        </select>
-                      {:else}
-                        <select bind:value={config.agents.skill_effort}>
-                          <option value={null}>Glut's own setting</option>
-                          {#each EFFORT_LEVELS as level (level)}<option value={level}>{level}</option>{/each}
-                        </select>
-                      {/if}
+                      <select value={stored ?? ""} onchange={(e) => setEffort(role, e.currentTarget.value)}>
+                        <option value="">
+                          Glut's own setting{reasoning?.default_effort ? `, else ${reasoning.default_effort}` : ""}
+                        </option>
+                        {#each offeredLevels(reasoning, stored) as level (level)}
+                          <option value={level}>{level}{takesLevel(reasoning, level) ? "" : " (not listed)"}</option>
+                        {/each}
+                      </select>
                     </label>
+                    {#if note}<p class="hint">{note}.</p>{/if}
                   {/if}
                   <p class="hint">{HARNESSES.find((h) => h.id === harness)?.blurb}</p>
                 </div>

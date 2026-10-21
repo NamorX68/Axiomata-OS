@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::{self, Config, ModelCost, ProviderId, ProviderSettings};
+use crate::config::{self, Config, Effort, ModelCost, ProviderId, ProviderSettings};
 use crate::error::AxiomataError;
 use crate::json_state;
 use crate::paths;
@@ -64,6 +64,22 @@ pub struct CatalogModel {
     /// The list price; `None` when the provider gives none or prices the model per request (OpenRouter's routers).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price: Option<ModelCost>,
+    /// Its effort levels (OpenRouter's `reasoning`); `None` when the provider does not say — every level is offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ModelReasoning>,
+}
+
+/// What a reasoning model knows of Glut's effort levels (`docs/plans/glut-effort.md`, F1): the pickers offer these.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelReasoning {
+    /// The levels it takes, the least first; never empty.
+    pub efforts: Vec<Effort>,
+    /// The level it reasons at when none is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<Effort>,
+    /// Its reasoning cannot be turned off.
+    #[serde(default)]
+    pub mandatory: bool,
 }
 
 /// One provider's list and when it was last fetched.
@@ -108,6 +124,7 @@ impl ModelCatalog {
                 name: (*name).to_string(),
                 context_length: None,
                 price: None,
+                reasoning: None,
             })
             .collect();
         self.providers.insert(
@@ -257,7 +274,8 @@ fn ollama_root(base: &str) -> &str {
 }
 
 /// OpenRouter's `GET /api/v1/models`: `{ data: [{ id, name, context_length, pricing: { prompt, completion,
-/// input_cache_read } }] }`, prices in USD per token as strings.
+/// input_cache_read }, reasoning: { supported_efforts, default_effort, mandatory } }] }`, prices in USD per token as
+/// strings.
 fn parse_openrouter(body: &Value) -> Result<Vec<CatalogModel>, String> {
     let data = body
         .get("data")
@@ -280,6 +298,7 @@ fn parse_openrouter(body: &Value) -> Result<Vec<CatalogModel>, String> {
                 name,
                 context_length: model.get("context_length").and_then(Value::as_u64),
                 price: model.get("pricing").and_then(openrouter_price),
+                reasoning: model.get("reasoning").and_then(openrouter_reasoning),
                 id,
             })
         })
@@ -312,6 +331,33 @@ fn openrouter_price(pricing: &Value) -> Option<ModelCost> {
     })
 }
 
+/// A model's effort levels; `None` when it names no level Glut knows (a model that does not reason, or one that
+/// only says whether it does). A level of a newer API that Glut lacks is left out rather than failing the list.
+fn openrouter_reasoning(reasoning: &Value) -> Option<ModelReasoning> {
+    let named = |value: &Value| value.as_str().and_then(Effort::parse);
+    let listed: Vec<Effort> = reasoning
+        .get("supported_efforts")?
+        .as_array()?
+        .iter()
+        .filter_map(named)
+        .collect();
+    let efforts: Vec<Effort> = Effort::ALL
+        .into_iter()
+        .filter(|level| listed.contains(level))
+        .collect();
+    if efforts.is_empty() {
+        return None;
+    }
+    Some(ModelReasoning {
+        efforts,
+        default_effort: reasoning.get("default_effort").and_then(named),
+        mandatory: reasoning
+            .get("mandatory")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
 /// Drops the float noise of `per token × 10⁶` (0.14 arriving as 0.13999999999999999).
 fn round_price(usd_per_m: f64) -> f64 {
     (usd_per_m * 1e9).round() / 1e9
@@ -332,6 +378,7 @@ fn parse_ollama(body: &Value) -> Result<Vec<CatalogModel>, String> {
                 id,
                 context_length: None,
                 price: None,
+                reasoning: None,
             })
         })
         .collect();
@@ -494,6 +541,7 @@ mod tests {
                         name: (*id).into(),
                         context_length: None,
                         price: price.clone(),
+                        reasoning: None,
                     })
                     .collect(),
                 fetched_at: None,
@@ -525,6 +573,63 @@ mod tests {
         assert_eq!(models[1].name, "openrouter/auto");
         assert_eq!(models[0].price, Some(cost(0.0, None, 0.0)));
         assert!(parse_openrouter(&json!({ "error": "x" })).is_err());
+    }
+
+    #[test]
+    fn effort_levels_arrive_least_first_and_unknown_or_missing_ones_say_nothing() {
+        let body = json!({ "data": [
+            { "id": "deepseek/v4", "reasoning": { "mandatory": false, "default_enabled": true,
+              "supported_efforts": ["max", "high", "low", "none"], "default_effort": "high" } },
+            { "id": "glm/flash", "reasoning": { "mandatory": true, "supported_efforts": ["max", "ultra", 3] } },
+            { "id": "plain/model", "reasoning": { "mandatory": false } },
+            { "id": "odd/model", "reasoning": { "supported_efforts": ["ultra"], "default_effort": "high" } },
+            { "id": "old/model" }
+        ]});
+        let models = parse_openrouter(&body).unwrap();
+        let reasoning = |id: &str| {
+            models
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap()
+                .reasoning
+                .clone()
+        };
+        assert_eq!(
+            reasoning("deepseek/v4"),
+            Some(ModelReasoning {
+                efforts: vec![Effort::None, Effort::Low, Effort::High, Effort::Max],
+                default_effort: Some(Effort::High),
+                mandatory: false,
+            })
+        );
+        let glm = reasoning("glm/flash").unwrap();
+        assert_eq!(
+            (glm.efforts, glm.default_effort, glm.mandatory),
+            (vec![Effort::Max], None, true)
+        );
+        assert_eq!(reasoning("plain/model"), None);
+        // OpenRouter's default need not be among the listed levels; it is what the model does unasked, kept as said.
+        let other = parse_openrouter(&json!({ "data": [
+            { "id": "x/y", "reasoning": { "supported_efforts": ["low"], "default_effort": "medium" } }
+        ]}))
+        .unwrap();
+        let other = other[0].reasoning.clone().unwrap();
+        assert_eq!(
+            (other.efforts, other.default_effort),
+            (vec![Effort::Low], Some(Effort::Medium))
+        );
+        assert_eq!(reasoning("odd/model"), None);
+        assert_eq!(reasoning("old/model"), None);
+    }
+
+    #[test]
+    fn a_catalog_written_before_the_levels_still_loads() {
+        let old = r#"{ "version": 1, "providers": { "open_router": { "models": [ { "id": "a/b", "name": "A" } ] } } }"#;
+        let catalog: ModelCatalog = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            catalog.providers[&ProviderId::OpenRouter].models[0].reasoning,
+            None
+        );
     }
 
     #[test]

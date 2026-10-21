@@ -76,6 +76,10 @@ export interface AgentDefaultsView {
   claude_env_keys: string[];
 }
 
+/** Bus event (`core/bus.ts`) after Settings saved the config: views that read it once (the chat's effort switch, the
+ *  bar's harness-only commands) read it again. */
+export const CONFIG_SAVED = "config:saved";
+
 /** What `get_config` returns; `workspace_root` is a plain string path. */
 export interface ConfigView {
   owner: string;

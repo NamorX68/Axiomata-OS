@@ -6,7 +6,7 @@
 
 import { writable } from "svelte/store";
 
-import { type ProviderId, invokeBackend, listenBackend } from "./backend";
+import { type EffortLevel, type ProviderId, invokeBackend, listenBackend } from "./backend";
 
 /** Mirrors `axiomata_core::config::ModelCost`, USD per million tokens. */
 export interface ModelPrice {
@@ -15,11 +15,22 @@ export interface ModelPrice {
   output_per_m: number;
 }
 
+/** Mirrors `axiomata_core::model_catalog::ModelReasoning`: the effort levels a reasoning model takes. */
+export interface ModelReasoning {
+  /** The least first, never empty. */
+  efforts: EffortLevel[];
+  default_effort?: EffortLevel;
+  /** Its reasoning cannot be turned off. */
+  mandatory: boolean;
+}
+
 export interface CatalogModel {
   id: string;
   name: string;
   context_length?: number;
   price?: ModelPrice;
+  /** Absent when the provider does not say which levels the model takes. */
+  reasoning?: ModelReasoning;
 }
 
 export interface ProviderCatalog {

@@ -4,10 +4,12 @@ import { get } from "svelte/store";
 import { registerBuiltins } from "../modules";
 import {
   type EngineCommand,
+  chatHarness,
   commandEntries,
   engineCommands,
   helpText,
   nearest,
+  refreshChatHarness,
   refreshEngineCommands,
   route,
   runCommand,
@@ -109,6 +111,18 @@ describe("the command list", () => {
     expect(suggestions("/", ENGINE).length).toBe(commandEntries(ENGINE).length);
     expect(suggestions("/theme ", ENGINE)).toEqual([]);
     expect(suggestions("theme", ENGINE)).toEqual([]);
+  });
+
+  it("offers /effort only while the chat runs on Glut, and everything while the harness is unknown", () => {
+    const names = (harness: "axh" | "opencode" | null) => commandEntries([], harness).map((c) => c.name);
+    expect(names("axh")).toContain("effort");
+    expect(names("opencode")).not.toContain("effort");
+    expect(names("opencode")).toContain("model");
+    expect(names(null)).toContain("effort");
+    chatHarness.set("claude_code");
+    expect(suggestions("/eff", [])).toEqual([]);
+    chatHarness.set(null);
+    expect(suggestions("/eff", []).map((c) => c.name)).toEqual(["effort"]);
   });
 
   it("finds near names by prefix first, then by a small edit distance", () => {
@@ -310,6 +324,50 @@ describe("the conversation commands that reach the backend (#108)", () => {
     const elsewhere = await runCommand("effort", ["high"]);
     expect(elsewhere.ok).toBe(false);
     expect(get(turnEffort)).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("/effort lists the chat model's own levels, marks the current one and notes one it does not list", async () => {
+    const spy = await backend();
+    spy.mockResolvedValue({ ...config, agents: { ...config.agents, chat_harness: "axh", chat_effort: null } });
+    modelCatalog.set({
+      providers: {
+        open_router: {
+          models: [
+            {
+              id: "configured/model",
+              name: "Flash",
+              reasoning: { efforts: ["none", "low", "high", "max"], default_effort: "high", mandatory: false },
+            },
+          ],
+        },
+      },
+    } as never);
+    turnEffort.set(null);
+    const shown = await runCommand("effort", []);
+    expect(shown.message).toBe("Effort: default (high)");
+    expect(shown.detail).toContain("model's default (high)");
+    expect(shown.detail).toContain("Levels of `configured/model` — default (high): `none` `low` `high` `max`");
+    await runCommand("effort", ["low"]);
+    expect((await runCommand("effort", [])).detail).toContain("`none` **`low`** `high`");
+    const unlisted = await runCommand("effort", ["medium"]);
+    expect(unlisted.ok).toBe(true);
+    expect(unlisted.message).toMatch(/does not list medium/);
+    expect((await runCommand("effort", ["hard"])).message).toBe('"hard" is no effort level — none, low, high, max');
+    expect((await runCommand("effort", ["default"])).message).toBe("Effort: back to default (high).");
+    expect(get(turnEffort)).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("reads the chat's harness for the harness-only commands and keeps it when the backend cannot answer", async () => {
+    const spy = await backend();
+    spy.mockResolvedValueOnce({ ...config, agents: { ...config.agents, chat_harness: "opencode" } });
+    await refreshChatHarness();
+    expect(get(chatHarness)).toBe("opencode");
+    spy.mockRejectedValueOnce(new Error("not up"));
+    await refreshChatHarness();
+    expect(get(chatHarness)).toBe("opencode");
+    chatHarness.set(null);
     spy.mockRestore();
   });
 

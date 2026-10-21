@@ -46,6 +46,7 @@
   import HexAvatar from "../ui/HexAvatar.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
   import { renderMarkdown } from "../core/markdown";
+  import EffortSwitch from "./EffortSwitch.svelte";
   import Window from "./Window.svelte";
 
   let list = $state<HTMLDivElement | null>(null);
@@ -76,6 +77,7 @@
       style="width: 100%; height: 100%;"
     >
       {#snippet headerExtra()}
+        <EffortSwitch />
         <button
           type="button"
           class="ax-btn plan-switch"

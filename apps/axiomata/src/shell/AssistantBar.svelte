@@ -9,11 +9,14 @@
   import { onMount } from "svelte";
   import { get } from "svelte/store";
 
+  import { CONFIG_SAVED } from "../core/backend";
+  import { on } from "../core/bus";
   import { busy, interruptedTurns, loadInterruptedTurns, panelOpen, pushInstruction, send, turns } from "../core/chat";
   import {
     type CommandEntry,
     commandEntries,
     engineCommands,
+    refreshChatHarness,
     refreshEngineCommands,
     route,
     runCommand,
@@ -39,6 +42,9 @@
   const listOpen = $derived(shown.length > 0);
 
   // A chat turn the app lost is said once at start; the chat panel offers to finish it (durable runs).
+  // A harness changed in Settings changes which commands are offered (`/effort` is Glut's).
+  onMount(() => on(CONFIG_SAVED, () => void refreshChatHarness()));
+
   onMount(() => {
     void loadInterruptedTurns().then(() => {
       if (get(interruptedTurns).length === 0) return;
@@ -50,6 +56,7 @@
   function refresh(): void {
     refreshedAt = Date.now();
     void refreshEngineCommands();
+    void refreshChatHarness();
   }
 
   function oninput(): void {

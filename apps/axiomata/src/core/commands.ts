@@ -21,7 +21,8 @@ import { getModule, invokeAction, listModules } from "./registry";
 import { openFilePanel } from "./staging";
 import { instances } from "./stores";
 import { THEMES, applyTheme, isTheme } from "./themes";
-import { type ConfigView, EFFORT_LEVELS, type Skill, invokeBackend, isEffortLevel } from "./backend";
+import { type ConfigView, type HarnessId, type Skill, invokeBackend, isEffortLevel } from "./backend";
+import { defaultLabel, effortState, levelsFor, reasoningOf, unlistedNote } from "./effortLevels";
 
 /** Where a command comes from: the app itself, or the chat's harness. */
 export type CommandSource = "app" | "glut" | "oc" | "cc";
@@ -63,6 +64,12 @@ export interface CommandResult {
 /** What the chat's harness offers, refreshed by the bar (`refreshEngineCommands`). */
 export const engineCommands = writable<EngineCommand[]>([]);
 
+/** The chat's harness as last read with its commands; `null` before that. Offers the Glut-only commands. */
+export const chatHarness = writable<HarnessId | null>(null);
+
+/** App commands only one harness reads, by name: the others leave them out of the suggestions and `/help`. */
+const HARNESS_ONLY: Record<string, HarnessId> = { effort: "axh" };
+
 /** One command as `chat_commands` sends it. */
 interface EngineCommandWire {
   name: string;
@@ -83,6 +90,15 @@ export async function refreshEngineCommands(): Promise<void> {
     );
   } catch {
     // Kept as it was; `/help` says the list arrives with the chat.
+  }
+}
+
+/** Reads which harness the chat runs on, for the commands only one harness reads; read with the engine's commands. */
+export async function refreshChatHarness(): Promise<void> {
+  try {
+    chatHarness.set((await invokeBackend<ConfigView>("get_config")).agents.chat_harness);
+  } catch {
+    // Kept as it was: unknown, every command stays offered, and `/effort` itself says when the harness is another.
   }
 }
 
@@ -137,8 +153,12 @@ const MOVED: Record<string, string> = { add: "/tile add", remove: "/tile remove"
 const PREFIXES: readonly EngineSource[] = ["glut", "oc", "cc"];
 
 /** Every command the bar knows, in the order `/help` and the suggestion list show them. */
-export function commandEntries(engine: readonly EngineCommand[] = get(engineCommands)): CommandEntry[] {
-  const app: CommandEntry[] = [...CONVERSATION, ...CONTROL].map((c) => ({ ...c, source: "app" }));
+export function commandEntries(
+  engine: readonly EngineCommand[] = get(engineCommands),
+  harness: HarnessId | null = get(chatHarness),
+): CommandEntry[] {
+  const offered = (c: AppCommand): boolean => !harness || (HARNESS_ONLY[c.name] ?? harness) === harness;
+  const app: CommandEntry[] = [...CONVERSATION, ...CONTROL].filter(offered).map((c) => ({ ...c, source: "app" }));
   const own: CommandEntry[] = engine.map((c) => ({
     ...c,
     level: 3,
@@ -407,8 +427,8 @@ async function model(args: string[]): Promise<CommandResult> {
   return { ok: true, message: `Model for this conversation: ${wanted}.` };
 }
 
-/** `/effort` shows this conversation's level and the configured one; `/effort <level>` switches, `/effort default`
- *  goes back. Only Glut reads it: on another harness the command says so and changes nothing. */
+/** `/effort` shows this conversation's level and the levels the chat model takes; `/effort <level>` switches,
+ *  `/effort default` goes back. Only Glut reads it: on another harness the command says so and changes nothing. */
 async function effort(args: string[]): Promise<CommandResult> {
   let config: ConfigView;
   try {
@@ -419,29 +439,53 @@ async function effort(args: string[]): Promise<CommandResult> {
   if (config.agents.chat_harness !== "axh") {
     return { ok: false, message: "/effort is Glut's: the chat runs on another harness." };
   }
+  if (get(modelCatalog) === null) {
+    try {
+      await loadModelCatalog();
+    } catch {
+      // Without a catalog every level is offered; the provider takes a near one where it knows fewer.
+    }
+  }
+  const provider = config.agents.chat_provider;
+  const model = get(turnModel) ?? config.agents.providers[provider]?.chat_model ?? "";
+  const reasoning = reasoningOf(get(modelCatalog), provider, model);
   const configured = config.agents.chat_effort;
-  const configuredText = configured ?? "Glut's own setting, else the provider's default";
   const wanted = args[0]?.toLowerCase();
   if (!wanted) {
-    const current = get(turnEffort);
-    const head = current
-      ? `**Effort** — \`${current}\` for this conversation (configured: ${configuredText}, \`/effort default\` goes back)`
-      : `**Effort** — ${configured ? `\`${configured}\`, the configured chat effort` : configuredText}`;
+    const state = effortState(get(turnEffort), configured, reasoning);
+    const head =
+      state.source === "conversation"
+        ? `**Effort** — \`${state.level}\` for this conversation ` +
+          `(configured: ${configured ? `\`${configured}\`` : "not set"}, \`/effort default\` goes back)`
+        : state.source === "settings"
+          ? `**Effort** — \`${state.level}\`, the configured chat effort`
+          : `**Effort** — ${state.explanation}`;
+    const levels = levelsFor(reasoning)
+      .map((level) => (level === state.level ? `**\`${level}\`**` : `\`${level}\``))
+      .join(" ");
+    const of = reasoning
+      ? `Levels of \`${plain(model)}\` — ${defaultLabel(reasoning)}${reasoning.mandatory ? ", always reasons" : ""}:`
+      : "Levels (the catalog does not say which the model takes):";
+    const note = unlistedNote(reasoning, state.level);
     return {
       ok: true,
-      message: `Effort: ${current ?? configured ?? "default"}`,
-      detail: `${head}\n\nLevels: ${EFFORT_LEVELS.map((level) => `\`${level}\``).join(" ")}`,
+      message: `Effort: ${state.level ?? defaultLabel(reasoning)}`,
+      detail: `${head}\n\n${of} ${levels}${note ? `\n\n*${state.level}: ${note}*` : ""}`,
     };
   }
   if (wanted === "default") {
     turnEffort.set(null);
-    return { ok: true, message: `Effort: ${configured ?? "default"} (configured).` };
+    return {
+      ok: true,
+      message: configured ? `Effort: ${configured} (configured).` : `Effort: back to ${defaultLabel(reasoning)}.`,
+    };
   }
   if (!isEffortLevel(wanted)) {
-    return { ok: false, message: `"${args[0]}" is no effort level — ${EFFORT_LEVELS.join(", ")}` };
+    return { ok: false, message: `"${args[0]}" is no effort level — ${levelsFor(reasoning).join(", ")}` };
   }
   turnEffort.set(wanted);
-  return { ok: true, message: `Effort for this conversation: ${wanted}.` };
+  const note = unlistedNote(reasoning, wanted);
+  return { ok: true, message: `Effort for this conversation: ${wanted}${note ? ` — ${note}` : ""}.` };
 }
 
 /** `/compact`: the conversation's harness summarises it, the next turns build on the summary. */

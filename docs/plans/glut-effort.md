@@ -68,3 +68,22 @@ already reads itself.
 - `axh run`, two file reads and a prime question: `--effort none` 217 output tokens, `--effort max` 482; with `max`
   the step after the tool calls carries ~36 more input tokens — the thinking sent back beside the calls (E4), taken
   by the provider without complaint.
+
+## Seeing and picking the levels (F1–F4, owner 2026-10-21)
+
+The owner wanted to see the levels and pick one. Approved as proposed; the chat's pick holds for the conversation only.
+
+- **F1 — the catalog knows a model's levels.** OpenRouter's list says per model `reasoning: { supported_efforts,
+  default_effort, mandatory }` (measured: V4.1 Flash `none low high max`, default `high`; GLM 5.3 Flash `low high
+  max`, default `max`, cannot be turned off). `model_catalog::ModelReasoning` keeps them, least first; a level Glut
+  does not know is left out, a model naming none has no `reasoning` — every level is offered then (Ollama, Anthropic,
+  an old catalog file).
+- **F2 — the chat's switch.** Beside Plan/Build an "Effort" select (`shell/EffortSwitch.svelte`), only while the chat
+  runs on Glut: "default (high)" plus the chat model's levels (`/model`'s choice counts). Picking one is
+  `/effort <level>` — this conversation only, a new one goes back.
+- **F3 — Settings.** The role's effort select offers the levels of that role's model; "Glut's own setting, else
+  high" names the model's default. A stored level the model does not list stays visible, marked "(not listed)", with
+  a note that the provider takes a near level or refuses it.
+- **F4 — `/effort`.** Lists the chat model's levels with the current one bold and the model's default; a level the
+  model does not list is taken with that note. `/effort` is left out of the suggestions and `/help` while the chat
+  runs on another harness (`commands.ts` `HARNESS_ONLY`, `chatHarness` read with the engine's commands).
