@@ -117,3 +117,7 @@ Glut was built to replace.
   without the cache reads' cost; the event log grows without a bound; the app's question does not mark a call asked
   to run outside the sandbox (as the pane's does not either).
 
+## Measured
+
+- CP5 on the Mac: (to be filled in after the owner's test)
+
