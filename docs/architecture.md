@@ -1502,6 +1502,12 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **Glut lean built** (2026-10-20, `docs/plans/glut-lean.md`): no cutting (relocation into the run's store), compact
   outputs of frequent commands, unchanged re-reads as a pointer, `read_file` outlines. §5 "Glut 2". Round 2 the same
   day: chains compacted part by part, the savings counted (`axh gain`), pipes counted only.
+- **Glut robust built** (2026-10-21, `docs/plans/glut-robust.md`, cards #112 and the "Kürzen" item of #111): a ledger
+  of refused calls (the second identical one warns, the third ends the run as `Refused`, 15 in all end it), and
+  compaction before the context is full (15 % reserve, capped for small windows; the provider's "too long" compacts
+  once) — the older steps become a summary by the run's own model, the replaced part stays in the result store. Live
+  on DeepSeek V4.1 Flash: a refused fetch run stopped after 4 steps (was 30+); an 8-file run in a 24k window compacted
+  seven times and still named all eight codewords. §5 "Glut 2".
 - **Glut effort built** (2026-10-21, `docs/plans/glut-effort.md`): the reasoning level from a command's or skill's
   `effort:`, `axh --effort`, the chat's `/effort`, `[agents.glut]`, `~/.axh/settings.json`; the model's thinking goes
   back while it works on the same prompt. §5 "Glut 2".

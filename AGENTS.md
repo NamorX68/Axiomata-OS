@@ -34,7 +34,9 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   todo/plan-build/snapshots/LSP errors), and "Glut lean" (2026-10-20, `docs/plans/glut-lean.md`: nothing cut, compact
   outputs of frequent commands — a chain part by part —, unchanged re-reads as a pointer, `read_file` outlines, the
   savings counted in `~/.axh/lean.jsonl`, `axh gain`), and "Glut effort" (2026-10-21, `docs/plans/glut-effort.md`:
-  the reasoning level, Glut's own sources first), and slash commands in the chat
+  the reasoning level, Glut's own sources first; levels per model in the catalog, the chat bar's effort switch), and
+  "Glut robust" (2026-10-21, `docs/plans/glut-robust.md`: #112 a refused call warns once and ends the run the third
+  time, #111 the run compacts its older steps itself before the window is full), and slash commands in the chat
   (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
   (`docs/plans/durable.md`: a journal per run, resume on click). LocalBrain was built, measured and not taken over
   (`docs/plans/localbrain.md`, "Outcome").
@@ -279,6 +281,12 @@ from the code itself:
   until rquickjs bundles a fixed engine; `cargo audit` cannot see GitHub advisories. A script's tool calls go through
   `run.rs` `perform` like direct ones — never call the toolbox from `codemode.rs`. Language servers asked after an
   edit (`diagnostics.rs` `SAFE_SERVERS`) must never run the project's code: an agent writes the files they read.
+- **Glut ends what refusals keep repeating, and compacts itself** (Glut robust): `refusals.rs` counts per tool and
+  target *once per call* (the network proxy judges every connection) — keep that when feeding it from a new place;
+  `FinishReason::Refused` must still answer every call of the last reply. A compaction keeps the system prompt, the
+  latest user message and whole steps (a call never parted from its result); what it replaces goes into the result
+  store, never away. Its limits and window are Glut's own (`~/.axh/settings.json` `refusals`, `compact`,
+  `contextWindow`); Axiomata only passes its catalog's window below them.
 - **Glut never cuts a tool result** (Glut lean): the toolbox hands back the whole text, the loop bounds it once as it
   enters the conversation (`results::bounded`: head + tail, the whole in the run's `ResultStore`) — never cap inside a
   tool. A compact-output filter (`tools/output.rs`) rewrites only the *output* of a simple command, keeps Glut's own

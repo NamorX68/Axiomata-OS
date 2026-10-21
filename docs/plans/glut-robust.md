@@ -1,7 +1,7 @@
 # Glut robust — no endless refusals, compaction before the limit
 
-Status: **approved** by the owner 2026-10-21 ("Ja bau so", R4 at 5/15 as proposed); CP1–CP3 **built** 2026-10-21 on
-branch `glut-robust`, CP4 (live) open. Cards #112 and the "Kürzen dreifach" item of #111.
+Status: **approved** by the owner 2026-10-21 ("Ja bau so", R4 at 5/15 as proposed); CP1–CP4 **built and measured** 2026-10-21 on
+branch `glut-robust`. Cards #112 and the "Kürzen dreifach" item of #111.
 
 ## Why
 
@@ -123,3 +123,15 @@ The other items of #111 stay on the card (Opencode out once Glut has a TUI, conn
   (as relocated results already do); a script's own "a script cannot start …" refusals are not counted; a project's
   settings file with a malformed `refusals`/`compact`/`contextWindow` still fails the load although its values are
   ignored.
+
+## Measured (CP4, 2026-10-21, DeepSeek V4.1 Flash on OpenRouter, `axh run` headless in the default mode)
+
+- **Refusals:** "read https://example.com with web_fetch … try other ways until you get it". The model tried
+  `web_fetch`, `web_search`, `curl` twice and `web_fetch` on `http://` — the same host, so the second fetch carried the
+  warning — and answered after **4 steps** with a clear account of what was refused (12.5k input, 758 output tokens).
+  Before (LocalBrain CP4, another model): 30 identical fetches and workarounds up to step 40.
+- **Compaction:** eight 12 KB files read one per turn with `--context-window 24000` (compacts from 12k, keeps 6k).
+  Seven compactions, each ~12.8k → ~6k tokens and a summary call of ~1.5k input tokens; the final answer named all
+  eight codewords in order — six of them known only from the summaries. 9 steps, 90.6k input tokens in all.
+- Not measured: a news-web run (no refusal problem left to show after the first measurement; the chat path is
+  covered by the core's tests).
