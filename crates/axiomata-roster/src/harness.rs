@@ -13,7 +13,7 @@ pub enum Harness {
     ClaudeCode,
     /// The Opencode CLI — the same harness skills and routines already run on.
     Opencode,
-    /// Axiomata's own harness, Glut (`axiomata-harness`, `docs/plans/glut-cards.md`): started through the app's CLI
+    /// Axiomata's own harness, Glut (`glut`, `docs/plans/glut-cards.md`): started through the app's CLI
     /// (`axiomata-cli harness card`). Stored before as `mini`, the placeholder it grew out of (M7.4), which still reads
     /// as this.
     #[serde(alias = "mini")]

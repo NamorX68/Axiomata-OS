@@ -27,7 +27,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (card #75). Built since: the ⌘K spotlight, Orbit + 2Brain in one view, and the app-wide UI/UX round "Glut + Hex"
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
-  the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness `axiomata-harness` / `axh`
+  the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness Glut (`glut` / `axh`, since 2026-10-21 in its own repository `../Axiomata-Glut`)
   (#37, `docs/plans/harness.md`; HS1–HS8 built), made one to keep a role on in "Glut rund" (2026-10-19,
   `docs/plans/glut-round.md`: web fetch/search, fewer tokens, cached tokens metered apart, streaming, skills that name
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat,
@@ -98,6 +98,13 @@ skips the calendar/mail/reminders modules' mount-time auto-refresh (each is a bi
 and each module's manual ↻ still runs regardless (`core/devFlags.ts`).
 
 ## Architecture — traps worth knowing before you touch things
+
+- **Two crates live in repositories of their own, beside this one** (2026-10-21): Glut — the harness, `glut` and `axh`
+  — in `../Axiomata-Glut`, and the guarded file service `axiomata-files` in `../Axiomata-Foundation` (shared with Glut
+  and, later, the Studio as an app of its own). Both are path dependencies in the root `Cargo.toml`, so they must be
+  checked out there; a change to either is made, tested and committed in its own repository, and takes effect here at
+  the next build. Glut depends on `axiomata-files` only, never on this repository (feedback "Glut standalone"). Paths
+  below that name `crates/glut/…` or `axiomata-files` mean those repositories.
 
 Full walkthrough: `docs/architecture.md` §3–§5. The load-bearing facts that aren't obvious
 from the code itself:
@@ -278,11 +285,9 @@ from the code itself:
   directly, without a shell. Every app-harness command carries `AXIOMATA_HARNESS_RUN=skill|chat`: a skill run gets only a
   short CLI list (`main.rs` `skill_run_may`), a chat turn no owner gate and only plain cards (`board_flow::plain_*`).
   Widen either list only with the same care; on Opencode's unattended shell the mark is a second line, not a boundary.
-- **Glut's code mode has no regular expressions** (`axiomata-harness/src/codemode.rs` `Intrinsics`): the bundled
-  quickjs-ng has an open heap-write advisory in its regex compiler (GHSA-rxpx-wj25-jhqq) — do not add `RegExp` back
-  until rquickjs bundles a fixed engine; `cargo audit` cannot see GitHub advisories. A script's tool calls go through
-  `run.rs` `perform` like direct ones — never call the toolbox from `codemode.rs`. Language servers asked after an
-  edit (`diagnostics.rs` `SAFE_SERVERS`) must never run the project's code: an agent writes the files they read.
+- **Glut's own traps live in its repository** (`../Axiomata-Glut/AGENTS.md`): code mode without regular expressions, the
+  refusal ledger and compaction, never cutting a tool result, hooks that only veto, the two layers of subagents.
+  Read them before touching how Axiomata drives a Glut run.
 - **A card on Glut is `axiomata-cli harness card` in its pane** (`docs/plans/glut-cards.md`): everything the run is
   told is the spec `glut-card.json` in the session's channel (`glut_card`, written by `agent_entry::wire_glut`), found
   by `AXIOMATA_AGENT_ID` and checked against the database (folder, team-server file) — never put rights, a command or
@@ -290,32 +295,6 @@ from the code itself:
   pane (first answer wins, typed-ahead lines dropped), writes `glut-events.jsonl` (meter: `usage::GlutTally`; tiles:
   `activity::glut_recent`) and passes what is left of the session's limits as the run's `Budget`. A start on another
   harness forgets the spec (`glut_card::forget`).
-- **Glut ends what refusals keep repeating, and compacts itself** (Glut robust): `refusals.rs` counts per tool and
-  target *once per call* (the network proxy judges every connection) — keep that when feeding it from a new place;
-  `FinishReason::Refused` must still answer every call of the last reply. A compaction keeps the system prompt, the
-  latest user message and whole steps (a call never parted from its result); what it replaces goes into the result
-  store, never away. Its limits and window are Glut's own (`~/.axh/settings.json` `refusals`, `compact`,
-  `contextWindow`); Axiomata only passes its catalog's window below them.
-- **Glut never cuts a tool result** (Glut lean): the toolbox hands back the whole text, the loop bounds it once as it
-  enters the conversation (`results::bounded`: head + tail, the whole in the run's `ResultStore`) — never cap inside a
-  tool. A compact-output filter (`tools/output.rs`) rewrites only the *output* of a simple command, keeps Glut's own
-  `[…]` notes and the `error: ` prefix, and puts the raw output in the store; a new filter needs a real output as a
-  test fixture (`tools/output/fixtures/`, anonymised) and must leave the model's own format flags alone. A chain
-  (`a && b; c`) runs with a random mark printed before each part (`output::marked`/`unmark` in `shell.rs`) — the only
-  place Glut touches a command: the gate, the hooks and the events see the command and the output as written, never
-  the marks; keep it that way when changing either side.
 - **Glut becomes an application of its own** (owner, 2026-10-21): a new Glut setting starts in the harness — its own
   `~/.axh/settings.json`, an `axh` flag or frontmatter — and Axiomata's setting only passes a value on top
   (`docs/plans/glut-effort.md` E1 is the pattern). Never a Glut option only `axiomata-core` can reach.
-- **Hooks veto, they never permit** (HS7, `docs/plans/harness-hs7.md`): the `hooks` of
-  `~/.axh/settings.json` (Claude's shape) may only *block* a call or the answer — `allow`/`ask` parse and
-  are no-ops (the gate stays the only decider), a crash/timeout/odd exit is a fail-open `Event::Hook` note,
-  and only the owner's file counts: a project's `.axh/` hooks are parsed (`project_hooks_skipped`) and
-  printed/folded into `stderr` as a note, never executed.
-- **Subagents: offering `task` and judging `task` are two layers** (HS8, `docs/plans/harness-hs8.md`): the
-  tool is *offered* when the run configures it (`RunConfig.subagents`, default on; in the core set only
-  when the skill's `allowed_tools` names `task` — one reading of the frontmatter feeds both the gate and
-  the tool list), but whether a call *runs* is the gate's word like any change (`Access::Other` under
-  `task`, rules then mode; headless an unanswered ask refuses it). A declaration alone never allows, the
-  subagent gets the parent's toolbox minus `task` (one level only), and its events arrive wrapped as
-  `Event::Sub { depth, event }` — sinks must recurse (`Notes`, `Readable`) or they drop them.

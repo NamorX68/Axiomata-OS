@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
-use axiomata_harness::permissions::Mode;
 use axiomata_ide::lifecycle::{Channel, ChannelRoots};
+use glut::permissions::Mode;
 use serde::{Deserialize, Serialize};
 
 use crate::AxiomataError;
@@ -161,7 +161,7 @@ pub fn read_private(path: &Path, max_bytes: u64) -> Result<String, AxiomataError
 pub fn endpoint(
     config: &crate::config::Config,
     model: Option<String>,
-) -> Result<axiomata_harness::ModelEndpoint, AxiomataError> {
+) -> Result<glut::ModelEndpoint, AxiomataError> {
     let role = crate::config::ProviderRole::Chat;
     let provider = config.agents.provider_for(role);
     // An engine's model written as Opencode spells it (`openrouter/<model>`) means the same model to Glut, which

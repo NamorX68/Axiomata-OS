@@ -21,8 +21,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use axiomata_files::{LinkPolicy, Root};
-use axiomata_harness::skills::context::context_blocks;
 use chrono::Utc;
+use glut::skills::context::context_blocks;
 use rusqlite::Connection;
 
 use crate::agents::{AgentBackend, AgentRequest, AgentRunResult, opencode};

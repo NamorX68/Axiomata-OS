@@ -9,8 +9,8 @@ serde_json.workspace = true
 chrono.workspace = true
 axiomata-core = { path = "../axiomata-core" }
 axiomata-git = { path = "../axiomata-git" }
-axiomata-harness = { path = "../axiomata-harness" }
-axiomata-files = { path = "../axiomata-files" }
+glut.workspace = true
+axiomata-files.workspace = true
 axiomata-roster = { path = "../axiomata-roster" }
 rusqlite.workspace = true
 anyhow.workspace = true

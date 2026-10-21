@@ -1,4 +1,4 @@
-//! `axiomata-cli harness …`: the own harness (`axiomata-harness`, `docs/plans/harness.md`) with a provider from
+//! `axiomata-cli harness …`: the own harness (`glut`, `docs/plans/harness.md`) with a provider from
 //! `~/.axiomata/config.toml` — its base URL, key and skill model (H5). The way to try the harness before it has a
 //! place in the app.
 
@@ -9,19 +9,19 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
-use axiomata_harness::commands::{PermissionsView, Registry};
-use axiomata_harness::mcp;
-use axiomata_harness::permissions::settings::{self, Trust};
-use axiomata_harness::permissions::{
+use clap::{Args, Subcommand, ValueEnum};
+use glut::commands::{PermissionsView, Registry};
+use glut::mcp;
+use glut::permissions::settings::{self, Trust};
+use glut::permissions::{
     Asker, BuiltGate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
 };
-use axiomata_harness::setup::{self, Draft, Prepared};
-use axiomata_harness::skills;
-use axiomata_harness::{
+use glut::setup::{self, Draft, Prepared};
+use glut::skills;
+use glut::{
     Cancel, Effort, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat,
     RunConfig, SharedSink, SkillHow,
 };
-use clap::{Args, Subcommand, ValueEnum};
 
 use crate::board_flow::owner_only;
 
@@ -185,7 +185,7 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // Glut 2 (D): snapshots before changes, in the harness's own store, for `axh undo`.
     run_config.snapshots = Some(home.join(".axh").join("snapshots"));
     // Glut lean (N9): what the run saves is counted with the app's runs.
-    run_config.savings = Some(home.join(".axh").join(axiomata_harness::lean::FILE));
+    run_config.savings = Some(home.join(".axh").join(glut::lean::FILE));
     // The flag, else the app's skill effort, else the harness's own settings; a skill's or a command's `effort:`
     // still wins in `prepare`.
     endpoint.effort = endpoint
@@ -241,13 +241,12 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     .await?;
     // A skill run's task is the skill's body already: loading skills would only cost a turn (glut-round CP4).
     if skill.is_some() {
-        tools.withdraw(axiomata_harness::skills::tool::NAME);
+        tools.withdraw(glut::skills::tool::NAME);
     }
     // Ctrl-C, SIGTERM and SIGHUP end the run with its last line and every background job stopped.
     let cancel = Cancel::new();
-    axiomata_harness::run::cancel_on_signals(&cancel);
-    let outcome =
-        axiomata_harness::run(&run_config, &model, &tools, &prompt, &mut sink, &cancel).await;
+    glut::run::cancel_on_signals(&cancel);
+    let outcome = glut::run(&run_config, &model, &tools, &prompt, &mut sink, &cancel).await;
     match outcome.reason {
         FinishReason::Answered => Ok(()),
         other => bail!("the run ended: {other:?}"),
@@ -419,9 +418,9 @@ fn gain(days: Option<u32>) -> Result<()> {
         .map(PathBuf::from)
         .filter(|home| home.is_absolute())
         .context("HOME is not set to an absolute folder")?;
-    let path = home.join(".axh").join(axiomata_harness::lean::FILE);
-    let table = axiomata_harness::lean::report(&path, days)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let path = home.join(".axh").join(glut::lean::FILE);
+    let table =
+        glut::lean::report(&path, days).with_context(|| format!("reading {}", path.display()))?;
     print!("{table}");
     Ok(())
 }
@@ -492,7 +491,7 @@ fn render(event: &Event) -> Option<String> {
         Event::Todo { items, .. } => {
             let open = items
                 .iter()
-                .filter(|item| item.status != axiomata_harness::planning::TodoStatus::Done)
+                .filter(|item| item.status != glut::planning::TodoStatus::Done)
                 .count();
             format!("☐ todo · {open} open of {}", items.len())
         }
@@ -644,7 +643,7 @@ mod tests {
 
     #[test]
     fn a_subagents_events_are_indented_and_their_finished_reads_its_own() {
-        use axiomata_harness::Usage;
+        use glut::Usage;
 
         // HS8, D8: the subagent's own finished line is a `↳`, never the run's `■`.
         let finished = Event::Sub {

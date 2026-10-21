@@ -14,10 +14,10 @@ axiomata-roster = { path = "../axiomata-roster" }
 axiomata-tasks = { path = "../axiomata-tasks" }
 axiomata-opencode = { path = "../axiomata-opencode" }
 # The guarded file service (editor plan ED0); `workspace` is its strict root.
-axiomata-files = { path = "../axiomata-files" }
+axiomata-files.workspace = true
 # The own agent harness (`docs/plans/harness.md`): `backend: axh` runs a skill through it (HS6b). The allowed
 # dependency direction — the harness knows nothing of core (H2).
-axiomata-harness = { path = "../axiomata-harness" }
+glut.workspace = true
 home.workspace = true
 serde.workspace = true
 serde_json.workspace = true

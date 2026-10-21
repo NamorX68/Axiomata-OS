@@ -62,7 +62,7 @@ pub enum AxiomataError {
     /// `Board`/`Ide`/`Roster`: the harness is a crate of its own, built to be
     /// lifted out, and carries its own error type.
     #[error("harness: {0}")]
-    Harness(#[from] axiomata_harness::HarnessError),
+    Harness(#[from] glut::HarnessError),
 
     /// Applying a specific schema migration failed.
     #[error("migration {version} failed: {source}")]

@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-pub use axiomata_harness::Effort;
 use axiomata_roster::Engine;
+pub use glut::Effort;
 use serde::{Deserialize, Serialize};
 
 use crate::agents::valid_model_name;
@@ -166,7 +166,7 @@ pub enum HarnessId {
     Opencode,
     /// Claude Code as `claude -p` on the app's own login folder — Anthropic only (D2).
     ClaudeCode,
-    /// The own harness, Glut (`axiomata-harness`) — providers with an OpenAI-compatible endpoint (D6).
+    /// The own harness, Glut (`glut`) — providers with an OpenAI-compatible endpoint (D6).
     Axh,
 }
 
@@ -197,7 +197,7 @@ impl HarnessId {
 /// unattended skill/routine runs, plus the endpoint/credential fields kept
 /// for the Settings UI. Opencode resolves providers and auth from its own
 /// config; the `base_url`/`api_key` fields are what Axiomata's own harness
-/// (`axiomata-harness`, `docs/plans/harness.md` H5) talks to the provider with,
+/// (`glut`, `docs/plans/harness.md` H5) talks to the provider with,
 /// and they still drive `validate_for_save`. Kept independently per
 /// provider (`AgentDefaults::providers`) so switching the active provider in
 /// the Settings UI never discards what was typed for the others.

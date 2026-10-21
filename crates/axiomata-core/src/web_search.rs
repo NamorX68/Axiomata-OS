@@ -5,10 +5,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axiomata_harness::tools::search::{
-    BudgetVerdict, Provider, SearchBudget, SearchKeys, Ticket, WebSearch,
-};
 use chrono::{DateTime, Utc};
+use glut::tools::search::{BudgetVerdict, Provider, SearchBudget, SearchKeys, Ticket, WebSearch};
 use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::config::Config;

@@ -464,7 +464,7 @@ struct Setup {
 
 impl Setup {
     fn prepare(
-        servers: &[axiomata_harness::mcp::config::ServerEntry],
+        servers: &[glut::mcp::config::ServerEntry],
         cwd: &Path,
         system_prompt_file: Option<&Path>,
     ) -> Result<Self, AxiomataError> {
@@ -532,8 +532,8 @@ fn declared_tools(
         path: name.unwrap_or("the run").into(),
         reason: format!("unparsable `allowed_tools`: {reason}"),
     };
-    axiomata_harness::skills::rules_of(text).map_err(invalid)?;
-    let parts = axiomata_harness::skills::split_rules(text);
+    glut::skills::rules_of(text).map_err(invalid)?;
+    let parts = glut::skills::split_rules(text);
     if let Some(part) = parts
         .iter()
         .find(|part| !part.starts_with(|c: char| c.is_ascii_alphabetic()))
@@ -551,12 +551,12 @@ fn valid_session_id(id: &str) -> bool {
 }
 
 /// The owner's MCP servers (`~/.axh/mcp.json`).
-fn owner_servers() -> Result<Vec<axiomata_harness::mcp::config::ServerEntry>, AxiomataError> {
+fn owner_servers() -> Result<Vec<glut::mcp::config::ServerEntry>, AxiomataError> {
     let home = home::home_dir().ok_or_else(|| AxiomataError::AgentApi {
         backend: BACKEND_CLAUDE_CODE,
         message: "no home folder to read ~/.axh/mcp.json from".to_owned(),
     })?;
-    axiomata_harness::mcp::config::owner(&home).map_err(|err| AxiomataError::AgentApi {
+    glut::mcp::config::owner(&home).map_err(|err| AxiomataError::AgentApi {
         backend: BACKEND_CLAUDE_CODE,
         message: format!("the MCP servers for the app's Claude Code: {err}"),
     })
@@ -564,7 +564,7 @@ fn owner_servers() -> Result<Vec<axiomata_harness::mcp::config::ServerEntry>, Ax
 
 /// `servers` as Claude Code's `--mcp-config` file (`{"mcpServers": …}`), or `None` without any.
 fn mcp_config_json(
-    servers: &[axiomata_harness::mcp::config::ServerEntry],
+    servers: &[glut::mcp::config::ServerEntry],
 ) -> Result<Option<String>, AxiomataError> {
     if servers.is_empty() {
         return Ok(None);
@@ -1352,7 +1352,7 @@ mod tests {
 
     #[test]
     fn the_mcp_file_has_claudes_shape_and_no_servers_means_no_file() {
-        use axiomata_harness::mcp::config::{Origin, ServerConfig, ServerEntry};
+        use glut::mcp::config::{Origin, ServerConfig, ServerEntry};
         assert_eq!(mcp_config_json(&[]).unwrap(), None);
         let entry = ServerEntry {
             name: "apple-mail".to_owned(),

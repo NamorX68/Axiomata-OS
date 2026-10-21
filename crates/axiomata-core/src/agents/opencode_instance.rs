@@ -305,11 +305,10 @@ fn prepare_at(places: &Places, home: &Path, config: &Config) -> Result<bool, Axi
         link_owner_config_home(places, &owner_config_home(home))?;
         master_config(owner_config(home), config)
     } else {
-        let servers =
-            axiomata_harness::mcp::config::owner(home).map_err(|err| AxiomataError::AgentApi {
-                backend: super::BACKEND_OPENCODE,
-                message: format!("the MCP servers for the app's Opencode: {err}"),
-            })?;
+        let servers = glut::mcp::config::owner(home).map_err(|err| AxiomataError::AgentApi {
+            backend: super::BACKEND_OPENCODE,
+            message: format!("the MCP servers for the app's Opencode: {err}"),
+        })?;
         generated_config(owner_catalog(home), config, &servers, places.instance)
     };
     let text = serde_json::to_string_pretty(&generated).map_err(|err| AxiomataError::AgentApi {
@@ -342,7 +341,7 @@ pub(crate) fn mark_started(instance: Instance) -> Result<(), AxiomataError> {
 fn generated_config(
     catalog: Map<String, Value>,
     config: &Config,
-    servers: &[axiomata_harness::mcp::config::ServerEntry],
+    servers: &[glut::mcp::config::ServerEntry],
     instance: Instance,
 ) -> Value {
     let providers = with_app_credentials(catalog, config);
@@ -453,8 +452,8 @@ fn openai_base(base: &str) -> String {
 
 /// One server of `~/.axh/mcp.json` as Opencode spells it. An HTTP server whose header needs a `${VAR}` is left
 /// out: the harness expands it from its own environment, and the service has no such variable.
-fn opencode_server(entry: &axiomata_harness::mcp::config::ServerEntry) -> Option<Value> {
-    use axiomata_harness::mcp::config::ServerConfig;
+fn opencode_server(entry: &glut::mcp::config::ServerEntry) -> Option<Value> {
+    use glut::mcp::config::ServerConfig;
     match &entry.config {
         ServerConfig::Stdio { command, args, env } => {
             if env.values().any(|value| value.contains("${")) {
@@ -806,7 +805,7 @@ mod tests {
             Some("skill")
         );
     }
-    use axiomata_harness::mcp::config::{Origin, ServerConfig, ServerEntry};
+    use glut::mcp::config::{Origin, ServerConfig, ServerEntry};
 
     fn temp_dir(label: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

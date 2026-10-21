@@ -2,7 +2,7 @@
 //! service — the single agent harness for every model Axiomata runs, cloud or
 //! local), `Ollama` (a
 //! single raw completion against a local model for simple, tool-free tasks)
-//! and `Axh` (a run through Axiomata's own harness, `axiomata-harness` —
+//! and `Axh` (a run through Axiomata's own harness, `glut` —
 //! step HS6b, `docs/plans/harness-hs6b.md`).
 //!
 //! Skill and routine execution dispatches through the [`AgentBackend`] enum
@@ -179,7 +179,7 @@ pub enum AgentBackend {
     /// loop. Intended for simple, deterministic tasks (e.g. appending a to-do
     /// item).
     Ollama { model: String },
-    /// A run through Axiomata's own harness (`axiomata-harness`,
+    /// A run through Axiomata's own harness (`glut`,
     /// `docs/plans/harness.md`, step HS6b): the same lean tool-calling loop
     /// the `axh` binary runs, driven from the core — guarded file tools, the
     /// skill's own `allowed_tools` as its permissions, the sandbox, the

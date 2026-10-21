@@ -1508,6 +1508,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   once) — the older steps become a summary by the run's own model, the replaced part stays in the result store. Live
   on DeepSeek V4.1 Flash: a refused fetch run stopped after 4 steps (was 30+); an 8-file run in a 24k window compacted
   seven times and still named all eight codewords. §5 "Glut 2".
+- **Glut and the file guard moved out** (2026-10-21, owner: Glut becomes "eine eigenständige App"): the harness is
+  the crate `glut` in its own repository `Axiomata-Glut` (history kept, `git subtree split`; `axh` stays), and
+  `axiomata-files` moved to `Axiomata-Foundation`, the shared building blocks of the Axiomata apps (later the terminal
+  emulator, when the Studio becomes an app of its own). Both are checked out beside this repository and built from
+  there (path dependencies in the root `Cargo.toml`); Glut's own traps and the TUI's plan live in its repository.
 - **Glut on cards built** (2026-10-21, `docs/plans/glut-cards.md`, D9 of `durable.md` revisited): the engine kind
   `glut` (the former placeholder `mini`) works, reviews and plans cards like Claude Code and Opencode — the studio
   writes the run's spec and the team server into the channel, the pane runs `axiomata-cli harness card`, asks come in

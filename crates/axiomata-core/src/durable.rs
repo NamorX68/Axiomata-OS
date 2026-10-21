@@ -2,7 +2,7 @@
 //! app lost is marked `interrupted` at the next start, and a Glut run that kept its journal goes on from its last step
 //! on the owner's click — never by itself (D3).
 //!
-//! The journal itself is the harness's (`axiomata_harness::journal`); the app keeps its journals apart from `axh`'s,
+//! The journal itself is the harness's (`glut::journal`); the app keeps its journals apart from `axh`'s,
 //! under `~/.axiomata/harness/runs`, and names each by the id it records in the run's `journal` column.
 
 use std::path::PathBuf;
@@ -35,7 +35,7 @@ pub fn new_journal_id() -> String {
 
 /// The ids of the unfinished journals there are.
 fn kept_journals() -> Vec<String> {
-    axiomata_harness::journal::list(&journal_dir())
+    glut::journal::list(&journal_dir())
         .into_iter()
         .map(|unfinished| unfinished.run)
         .collect()
@@ -51,7 +51,7 @@ pub fn on_start(db: &Mutex<Connection>) {
         Ok(marked) => tracing::info!(marked, "runs the app lost are marked interrupted"),
         Err(err) => tracing::warn!(%err, "could not mark the lost runs"),
     }
-    axiomata_harness::journal::sweep(&journal_dir());
+    glut::journal::sweep(&journal_dir());
     if let Err(err) = runlog::forget_lost_journals(&conn, &kept_journals()) {
         tracing::warn!(%err, "could not tidy the interrupted runs");
     }
@@ -107,7 +107,7 @@ where
 ///
 /// # Errors
 ///
-/// No such interrupted run, no journal (another harness, or past [`axiomata_harness::journal::KEEP`]), a journal of
+/// No such interrupted run, no journal (another harness, or past [`glut::journal::KEEP`]), a journal of
 /// another run, the skill gone or no longer on Glut, the run claimed by another resume, the spend cap reached, or a
 /// failure to write the row.
 pub async fn resume_run(
@@ -134,7 +134,7 @@ pub async fn resume_run(
         let source = RunSource::from_db_str(&source, 1)?;
         (journal, name, source)
     };
-    let Some(unfinished) = axiomata_harness::journal::list(&journal_dir())
+    let Some(unfinished) = glut::journal::list(&journal_dir())
         .into_iter()
         .find(|unfinished| unfinished.run == journal)
     else {
@@ -216,7 +216,7 @@ pub fn discard(db: &Mutex<Connection>, id: i64) -> Result<(), AxiomataError> {
     };
     // Gone already is fine: the journal past its time was swept.
     if kept_journals().contains(&journal) {
-        axiomata_harness::journal::discard(&journal_dir(), &journal).map_err(|message| {
+        glut::journal::discard(&journal_dir(), &journal).map_err(|message| {
             AxiomataError::AgentApi {
                 backend: "durable",
                 message,
@@ -279,15 +279,12 @@ mod tests {
     }
 
     fn write_journal(run: &str, meta: serde_json::Value) {
-        let spec = axiomata_harness::journal::JournalSpec {
+        let spec = glut::journal::JournalSpec {
             dir: journal_dir(),
             run: run.to_owned(),
             meta,
         };
-        drop(
-            axiomata_harness::journal::Journal::create(&spec, std::path::Path::new("/w"), "m")
-                .unwrap(),
-        );
+        drop(glut::journal::Journal::create(&spec, std::path::Path::new("/w"), "m").unwrap());
     }
 
     fn resumable(fx: &Fixture) -> Vec<bool> {

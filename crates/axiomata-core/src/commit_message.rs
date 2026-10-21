@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use axiomata_harness::{ChatModel, Message, OpenAiCompat};
+use glut::{ChatModel, Message, OpenAiCompat};
 
 use crate::AxiomataCore;
 use crate::config::ProviderRole;

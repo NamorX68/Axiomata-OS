@@ -1,5 +1,5 @@
 //! The `axh` backend: a skill or prompt run through Axiomata's own harness
-//! (`axiomata-harness`, `docs/plans/harness.md`) instead of an opencode
+//! (`glut`, `docs/plans/harness.md`) instead of an opencode
 //! session — step HS6b, `docs/plans/harness-hs6b.md`.
 //!
 //! Division of labour (D1): the core keeps building the run's prompt
@@ -32,13 +32,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use axiomata_harness::commands::{Expanded, Registry, Source};
-use axiomata_harness::mcp;
-use axiomata_harness::permissions::settings;
-use axiomata_harness::permissions::{Gate, Mode, Nobody, Rule, RuleSet};
-use axiomata_harness::setup;
-use axiomata_harness::skills;
-use axiomata_harness::{
+use glut::commands::{Expanded, Registry, Source};
+use glut::mcp;
+use glut::permissions::settings;
+use glut::permissions::{Gate, Mode, Nobody, Rule, RuleSet};
+use glut::setup;
+use glut::skills;
+use glut::{
     Cancel, Effort, Event, EventSink, FinishReason, McpStatus, Message, ModelEndpoint,
     OpenAiCompat, RunConfig, SharedSink,
 };
@@ -93,7 +93,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     harness.compact_for(config, ProviderRole::Skill, &endpoint.model);
     // Durable runs (D5): the run journals its steps; a resumed one goes on from them (D3).
     if let Some(journal) = &request.journal {
-        harness.run_config.journal = Some(axiomata_harness::journal::JournalSpec {
+        harness.run_config.journal = Some(glut::journal::JournalSpec {
             dir: crate::durable::journal_dir(),
             run: journal.id.clone(),
             meta: serde_json::json!({ "kind": "skill", "name": request.name }),
@@ -110,7 +110,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     })?;
     let (mut outcome, conversation) =
         match request.journal.as_ref().filter(|journal| journal.resume) {
-            Some(journal) => axiomata_harness::resume(
+            Some(journal) => glut::resume(
                 &harness.run_config,
                 &model,
                 &harness.tools,
@@ -124,7 +124,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
                 message,
             })?,
             None => {
-                axiomata_harness::run_continuing(
+                glut::run_continuing(
                     &harness.run_config,
                     &model,
                     &harness.tools,
@@ -150,7 +150,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         // Never longer than the skill's own limit, and no subagents: the repair only writes out what is known.
         harness.run_config.timeout = request.timeout.min(JSON_REPAIR_TIMEOUT);
         harness.run_config.subagents = false;
-        let (repair, _) = axiomata_harness::run_continuing(
+        let (repair, _) = glut::run_continuing(
             &harness.run_config,
             &model,
             &harness.tools,
@@ -296,7 +296,7 @@ pub(crate) async fn chat(
     harness.run_config.instructions = instructions;
     // Glut lean (N2): a result too long for the conversation is kept beside it, so a later turn of this
     // conversation still reads back what an earlier turn's note names.
-    harness.run_config.results = Some(axiomata_harness::results::StoreSpec {
+    harness.run_config.results = Some(glut::results::StoreSpec {
         dir: sessions.join(format!("{session_id}.results")),
         tag: session_id.clone(),
     });
@@ -305,7 +305,7 @@ pub(crate) async fn chat(
         .resume
         .clone()
         .unwrap_or_else(crate::durable::new_journal_id);
-    harness.run_config.journal = Some(axiomata_harness::journal::JournalSpec {
+    harness.run_config.journal = Some(glut::journal::JournalSpec {
         dir: crate::durable::journal_dir(),
         run: journal.clone(),
         meta: serde_json::json!({
@@ -322,7 +322,7 @@ pub(crate) async fn chat(
         ..endpoint
     })?;
     let (outcome, conversation) = match &request.resume {
-        Some(run) => axiomata_harness::resume(
+        Some(run) => glut::resume(
             &harness.run_config,
             &model,
             &harness.tools,
@@ -336,7 +336,7 @@ pub(crate) async fn chat(
             message,
         })?,
         None => {
-            axiomata_harness::run_continuing(
+            glut::run_continuing(
                 &harness.run_config,
                 &model,
                 &harness.tools,
@@ -361,8 +361,8 @@ pub(crate) async fn chat(
         let mut message = harness.notes.join(Some(&ended));
         // K7: a new chat is the way out only where compacting could not help — it failed, it is off, or the
         // prompt still does not fit after it.
-        let too_long = message.contains(axiomata_harness::compact::COMPACTION_FAILED)
-            || axiomata_harness::model::mentions_context_overflow(&message)
+        let too_long = message.contains(glut::compact::COMPACTION_FAILED)
+            || glut::model::mentions_context_overflow(&message)
             || !harness.run_config.compaction.auto;
         if continuing
             && too_long
@@ -429,7 +429,7 @@ pub struct InterruptedTurn {
 
 /// The chat turns on Glut that the app lost before they answered, newest first — none still going.
 pub fn interrupted_chat_turns() -> Vec<InterruptedTurn> {
-    axiomata_harness::journal::list(&crate::durable::journal_dir())
+    glut::journal::list(&crate::durable::journal_dir())
         .into_iter()
         .filter(|unfinished| !unfinished.running && unfinished.meta["kind"] == CHAT_JOURNAL)
         .filter_map(|unfinished| {
@@ -465,7 +465,7 @@ pub fn discard_chat_turn(run: &str) -> Result<(), AxiomataError> {
             message: format!("no interrupted chat turn {run}"),
         });
     }
-    axiomata_harness::journal::discard(&crate::durable::journal_dir(), run).map_err(|message| {
+    glut::journal::discard(&crate::durable::journal_dir(), run).map_err(|message| {
         AxiomataError::AgentApi {
             backend: BACKEND_AXH,
             message,
@@ -551,9 +551,9 @@ pub(crate) async fn undo_last(session_id: &str, cwd: &Path) -> Result<String, Ax
     // of its own, and `axh undo --run <that>` brings it back.
     let kept = tokio::task::spawn_blocking(move || -> Result<String, String> {
         let kept = format!("undo-{restored_run}");
-        let mut before = axiomata_harness::snapshot::Snapshots::open(&root, &cwd, &kept)?;
+        let mut before = glut::snapshot::Snapshots::open(&root, &cwd, &kept)?;
         before.take(0)?;
-        axiomata_harness::snapshot::restore(&root, &cwd, &restored_run, None)?;
+        glut::snapshot::restore(&root, &cwd, &restored_run, None)?;
         Ok(kept)
     })
     .await
@@ -580,7 +580,7 @@ pub(crate) fn session_title(id: &str) -> Option<String> {
             .take(super::MAX_TITLE_LINES)
             .map_while(Result::ok)
             .filter_map(|line| serde_json::from_str::<Message>(&line).ok())
-            .find(|message| message.role == axiomata_harness::model::Role::User)
+            .find(|message| message.role == glut::model::Role::User)
             .and_then(|message| message.content)
             .map(|text| super::title_of(&text))
             .unwrap_or_default(),
@@ -594,9 +594,7 @@ pub(crate) fn session_title(id: &str) -> Option<String> {
 /// # Errors
 ///
 /// A command folder or file that cannot be used, as [`Registry::load`] says.
-pub fn chat_commands(
-    cwd: &Path,
-) -> Result<Vec<axiomata_harness::commands::Command>, AxiomataError> {
+pub fn chat_commands(cwd: &Path) -> Result<Vec<glut::commands::Command>, AxiomataError> {
     let home = settings::home_dir()?;
     Ok(Registry::load(&home, cwd, false)?
         .commands()
@@ -657,17 +655,16 @@ async fn compact_session(
         .expect("agent_slots semaphore is never closed");
     let started = Instant::now();
     let model = OpenAiCompat::new(endpoint)?;
-    let compacted =
-        tokio::time::timeout(timeout, axiomata_harness::compact::compact(&model, earlier))
-            .await
-            .map_err(|_| AxiomataError::AgentTimeout {
-                backend: BACKEND_AXH,
-                timeout,
-            })?
-            .map_err(|err| AxiomataError::AgentApi {
-                backend: BACKEND_AXH,
-                message: format!("the conversation could not be compacted: {err}"),
-            })?;
+    let compacted = tokio::time::timeout(timeout, glut::compact::compact(&model, earlier))
+        .await
+        .map_err(|_| AxiomataError::AgentTimeout {
+            backend: BACKEND_AXH,
+            timeout,
+        })?
+        .map_err(|err| AxiomataError::AgentApi {
+            backend: BACKEND_AXH,
+            message: format!("the conversation could not be compacted: {err}"),
+        })?;
     // The conversation as it was stays beside it: a poor summary must not cost the history. Its name is no session id
     // (the dot), so `/resume` never lists it.
     let backup = sessions.join(format!("{session_id}.pre-compact.jsonl"));
@@ -766,7 +763,7 @@ struct Rights<'a> {
 /// its events leave for the record (D7).
 struct Harness {
     run_config: RunConfig,
-    tools: axiomata_harness::Toolbox,
+    tools: glut::Toolbox,
     notes: Notes,
     sink: SharedSink,
     /// The owner's `effort` in `~/.axh/settings.json`: the run's when neither the run nor `[agents.glut]` names one.
@@ -819,7 +816,7 @@ impl Harness {
         // Glut 2 (D): snapshots before changes, in the harness's own store (`axh undo` puts a folder back).
         run_config.snapshots = Some(home.join(".axh").join("snapshots"));
         // Glut lean (N9): what the run saves is counted beside `axh`'s and the Studio's runs, for `axh gain`.
-        run_config.savings = Some(home.join(".axh").join(axiomata_harness::lean::FILE));
+        run_config.savings = Some(home.join(".axh").join(glut::lean::FILE));
         run_config.codemode = config.agents.glut.codemode
             && (rights.declared.is_empty()
                 || rights
@@ -887,7 +884,7 @@ impl Harness {
             .get(model)
             .copied()
             .or_else(|| catalog_window(config.agents.provider_for(role), model));
-        self.run_config.compaction = axiomata_harness::Compaction {
+        self.run_config.compaction = glut::Compaction {
             auto: self.compact_auto,
             context_window: window,
         };
@@ -1357,7 +1354,7 @@ mod tests {
     use crate::skills::runlog;
     use crate::skills::runner;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
-    use axiomata_harness::Access;
+    use glut::Access;
     use rusqlite::Connection;
     use serde_json::{Value, json};
     use std::os::unix::fs::PermissionsExt;
@@ -2279,12 +2276,12 @@ mod tests {
         let _fx = Fixture::new("chat-lost");
         let dir = crate::durable::journal_dir();
         let write = |run: &str, meta: Value| {
-            let spec = axiomata_harness::journal::JournalSpec {
+            let spec = glut::journal::JournalSpec {
                 dir: dir.clone(),
                 run: run.to_owned(),
                 meta,
             };
-            drop(axiomata_harness::journal::Journal::create(&spec, Path::new("/w"), "m").unwrap());
+            drop(glut::journal::Journal::create(&spec, Path::new("/w"), "m").unwrap());
         };
         write(
             "run-chat-1",

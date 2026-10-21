@@ -17,13 +17,13 @@ use axiomata_core::agent_entry::HARNESS_RUN_ENV;
 use axiomata_core::glut_card::{self, CardSpec};
 use axiomata_core::ide::lifecycle::{AgentState, Channel};
 use axiomata_core::permission_ask::{self, Decision};
-use axiomata_harness::journal;
-use axiomata_harness::permissions::{
+use glut::journal;
+use glut::permissions::{
     Answer, AnswerFuture, AskRequest, Asker, GateOptions, ask_display, build_gate, printable,
 };
-use axiomata_harness::setup;
-use axiomata_harness::skills;
-use axiomata_harness::{
+use glut::setup;
+use glut::skills;
+use glut::{
     Budget, Cancel, Event, EventSink, FinishReason, Message, OpenAiCompat, Prices, RunConfig,
     SharedSink,
 };
@@ -98,7 +98,7 @@ pub async fn card(core: &AxiomataCore) -> Result<()> {
         .or_else(|| app_prices(&config, &model_name));
     let model = OpenAiCompat::new(endpoint)?;
     // The team server alone: the session's own file, never the owner's `~/.axh/mcp.json` nor the project's.
-    let servers = axiomata_harness::mcp::config::named(&spec.mcp_config)?;
+    let servers = glut::mcp::config::named(&spec.mcp_config)?;
     let extras = setup::Extras {
         search: axiomata_core::web_search::web_search_tool(&config),
         direct: Vec::new(),
@@ -149,9 +149,7 @@ pub async fn card(core: &AxiomataCore) -> Result<()> {
         let cancel = Cancel::new();
         *current.lock().unwrap_or_else(|poison| poison.into_inner()) = cancel.clone();
         let _ = channel.set_state(AgentState::Working);
-        match axiomata_harness::resume(&run_config, &model, &tools, &lost.run, &mut sink, &cancel)
-            .await
-        {
+        match glut::resume(&run_config, &model, &tools, &lost.run, &mut sink, &cancel).await {
             Ok((outcome, after)) => {
                 conversation = after;
                 if let Err(err) = save_conversation(&channel, &conversation) {
@@ -201,7 +199,7 @@ pub async fn card(core: &AxiomataCore) -> Result<()> {
         let cancel = Cancel::new();
         *current.lock().unwrap_or_else(|poison| poison.into_inner()) = cancel.clone();
         let _ = channel.set_state(AgentState::Working);
-        let (outcome, after) = axiomata_harness::run_continuing(
+        let (outcome, after) = glut::run_continuing(
             &run_config,
             &model,
             &tools,
@@ -226,8 +224,7 @@ pub async fn card(core: &AxiomataCore) -> Result<()> {
 /// Whether `prompt` is one of the user's messages of `conversation` already.
 fn told(conversation: &[Message], prompt: &str) -> bool {
     conversation.iter().any(|message| {
-        message.role == axiomata_harness::model::Role::User
-            && message.content.as_deref() == Some(prompt)
+        message.role == glut::model::Role::User && message.content.as_deref() == Some(prompt)
     })
 }
 
@@ -267,7 +264,7 @@ async fn budget(core: &AxiomataCore, agent_id: i64, prices: Option<Prices>) -> B
     // engine names no model, has no figure of the meter's.
     let spent = usage.cost_usd.or_else(|| {
         prices.map(|prices| {
-            prices.cost_usd(&axiomata_harness::Usage {
+            prices.cost_usd(&glut::Usage {
                 input_tokens: usage.usage.input_tokens,
                 cached_input_tokens: 0,
                 output_tokens: usage.usage.output_tokens,
@@ -364,7 +361,7 @@ const STOP_POLL: Duration = Duration::from_secs(2);
 fn run_config(
     spec: &CardSpec,
     config: &axiomata_core::config::Config,
-    built: &axiomata_harness::permissions::BuiltGate,
+    built: &glut::permissions::BuiltGate,
     home: &std::path::Path,
     model: &str,
 ) -> RunConfig {
@@ -391,7 +388,7 @@ fn run_config(
     // The team tools are the session's work, not a lookup: offered directly.
     run_config.mcp_behind_code = false;
     run_config.snapshots = Some(home.join(".axh").join("snapshots"));
-    run_config.savings = Some(home.join(".axh").join(axiomata_harness::lean::FILE));
+    run_config.savings = Some(home.join(".axh").join(glut::lean::FILE));
     run_config
 }
 

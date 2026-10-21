@@ -364,10 +364,10 @@ dependencies = [
  "axiomata-core",
  "axiomata-files",
  "axiomata-git",
- "axiomata-harness",
  "axiomata-roster",
  "chrono",
  "clap",
+ "glut",
  "rusqlite",
  "rustix",
  "serde_json",
@@ -381,7 +381,6 @@ version = "0.1.0"
 dependencies = [
  "axiomata-board",
  "axiomata-files",
- "axiomata-harness",
  "axiomata-ide",
  "axiomata-opencode",
  "axiomata-roster",
@@ -389,6 +388,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cron",
+ "glut",
  "gray_matter",
  "home",
  "ignore",
@@ -436,28 +436,6 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
-]
-
-[[package]]
-name = "axiomata-harness"
-version = "0.1.0"
-dependencies = [
- "axiomata-files",
- "chrono",
- "clap",
- "globset",
- "gray_matter",
- "htmd",
- "regex",
- "reqwest 0.12.28",
- "rquickjs",
- "rustix",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.20",
- "tokio",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1869,6 +1847,28 @@ dependencies = [
  "log",
  "regex-automata",
  "regex-syntax",
+]
+
+[[package]]
+name = "glut"
+version = "0.1.0"
+dependencies = [
+ "axiomata-files",
+ "chrono",
+ "clap",
+ "globset",
+ "gray_matter",
+ "htmd",
+ "regex",
+ "reqwest 0.12.28",
+ "rquickjs",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]

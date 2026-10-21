@@ -326,7 +326,7 @@ mod tests {
                 .allowed_tools
                 .as_deref()
                 .unwrap_or_else(|| panic!("{name} declares no `allowed_tools`"));
-            let rules = axiomata_harness::skills::rules_of(declared)
+            let rules = glut::skills::rules_of(declared)
                 .unwrap_or_else(|reason| panic!("{name}: {reason}"));
             assert!(
                 rules.iter().any(|rule| rule.text().starts_with("Read")),

@@ -24,11 +24,11 @@ use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use axiomata_harness::permissions::Mode;
 use axiomata_ide::lifecycle::{Channel, ChannelRoots};
 use axiomata_ide::model::Agent;
 use axiomata_ide::session_token;
 use axiomata_roster::Role;
+use glut::permissions::Mode;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -147,12 +147,12 @@ const DIRECT_COMMANDS: [&[&str]; 3] = [&["board", "list"], &["board", "add"], &[
 /// W8): `axiomata-cli`, from [`cli_path`], for [`DIRECT_COMMANDS`] only, marked by [`HARNESS_RUN_ENV`] as `kind`, with the
 /// app's `AXIOMATA_HOME` when one is set — the sandbox hides `~/.axiomata`, where the CLI's database is. `None` without
 /// a CLI.
-pub fn cli_direct_program(kind: &str) -> Option<axiomata_harness::tools::shell::DirectProgram> {
+pub fn cli_direct_program(kind: &str) -> Option<glut::tools::shell::DirectProgram> {
     let mut env = vec![(HARNESS_RUN_ENV.into(), kind.into())];
     if let Some(home) = std::env::var_os(crate::paths::AXIOMATA_HOME_ENV) {
         env.push((crate::paths::AXIOMATA_HOME_ENV.into(), home));
     }
-    Some(axiomata_harness::tools::shell::DirectProgram {
+    Some(glut::tools::shell::DirectProgram {
         name: CLI_NAME.to_owned(),
         path: cli_path()?,
         env,
@@ -1154,7 +1154,7 @@ mod tests {
         assert_eq!(env["AXIOMATA_CARD_ID"], "42");
         assert!(!fs::read_to_string(&spec_path).unwrap().contains(&secret));
         // The team server's file is one Glut reads as it is.
-        let servers = axiomata_harness::mcp::config::named(&spec.mcp_config).unwrap();
+        let servers = glut::mcp::config::named(&spec.mcp_config).unwrap();
         assert_eq!(servers.len(), 1);
     }
 
@@ -1191,7 +1191,7 @@ mod tests {
         assert!(!deny.contains(&"Edit".to_owned()));
         // Every rule is one Glut reads.
         for rule in GLUT_CARD_DENIED.iter().chain(GLUT_AUTO_DENIED.iter()) {
-            assert!(axiomata_harness::Rule::parse(rule).is_ok(), "{rule}");
+            assert!(glut::Rule::parse(rule).is_ok(), "{rule}");
         }
     }
 
