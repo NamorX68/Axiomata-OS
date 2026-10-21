@@ -4,6 +4,9 @@
   refused with the nearest names. While the first word after `/` is typed, a list of matching commands opens above
   the bar: ↑/↓ move in it, Tab takes one, Enter takes it unless the line already names a command, Esc closes it.
   Otherwise ↑/↓ walk the input history.
+
+  The conversation's settings sit at the bar's right end, so they can be set before the first question: Plan/Build,
+  Glut's effort (`EffortSwitch.svelte`) and a new conversation (⌘N while the input has the focus, `core/chatKeys.ts`).
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -11,7 +14,18 @@
 
   import { CONFIG_SAVED } from "../core/backend";
   import { on } from "../core/bus";
-  import { busy, interruptedTurns, loadInterruptedTurns, panelOpen, pushInstruction, send, turns } from "../core/chat";
+  import {
+    busy,
+    interruptedTurns,
+    loadInterruptedTurns,
+    newSession,
+    panelOpen,
+    planMode,
+    pushInstruction,
+    send,
+    turns,
+  } from "../core/chat";
+  import { isNewSessionPress } from "../core/chatKeys";
   import {
     type CommandEntry,
     commandEntries,
@@ -22,8 +36,12 @@
     runCommand,
     suggestions,
   } from "../core/commands";
+  import { keyHints } from "../core/keyHints";
+  import { platform } from "../core/keys";
   import { toast } from "../core/toast";
+  import IconButton from "../ui/IconButton.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
+  import EffortSwitch from "./EffortSwitch.svelte";
 
   /** How old the engine's list may get before typing `/` reads it again. */
   const REFRESH_AFTER_MS = 30_000;
@@ -110,7 +128,15 @@
     refresh();
   }
 
+  /** Nothing to start afresh while the agent works or before the first turn. */
+  const canStartOver = $derived(!$busy && $turns.length > 0);
+
   function onKeydown(e: KeyboardEvent) {
+    if (isNewSessionPress(e, $platform)) {
+      e.preventDefault();
+      if (canStartOver) newSession();
+      return;
+    }
     if (listOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         const step = e.key === "ArrowDown" ? 1 : -1;
@@ -184,6 +210,28 @@
     oninput={oninput}
     onkeydown={onKeydown}
   />
+  <div class="controls">
+    <button
+      type="button"
+      class="ax-btn mode"
+      class:on={$planMode}
+      aria-pressed={$planMode}
+      title={$planMode
+        ? "Plan mode: the agent reads and plans, changes nothing — click to let it build"
+        : "Build mode: the agent may change things — click to only plan"}
+      onclick={() => planMode.update((planning) => !planning)}
+    >
+      {$planMode ? "Plan" : "Build"}
+    </button>
+    <EffortSwitch />
+    <IconButton
+      icon="square-pen"
+      size="sm"
+      label="New session ({keyHints('⌘N', $platform)} in this field)"
+      disabled={!canStartOver}
+      onclick={newSession}
+    />
+  </div>
   {#if $busy}
     <span class="chip"><StatusMark tone="live" />working…</span>
   {:else if $turns.length > 0}
@@ -260,6 +308,20 @@
   input:focus-visible {
     outline: none;
     border-color: transparent;
+  }
+  .controls {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+  }
+  .mode {
+    font-size: var(--ax-font-size-sm);
+    padding: calc(1px * var(--ax-ui-scale)) var(--ax-space-2);
+  }
+  /* Selected, not alive: the switch is a setting, so it takes the selection tone, never the glow. */
+  .mode.on {
+    background: var(--ax-selected-bg);
   }
   .chip {
     display: inline-flex;

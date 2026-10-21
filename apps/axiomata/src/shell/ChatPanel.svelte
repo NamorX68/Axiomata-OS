@@ -34,9 +34,7 @@
     busy,
     dropTurn,
     interruptedTurns,
-    newSession,
     panelOpen,
-    planMode,
     resumeTurn,
     sessionId,
     toolCalls,
@@ -46,7 +44,6 @@
   import HexAvatar from "../ui/HexAvatar.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
   import { renderMarkdown } from "../core/markdown";
-  import EffortSwitch from "./EffortSwitch.svelte";
   import Window from "./Window.svelte";
 
   let list = $state<HTMLDivElement | null>(null);
@@ -76,24 +73,6 @@
       onClose={() => panelOpen.set(false)}
       style="width: 100%; height: 100%;"
     >
-      {#snippet headerExtra()}
-        <EffortSwitch />
-        <button
-          type="button"
-          class="ax-btn plan-switch"
-          class:on={$planMode}
-          aria-pressed={$planMode}
-          title={$planMode
-            ? "Plan mode: the agent reads and plans, changes nothing — click to let it build"
-            : "Build mode: the agent may change things — click to only plan"}
-          onclick={() => planMode.update((on) => !on)}
-        >
-          {$planMode ? "Plan" : "Build"}
-        </button>
-        <button type="button" class="ax-btn new-session" onclick={newSession} disabled={$busy || $turns.length === 0}>
-          New session
-        </button>
-      {/snippet}
       <div class="turns" bind:this={list}>
         {#each $interruptedTurns as lost (lost.run)}
           <p class="interrupted">
@@ -154,17 +133,6 @@
        short-but-wide 21:9 display still gets a usable-height panel. */
     height: 56vh;
     z-index: var(--ax-z-assistant);
-  }
-
-  .new-session,
-  .plan-switch {
-    font-size: var(--ax-font-size-sm);
-    padding: 1px var(--ax-space-2);
-  }
-
-  /* Selected, not alive: the switch is a setting, so it takes the selection tone, never the glow. */
-  .plan-switch.on {
-    background: var(--ax-selected-bg);
   }
 
   .turns {

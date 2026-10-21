@@ -2,7 +2,7 @@
   The chat's effort switch (`docs/plans/glut-effort.md`, F2): how hard Glut's model reasons in this conversation,
   with the levels the chat model takes. Picking one is `/effort <level>` — this conversation only; "default" goes back
   to the configured chat effort. Shown only while the chat runs on Glut: the other harnesses keep their own settings
-  (E6). The config is read when the switch mounts (each time the chat panel opens) and after every Settings save.
+  (E6). It sits in the bottom bar, so the config is read once at start and again after every Settings save.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
