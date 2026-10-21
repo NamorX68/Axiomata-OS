@@ -376,6 +376,7 @@ fn endpoint(
         api_key,
         model,
         effort: None,
+        versioned: false,
     })
 }
 

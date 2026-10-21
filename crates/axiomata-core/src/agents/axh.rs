@@ -1156,6 +1156,7 @@ pub(crate) fn endpoint(
         api_key,
         model,
         effort,
+        versioned: false,
     })
 }
 
