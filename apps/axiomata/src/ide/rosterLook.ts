@@ -52,7 +52,7 @@ export function engineIdFor(
 /** The harness as a person says it. */
 export function harnessLabel(harness: Harness | string): string {
   if (harness === "claude_code") return "Claude Code";
-  if (harness === "mini") return "Mini";
+  if (harness === "glut") return "Glut";
   if (harness === "opencode") return "Opencode";
   return harness;
 }
@@ -61,7 +61,7 @@ export function harnessLabel(harness: Harness | string): string {
 export function harnessBadge(harness: Harness | string): string {
   if (harness === "claude_code") return "CC";
   if (harness === "opencode") return "OC";
-  if (harness === "mini") return "M";
+  if (harness === "glut") return "GL";
   return harness.slice(0, 2).toUpperCase() || "?";
 }
 

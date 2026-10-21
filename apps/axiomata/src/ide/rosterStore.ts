@@ -41,6 +41,6 @@ export async function refreshEngines(): Promise<EngineEntry[]> {
 
 /** What an engine is called in a picker: its label, and what it runs when the label does not say. */
 export function engineLine(engine: Pick<EngineEntry, "harness" | "model">): string {
-  const harness = engine.harness === "claude_code" ? "Claude Code" : engine.harness === "mini" ? "Mini" : "Opencode";
+  const harness = engine.harness === "claude_code" ? "Claude Code" : engine.harness === "glut" ? "Glut" : "Opencode";
   return `${harness} · ${engine.model ?? "default model"}`;
 }

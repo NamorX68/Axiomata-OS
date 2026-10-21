@@ -23,7 +23,7 @@ import type { ReachAnswer } from "./reach";
 export const HARNESSES: { id: Harness; label: string; hint: string }[] = [
   { id: "opencode", label: "Opencode", hint: "The harness skills and routines already run on" },
   { id: "claude_code", label: "Claude Code", hint: "Anthropic's CLI" },
-  { id: "mini", label: "Mini (M7.4)", hint: "Axiomata's own loop — not built yet" },
+  { id: "glut", label: "Glut", hint: "Axiomata's own harness: sandbox, network gate, refusal limits" },
 ];
 
 // There is deliberately no copy of the harness-to-default-command table here.

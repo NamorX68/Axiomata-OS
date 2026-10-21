@@ -87,8 +87,8 @@ describe("describeStatus", () => {
     expect(describeStatus(status({ state: "idle", started_at: started }), own, at(60)).tone).toBe("idle");
   });
 
-  it("has nothing to say for the mini harness", () => {
-    expect(describeStatus(status({ state: "starting" }), agent({ harness: "mini" }), 0).tone).toBe("none");
+  it("reads Glut's status like the other harnesses'", () => {
+    expect(describeStatus(status({ state: "working" }), agent({ harness: "glut" }), 0).tone).not.toBe("none");
   });
 });
 

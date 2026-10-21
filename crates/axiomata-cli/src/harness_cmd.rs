@@ -32,6 +32,9 @@ const PREVIEW_CHARS: usize = 160;
 pub enum HarnessAction {
     /// Run one prompt in a folder; prints each step, or JSON lines with `--json`.
     Run(Box<RunFlags>),
+    /// A Studio session on Glut, in its pane (`docs/plans/glut-cards.md`): started by the studio, which names the
+    /// session in the environment and wrote what it is started with into its channel.
+    Card,
     /// What Glut lean saved (`docs/plans/glut-lean.md`, N9): compacted outputs, unchanged re-reads and relocated
     /// results per kind — every Glut run's, from `~/.axh/lean.jsonl`; the same table as `axh gain`.
     Gain {
@@ -111,6 +114,7 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     let flags = match action {
         HarnessAction::Run(flags) => *flags,
         HarnessAction::Gain { days } => return gain(days),
+        HarnessAction::Card => return crate::harness_card::card(core).await,
     };
     let RunFlags {
         provider,
@@ -391,7 +395,7 @@ impl EventSink for JsonLines {
 
 /// One line per step, for a person at the terminal. Everything the model wrote goes through [`plain`] first: an
 /// escape sequence in its text would otherwise be the terminal's to act on (a title, a fake prompt, the clipboard).
-struct Readable;
+pub(crate) struct Readable;
 
 impl EventSink for Readable {
     fn emit(&mut self, event: Event) {
@@ -679,6 +683,7 @@ mod tests {
             event: Box::new(Event::Usage {
                 turn: 1,
                 input_tokens: 1,
+                cached_input_tokens: 0,
                 output_tokens: 2,
             }),
         };

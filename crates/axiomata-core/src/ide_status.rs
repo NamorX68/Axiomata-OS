@@ -382,7 +382,8 @@ pub fn waiting_agents(
             continue;
         };
         entry.ask = match agent.harness {
-            Harness::ClaudeCode => {
+            // Glut's pane stores its asks where Claude Code's hook does (`docs/plans/glut-cards.md`, C5).
+            Harness::ClaudeCode | Harness::Glut => {
                 permission_ask::open_ask(&conn, agent.id)?.map(|ask| WaitingAsk {
                     id: ask.id.to_string(),
                     source: AskSource::Claude,
@@ -393,7 +394,6 @@ pub fn waiting_agents(
             Harness::Opencode => service_session(agent)
                 .and_then(tracked_permission)
                 .map(|request| opencode_ask(&request)),
-            Harness::Mini => None,
         };
     }
     Ok(waiting)
@@ -485,7 +485,7 @@ pub async fn answer_permission(
     }
     .ok_or_else(|| refused(format!("no agent {agent_id}")))?;
     match agent.harness {
-        Harness::ClaudeCode => {
+        Harness::ClaudeCode | Harness::Glut => {
             let id = request_id
                 .parse::<i64>()
                 .map_err(|_| refused(format!("malformed request id {request_id:?}")))?;
@@ -519,9 +519,6 @@ pub async fn answer_permission(
                 .await
                 .map_err(|err| refused(format!("the Opencode service refused the answer: {err}")))
         }
-        Harness::Mini => Err(refused(
-            "this harness asks nothing the app can answer".into(),
-        )),
     }
 }
 

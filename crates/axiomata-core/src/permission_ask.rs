@@ -236,6 +236,42 @@ pub fn decide(
     Ok(())
 }
 
+/// Settles request `id` with the answer the owner typed in the session's pane (a Glut session, which asks in the app
+/// and in its pane at once, `docs/plans/glut-cards.md` C5). Returns `false` when the request was settled already —
+/// the app's answer came first, and that one stands.
+///
+/// # Errors
+///
+/// A database error.
+pub fn answer_in_pane(
+    db: &Connection,
+    agent_id: i64,
+    id: i64,
+    decision: Decision,
+) -> Result<bool, AxiomataError> {
+    let changed = db.execute(
+        "UPDATE permission_asks SET decision = ?2, decided_by = 'human:pane', decided_at = ?3 \
+         WHERE id = ?1 AND agent_id = ?4 AND decision IS NULL",
+        params![id, decision.as_str(), Utc::now().to_rfc3339(), agent_id],
+    )?;
+    Ok(changed > 0)
+}
+
+/// Withdraws request `id` of `agent_id` when nobody answered it and nobody will: the pane's input ended, or the turn
+/// was called off while it asked. The app stops offering it.
+///
+/// # Errors
+///
+/// A database error.
+pub fn withdraw(db: &Connection, agent_id: i64, id: i64) -> Result<(), AxiomataError> {
+    db.execute(
+        "UPDATE permission_asks SET decision = 'terminal', decided_by = 'system:withdrawn', decided_at = ?3 \
+         WHERE id = ?1 AND agent_id = ?2 AND decision IS NULL",
+        params![id, agent_id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
 /// Waits for the decision on request `id`, reading it through `read` every `poll` until `wait` has passed. On the way
 /// out without a decision the request is closed as `terminal`, so the app stops offering it while the pane's own
 /// prompt takes over.
@@ -435,5 +471,25 @@ mod tests {
             Decision::parse("always"),
             Err(AxiomataError::PermissionAsk { .. })
         ));
+    }
+
+    #[test]
+    fn the_pane_settles_only_its_own_open_request_and_a_withdrawn_one_stays_closed() {
+        let db = db();
+        let id = ask(&db, 4, "bash", "wc -l README.md").unwrap();
+        assert!(
+            !answer_in_pane(&db, 5, id, Decision::Allow).unwrap(),
+            "another session's request"
+        );
+        assert!(answer_in_pane(&db, 4, id, Decision::Allow).unwrap());
+        assert_eq!(decision_of(&db, id).unwrap(), Some(Decision::Allow));
+        assert!(
+            !answer_in_pane(&db, 4, id, Decision::Deny).unwrap(),
+            "settled once"
+        );
+        let second = ask(&db, 4, "bash", "od -c README.md").unwrap();
+        withdraw(&db, 4, second).unwrap();
+        assert_eq!(open_ask(&db, 4).unwrap(), None);
+        assert!(!answer_in_pane(&db, 4, second, Decision::Allow).unwrap());
     }
 }

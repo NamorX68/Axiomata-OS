@@ -1,5 +1,5 @@
 //! Starting an IDE agent: provisioning, the entry to the agent MCP server (`agent_entry`) and, for Opencode, its
-//! session.
+//! session; for Glut, the run's spec in the channel (`glut_card`).
 //!
 //! `axiomata_ide::provision::prepare` gives an agent its worktree, port and
 //! status channel — local, synchronous work. An Opencode agent additionally
@@ -85,6 +85,9 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                 "this session runs a command of its own, which Axiomata does not touch",
             ),
         });
+    }
+    if ready.agent.harness != Harness::Glut {
+        crate::glut_card::forget(&roots, ready.agent.id);
     }
     match ready.agent.harness {
         Harness::ClaudeCode => {
@@ -221,10 +224,33 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             }
             Ok(Started { ready, mcp })
         }
-        Harness::Mini => Ok(Started {
-            ready,
-            mcp: AgentEntry::not_applicable("the mini harness does not exist yet"),
-        }),
+        Harness::Glut => {
+            // Everything the run is told goes into the channel (`glut_card`); the pane types only the CLI's command,
+            // which finds it there by the session's id.
+            let (spec, mcp) = agent_entry::wire_glut(
+                &roots,
+                &ready.agent,
+                &ready.cwd,
+                role.as_ref(),
+                launch.as_ref(),
+            );
+            if launch.is_some() {
+                require_entry(&mcp)?;
+            }
+            let (Some(_), Some(cli)) = (spec, agent_entry::cli_path()) else {
+                return Err(crate::roster::refusal(
+                    "Glut session",
+                    mcp.note
+                        .clone()
+                        .unwrap_or_else(|| "its start could not be written".into()),
+                ));
+            };
+            ready.launch_command = format!(
+                "{} harness card",
+                agent_entry::shell_quote(&cli.display().to_string())
+            );
+            Ok(Started { ready, mcp })
+        }
     }
 }
 

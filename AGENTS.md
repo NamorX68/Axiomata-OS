@@ -36,7 +36,9 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   savings counted in `~/.axh/lean.jsonl`, `axh gain`), and "Glut effort" (2026-10-21, `docs/plans/glut-effort.md`:
   the reasoning level, Glut's own sources first; levels per model in the catalog, the chat bar's effort switch), and
   "Glut robust" (2026-10-21, `docs/plans/glut-robust.md`: #112 a refused call warns once and ends the run the third
-  time, #111 the run compacts its older steps itself before the window is full), and slash commands in the chat
+  time, #111 the run compacts its older steps itself before the window is full), and "Glut on cards" (2026-10-21,
+  `docs/plans/glut-cards.md`: engine kind `glut` — the former `mini` —, `axiomata-cli harness card` in the pane, asks
+  in the pane and the app at once, a budget per run, resume of a lost turn), and slash commands in the chat
   (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
   (`docs/plans/durable.md`: a journal per run, resume on click). LocalBrain was built, measured and not taken over
   (`docs/plans/localbrain.md`, "Outcome").
@@ -281,6 +283,13 @@ from the code itself:
   until rquickjs bundles a fixed engine; `cargo audit` cannot see GitHub advisories. A script's tool calls go through
   `run.rs` `perform` like direct ones — never call the toolbox from `codemode.rs`. Language servers asked after an
   edit (`diagnostics.rs` `SAFE_SERVERS`) must never run the project's code: an agent writes the files they read.
+- **A card on Glut is `axiomata-cli harness card` in its pane** (`docs/plans/glut-cards.md`): everything the run is
+  told is the spec `glut-card.json` in the session's channel (`glut_card`, written by `agent_entry::wire_glut`), found
+  by `AXIOMATA_AGENT_ID` and checked against the database (folder, team-server file) — never put rights, a command or
+  the secret on the pane's command line. The CLI holds a lock per session, asks through `permission_asks` *and* the
+  pane (first answer wins, typed-ahead lines dropped), writes `glut-events.jsonl` (meter: `usage::GlutTally`; tiles:
+  `activity::glut_recent`) and passes what is left of the session's limits as the run's `Budget`. A start on another
+  harness forgets the spec (`glut_card::forget`).
 - **Glut ends what refusals keep repeating, and compacts itself** (Glut robust): `refusals.rs` counts per tool and
   target *once per call* (the network proxy judges every connection) — keep that when feeding it from a new place;
   `FinishReason::Refused` must still answer every call of the last reply. A compaction keeps the system prompt, the

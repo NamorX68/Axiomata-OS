@@ -42,7 +42,8 @@ of its own).
 - **D8 — retention**: a finished run deletes its journal (its result is in `runs` or the chat's session file); an
   interrupted one stays resumable for 7 days, then the sweep removes it — as the snapshots.
 
-- **D9 — found while building**: card sessions never run on Glut (they are Opencode and Claude Code panes), so there is
+- **D9 — found while building** (revisited 2026-10-21 by `docs/plans/glut-cards.md`, C8: card sessions run on Glut
+  now, and a lost turn of one resumes from a journal in its channel): card sessions never run on Glut (they are Opencode and Claude Code panes), so there is
   none to resume. A prompt routine's run is recorded from its start like a skill's, but only a skill's run resumes
   (it is rebuilt from its `SKILL.md`). `axh` keeps its own journals in `~/.axh/runs` and resumes only its own runs
   (`axh resume [run] [--list] [--discard]`, its flags kept in the journal); the app's are in `~/.axiomata/harness/runs`.

@@ -1,7 +1,7 @@
 //! What a session has used so far: tokens and steps, read out of what its harness leaves behind
 //! (`docs/plans/a2a.md`, A9 and A33).
 //!
-//! Nothing here enforces anything or knows a price: it only counts. Two sources, one per harness, both read
+//! Nothing here enforces anything or knows a price: it only counts. One source per harness, each read
 //! tolerantly — a field that is missing counts 0, a line that is not JSON is skipped — because both formats belong to
 //! somebody else and change without notice. A source that yields nothing reads as "nothing used", which is why the
 //! caller also limits **steps**: those come from the same files, but a tool call is the one thing every format has.
@@ -9,6 +9,7 @@
 //! * **Claude Code** writes a transcript (`~/.claude/projects/<folder>/<session id>.jsonl`), one line per content block
 //!   of a reply, and every line of one reply repeats that reply's `usage`. Counting lines would count a reply as many
 //!   times as it has blocks, so a reply is counted once by its message id ([`ClaudeTally`]).
+//! * **Glut** writes an event log into the session's channel, one event per line ([`GlutTally`]).
 //! * **Opencode** returns its messages over the API; an assistant message carries `tokens` and its tool calls as
 //!   content parts of the type `tool` ([`opencode_usage`]).
 //!
@@ -119,32 +120,15 @@ impl ClaudeTally {
     /// Whatever opening or reading the file says, and [`io::ErrorKind::InvalidInput`] for something that is not a
     /// plain file; a file that does not exist yet is the caller's to expect.
     pub fn advance(&mut self, path: &Path) -> io::Result<()> {
-        if !std::fs::symlink_metadata(path)?.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "a transcript is a plain file",
-            ));
-        }
-        let mut file = File::open(path)?;
-        let len = file.metadata()?.len();
-        if len < self.offset {
+        let appended = appended(path, self.offset)?;
+        if appended.shrank {
             *self = ClaudeTally {
                 floor: self.usage(),
                 ..ClaudeTally::default()
             };
         }
-        file.seek(SeekFrom::Start(self.offset))?;
-        let mut chunk = Vec::new();
-        file.take(MAX_READ_PER_LOOK).read_to_end(&mut chunk)?;
-        let complete = chunk
-            .iter()
-            .rposition(|byte| *byte == b'\n')
-            .map_or(0, |at| at + 1);
-        self.feed(&String::from_utf8_lossy(&chunk[..complete]));
-        self.offset += complete as u64;
-        if complete == 0 && chunk.len() as u64 >= MAX_LINE_BYTES {
-            self.offset += chunk.len() as u64;
-        }
+        self.feed(&appended.text);
+        self.offset = appended.offset;
         Ok(())
     }
 
@@ -185,6 +169,114 @@ impl ClaudeTally {
                     self.tools.insert(id.to_owned());
                 }
             }
+        }
+    }
+}
+
+/// What a file gained since `offset`: its complete new lines, and where the next reading starts.
+struct Appended {
+    text: String,
+    offset: u64,
+    /// The file is shorter than `offset`: it was replaced or cut, and `text` is read from its start.
+    shrank: bool,
+}
+
+/// Reads what was appended to the file at `path` since `offset`, at most [`MAX_READ_PER_LOOK`]. A file that shrank is
+/// read from the start again. A last line without its newline is left for the next call, the harness may be in the
+/// middle of writing it — unless it is longer than any line can be, then it is skipped. A link is not followed.
+fn appended(path: &Path, offset: u64) -> io::Result<Appended> {
+    if !std::fs::symlink_metadata(path)?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a transcript is a plain file",
+        ));
+    }
+    let mut file = File::open(path)?;
+    let len = file.metadata()?.len();
+    let shrank = len < offset;
+    let mut offset = if shrank { 0 } else { offset };
+    file.seek(SeekFrom::Start(offset))?;
+    let mut chunk = Vec::new();
+    file.take(MAX_READ_PER_LOOK).read_to_end(&mut chunk)?;
+    let complete = chunk
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |at| at + 1);
+    let text = String::from_utf8_lossy(&chunk[..complete]).into_owned();
+    offset += complete as u64;
+    if complete == 0 && chunk.len() as u64 >= MAX_LINE_BYTES {
+        offset += chunk.len() as u64;
+    }
+    Ok(Appended {
+        text,
+        offset,
+        shrank,
+    })
+}
+
+/// What a Glut session has used, counted from its event log (`glut-events.jsonl` in its channel,
+/// `docs/plans/glut-cards.md` C6): each `usage` event once — a subagent's too, they arrive wrapped as `sub` — less
+/// the tokens read from the prompt cache (A27), and each `tool_call` as a step. The log only grows, so a reading goes
+/// on from where the last one stopped.
+#[derive(Debug, Clone, Default)]
+pub struct GlutTally {
+    offset: u64,
+    usage: Usage,
+    /// What a reading before the log was cut had counted.
+    floor: Usage,
+}
+
+impl GlutTally {
+    /// Everything counted so far.
+    pub fn usage(&self) -> Usage {
+        self.usage.at_least(self.floor)
+    }
+
+    /// Reads what was appended to the log at `path` since the last call.
+    ///
+    /// # Errors
+    ///
+    /// As [`ClaudeTally::advance`].
+    pub fn advance(&mut self, path: &Path) -> io::Result<()> {
+        let appended = appended(path, self.offset)?;
+        if appended.shrank {
+            *self = GlutTally {
+                floor: self.usage(),
+                ..GlutTally::default()
+            };
+        }
+        self.feed(&appended.text);
+        self.offset = appended.offset;
+        Ok(())
+    }
+
+    /// Counts the lines of `text`.
+    pub fn feed(&mut self, text: &str) {
+        for line in text.lines() {
+            if let Ok(entry) = serde_json::from_str::<Value>(line) {
+                self.count(&entry);
+            }
+        }
+    }
+
+    fn count(&mut self, event: &Value) {
+        match event.get("event").and_then(Value::as_str) {
+            Some("usage") => {
+                let input = number(event.get("input_tokens"))
+                    .saturating_sub(number(event.get("cached_input_tokens")));
+                self.usage.input_tokens = self.usage.input_tokens.saturating_add(input);
+                self.usage.output_tokens = self
+                    .usage
+                    .output_tokens
+                    .saturating_add(number(event.get("output_tokens")));
+            }
+            Some("tool_call") => self.usage.steps = self.usage.steps.saturating_add(1),
+            Some("sub") => {
+                if let Some(inner) = event.get("inner") {
+                    self.count(inner);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -492,5 +584,57 @@ mod tests {
         };
         assert_eq!(a.plus(a).tokens(), 6);
         assert_eq!(a.plus(a).steps, 6);
+    }
+
+    #[test]
+    fn a_glut_log_counts_usage_once_without_cache_reads_and_subagents_too() {
+        let log = concat!(
+            r#"{"event":"usage","turn":1,"input_tokens":1000,"cached_input_tokens":600,"output_tokens":50}"#,
+            "\n",
+            r#"{"event":"tool_call","turn":1,"id":"a","name":"bash","arguments":"{}"}"#,
+            "\n",
+            r#"{"event":"sub","depth":1,"inner":{"event":"usage","turn":1,"input_tokens":100,"output_tokens":10}}"#,
+            "\n",
+            r#"{"event":"sub","depth":1,"inner":{"event":"tool_call","turn":1,"id":"b","name":"read_file","arguments":"{}"}}"#,
+            "\n",
+            "not json\n",
+        );
+        let mut tally = GlutTally::default();
+        tally.feed(log);
+        assert_eq!(
+            tally.usage(),
+            Usage {
+                input_tokens: 500,
+                output_tokens: 60,
+                steps: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn a_glut_log_is_read_on_from_where_it_stopped_and_a_cut_log_keeps_the_count() {
+        let dir = std::env::temp_dir().join(format!("axiomata-glut-tally-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("glut-events.jsonl");
+        let line = r#"{"event":"usage","turn":1,"input_tokens":10,"output_tokens":1}"#;
+        std::fs::write(&path, format!("{line}\n{line}")).unwrap();
+        let mut tally = GlutTally::default();
+        tally.advance(&path).unwrap();
+        assert_eq!(
+            tally.usage().input_tokens,
+            10,
+            "a line still being written waits"
+        );
+        std::fs::write(&path, format!("{line}\n{line}\n")).unwrap();
+        tally.advance(&path).unwrap();
+        assert_eq!(tally.usage().input_tokens, 20);
+        std::fs::write(&path, "").unwrap();
+        tally.advance(&path).unwrap();
+        assert_eq!(
+            tally.usage().input_tokens,
+            20,
+            "a cut log does not zero what was used"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

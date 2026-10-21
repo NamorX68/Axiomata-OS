@@ -120,8 +120,7 @@ pub struct ChannelRoots {
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
     /// Started, but the harness has not reported anything yet — or it has no
-    /// channel at all (an own command that did not hook itself up, the mini
-    /// harness). The frontend decides how long "starting" stays believable.
+    /// channel at all (an own command that did not hook itself up). The frontend decides how long "starting" stays believable.
     Starting,
     /// Finished its turn; ready for the next prompt. This is when a message
     /// may be delivered to it (M7.5 CP13).
@@ -303,7 +302,8 @@ impl Channel {
     /// start Claude Code, and the env this returns points at it. Each file is
     /// only rewritten when its content changed. Opencode needs nothing here —
     /// its state comes from the Opencode service (OC3) — but reports its
-    /// status all the same, so it counts as connected.
+    /// status all the same, so it counts as connected. Glut needs no hookup
+    /// either: `axiomata-cli harness card` writes the channel's state itself.
     pub fn install(&self, harness: Harness) -> Result<Hookup> {
         let settings = self.dir.join(CLAUDE_SETTINGS_FILE);
         ensure_plain_dir(&self.dir)?;
@@ -322,14 +322,12 @@ impl Channel {
                 shell_quote(&settings.display().to_string()),
                 shell_quote(&planning.display().to_string()),
             )),
-            Harness::Opencode | Harness::Mini => None,
+            Harness::Opencode | Harness::Glut => None,
         };
         Ok(Hookup {
             args,
             env,
-            // The mini harness does not exist yet (M7.4) and brings its own
-            // mapping when it does (E18).
-            connected: harness != Harness::Mini,
+            connected: true,
         })
     }
 
@@ -395,9 +393,19 @@ impl Channel {
             // Opencode's plan agent answer comes from the service (OC3).
             plan_document: match harness {
                 Harness::ClaudeCode => self.read_plan_document(started_at),
-                Harness::Opencode | Harness::Mini => None,
+                Harness::Opencode | Harness::Glut => None,
             },
         }
+    }
+
+    /// Writes the session's state as the hooks of Claude Code do (`"<state> <unix seconds>"`), for a harness that
+    /// reports from its own process — Glut's `axiomata-cli harness card`.
+    pub fn set_state(&self, state: AgentState) -> Result<()> {
+        ensure_plain_dir(&self.dir)?;
+        write_atomic(
+            &self.dir.join(STATE_FILE),
+            &format!("{} {}\n", state.as_str(), unix_now()),
+        )
     }
 
     /// Marks the session as having used up a limit: from now on the `PreToolUse` hook of Claude Code refuses every tool
@@ -474,7 +482,7 @@ impl Channel {
     ) -> Option<PlanSnapshot> {
         let (steps, updated_at) = match harness {
             Harness::ClaudeCode => read_claude_tasks(&self.claude_list_dir)?,
-            Harness::Opencode | Harness::Mini => return None,
+            Harness::Opencode | Harness::Glut => return None,
         };
         if steps.is_empty() {
             return None;
@@ -1162,7 +1170,7 @@ mod tests {
         );
         assert!(!channel.dir().join(LEGACY_OPENCODE_DIR).exists());
 
-        assert!(!channel.install(Harness::Mini).unwrap().connected);
+        assert!(channel.install(Harness::Glut).unwrap().connected);
     }
 
     /// A Claude Code task file, as the task tools write it.
@@ -1310,14 +1318,14 @@ mod tests {
     }
 
     #[test]
-    fn install_for_the_mini_harness_still_writes_both_hookups_but_returns_no_args() {
+    fn install_for_glut_still_writes_both_hookups_but_returns_no_args() {
         let channel = Channel::for_agent(&locations(), 14);
-        let hookup = channel.install(Harness::Mini).unwrap();
+        let hookup = channel.install(Harness::Glut).unwrap();
         assert!(
             hookup.args.is_none(),
-            "the mini harness has no CLI to extend yet"
+            "Glut's start builds its own command line"
         );
-        assert!(!hookup.connected);
+        assert!(hookup.connected);
         // Claude Code's hookup is always written (E13), whatever the
         // profile's own harness is — an own command could still start it.
         assert!(channel.dir().join(CLAUDE_SETTINGS_FILE).is_file());

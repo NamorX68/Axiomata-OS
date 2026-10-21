@@ -458,7 +458,7 @@ let ideAgents: IdeAgent[] = [
 const HARNESS_DEFAULTS: Record<Harness, string> = {
   opencode: "opencode",
   claude_code: "claude",
-  mini: "axiomata-miniagent",
+  glut: "axiomata-cli",
 };
 
 /** Builds `effective_env` the way `Agent::resolve_env` does in Rust. */
@@ -1889,8 +1889,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         shared_folder: true,
         launch_command: `${agent.effective_command}${hookup}`,
         launch_env: `${agent.effective_env}\nAXIOMATA_EVENTS=${events}\nAXIOMATA_CLAUDE_SETTINGS=${events}/claude-settings.json`,
-        status_connected: agent.harness !== "mini",
-        mcp: generated && agent.harness !== "mini"
+        status_connected: true,
+        mcp: generated
           ? {
               status: "registered",
               server: "axiomata",

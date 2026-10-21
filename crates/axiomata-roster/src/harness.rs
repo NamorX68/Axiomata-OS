@@ -13,9 +13,11 @@ pub enum Harness {
     ClaudeCode,
     /// The Opencode CLI — the same harness skills and routines already run on.
     Opencode,
-    /// Axiomata's own agent loop, `axiomata-miniagent` (M7.4). A profile can name it before it exists; starting
-    /// one then fails, which is honest.
-    Mini,
+    /// Axiomata's own harness, Glut (`axiomata-harness`, `docs/plans/glut-cards.md`): started through the app's CLI
+    /// (`axiomata-cli harness card`). Stored before as `mini`, the placeholder it grew out of (M7.4), which still reads
+    /// as this.
+    #[serde(alias = "mini")]
+    Glut,
 }
 
 impl Harness {
@@ -24,7 +26,7 @@ impl Harness {
         match self {
             Harness::ClaudeCode => "claude_code",
             Harness::Opencode => "opencode",
-            Harness::Mini => "mini",
+            Harness::Glut => "glut",
         }
     }
 
@@ -33,7 +35,7 @@ impl Harness {
         match raw {
             "claude_code" => Some(Harness::ClaudeCode),
             "opencode" => Some(Harness::Opencode),
-            "mini" => Some(Harness::Mini),
+            "glut" | "mini" => Some(Harness::Glut),
             _ => None,
         }
     }
@@ -46,9 +48,8 @@ impl Harness {
         match self {
             Harness::ClaudeCode => "claude",
             Harness::Opencode => "opencode",
-            // No binary yet (M7.4). Naming the crate rather than an empty string makes the failure message say
-            // what is missing.
-            Harness::Mini => "axiomata-miniagent",
+            // The app's CLI; a start replaces it with the CLI's full path and the session's own arguments.
+            Harness::Glut => "axiomata-cli",
         }
     }
 }
@@ -59,9 +60,15 @@ mod tests {
 
     #[test]
     fn the_stored_spelling_round_trips_and_unknown_text_is_refused() {
-        for harness in [Harness::ClaudeCode, Harness::Opencode, Harness::Mini] {
+        for harness in [Harness::ClaudeCode, Harness::Opencode, Harness::Glut] {
             assert_eq!(Harness::parse(harness.as_str()), Some(harness));
         }
+        // The placeholder Glut grew out of reads as Glut, stored or in a config file.
+        assert_eq!(Harness::parse("mini"), Some(Harness::Glut));
+        assert_eq!(
+            serde_json::from_str::<Harness>("\"mini\"").unwrap(),
+            Harness::Glut
+        );
         assert_eq!(Harness::parse("Claude"), None);
         assert_eq!(Harness::parse(""), None);
     }

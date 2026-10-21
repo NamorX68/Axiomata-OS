@@ -33,8 +33,9 @@ ollama-rs.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 ignore.workspace = true
 cron.workspace = true
-# Kills the process group of a `claude -p` run that outlives its limit, MCP servers and shell children included.
-rustix = { workspace = true, features = ["process"] }
+# Kills the process group of a `claude -p` run that outlives its limit, MCP servers and shell children included;
+# `fs` for reading a Glut session's spec without following a link (`glut_card`).
+rustix = { workspace = true, features = ["process", "fs"] }
 
 [dev-dependencies]
 # Only the workspace tests decode images now; encoding moved to axiomata-files.

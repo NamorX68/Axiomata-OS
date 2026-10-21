@@ -1,7 +1,7 @@
 //! What the studio's sessions are doing right now, for the Flow's team pane (`docs/plans/a2a.md`, CP-A9).
 //!
-//! [`read`] looks at each session's own record — the newest Claude Code transcript of the session, or the newest page of
-//! its Opencode messages — and returns the last few steps ([`axiomata_ide::activity`]). It writes nothing and holds no
+//! [`read`] looks at each session's own record — the newest Claude Code transcript of the session, the newest page of
+//! its Opencode messages, or Glut's event log in its channel — and returns the last few steps ([`axiomata_ide::activity`]). It writes nothing and holds no
 //! lock while it reads: the sessions are looked up first, then the files and the service are asked.
 //!
 //! A session that cannot be read (no transcript yet, the service is down) is listed with `readable: false`, not left out:
@@ -112,7 +112,19 @@ pub async fn read(core: &AxiomataCore, agent_ids: &[i64]) -> Vec<SessionActivity
                     }
                 }
             },
-            Harness::Mini => None,
+            Harness::Glut => {
+                let path = Channel::for_agent(&roots, agent.id)
+                    .dir()
+                    .join(crate::glut_card::EVENTS_FILE);
+                tokio::task::spawn_blocking(move || {
+                    activity::tail_of(&path)
+                        .ok()
+                        .map(|text| activity::glut_recent(&text))
+                })
+                .await
+                .ok()
+                .flatten()
+            }
         };
         out.push(SessionActivity {
             agent_id: agent.id,

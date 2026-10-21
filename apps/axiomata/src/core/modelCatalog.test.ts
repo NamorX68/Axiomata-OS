@@ -31,7 +31,11 @@ describe("model catalog options", () => {
     expect(providerOptions(null, "ollama")).toEqual([]);
   });
 
-  it("gives Claude Code engines bare Anthropic ids and every other harness provider/model", () => {
+  it("gives Glut engines the bare ids of the providers it speaks to", () => {
+    expect(engineOptions(catalog, "glut").map((o) => o.value)).toEqual(["z-ai/glm-5.3-flash", "a/free", "gemma4:12b-mlx"]);
+  });
+
+  it("gives Claude Code engines bare Anthropic ids and Opencode provider/model", () => {
     expect(engineOptions(catalog, "claude_code").map((o) => o.value)).toEqual(["claude-haiku-5-5"]);
     expect(engineOptions(catalog, "opencode").map((o) => o.value)).toEqual([
       "anthropic/claude-haiku-5-5",

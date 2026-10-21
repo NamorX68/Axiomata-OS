@@ -63,9 +63,6 @@ const LABELS: Record<AgentState, { label: string; title: string }> = {
  * the same as "starting": the pane is up, nothing has been heard yet.
  */
 export function describeStatus(status: AgentStatus | undefined, agent: IdeAgent, now: number): StatusView {
-  if (agent.harness === "mini") {
-    return { tone: "none", label: "no status", title: "The mini harness reports its status from M7.4 on" };
-  }
   const state = status?.state ?? "starting";
   if (state === "starting" && agent.command.trim() && status?.started_at) {
     const silentFor = now - Date.parse(status.started_at);

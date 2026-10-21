@@ -152,6 +152,47 @@ pub fn claude_recent(text: &str) -> Vec<Activity> {
     keep_last(steps)
 }
 
+/// The last steps in a Glut session's event log (`glut-events.jsonl` in its channel, one event per line with its time
+/// in `at`), oldest first. A subagent's events and the streamed pieces of text are left out: the tile follows the
+/// session itself.
+pub fn glut_recent(text: &str) -> Vec<Activity> {
+    let mut steps = Vec::new();
+    for line in text.lines() {
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let at = entry.get("at").and_then(Value::as_str).map(str::to_owned);
+        match entry.get("event").and_then(Value::as_str) {
+            Some("tool_call") => {
+                // Glut keeps a call's arguments as the model wrote them: a JSON text.
+                let input = entry
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+                steps.push(Activity {
+                    kind: ActivityKind::Tool,
+                    name: tool_name(entry.get("name").and_then(Value::as_str).unwrap_or("tool")),
+                    detail: target_of(input.as_ref()),
+                    at,
+                });
+            }
+            Some("assistant_text") => {
+                let said = one_line(entry.get("text").and_then(Value::as_str).unwrap_or(""));
+                if !said.is_empty() {
+                    steps.push(Activity {
+                        kind: ActivityKind::Say,
+                        name: String::new(),
+                        detail: said,
+                        at,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    keep_last(steps)
+}
+
 /// The last steps in an Opencode session's messages, **newest message first** as the service lists them; the result is
 /// oldest first. A tool part names its tool as `name` or `tool` and keeps its input at `input` or `state.input`, depending
 /// on the service's version.
@@ -378,5 +419,30 @@ mod tests {
             assert!(tail_of(&link).is_err());
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_glut_log_gives_the_calls_and_the_words_with_their_times() {
+        let log = concat!(
+            r#"{"at":"2026-10-21T13:00:00Z","event":"started","model":"m","cwd":"/w","tools":[]}"#,
+            "\n",
+            r#"{"at":"2026-10-21T13:00:01Z","event":"assistant_text","turn":1,"text":"I'll read the card.\nMore."}"#,
+            "\n",
+            r#"{"at":"2026-10-21T13:00:02Z","event":"tool_call","turn":1,"id":"c1","name":"mcp__axiomata__get_card","arguments":"{}"}"#,
+            "\n",
+            r#"{"at":"2026-10-21T13:00:03Z","event":"tool_call","turn":2,"id":"c2","name":"bash","arguments":"{\"command\":\"git status\"}"}"#,
+            "\n",
+            r#"{"at":"2026-10-21T13:00:04Z","event":"sub","depth":1,"event_inner":{}}"#,
+            "\n",
+            "{cut in half",
+        );
+        let steps = glut_recent(log);
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0].kind, ActivityKind::Say);
+        assert_eq!(steps[0].detail, "I'll read the card.");
+        assert_eq!(steps[1].name, "get_card");
+        assert_eq!(steps[2].name, "bash");
+        assert_eq!(steps[2].detail, "git status");
+        assert_eq!(steps[2].at.as_deref(), Some("2026-10-21T13:00:03Z"));
     }
 }

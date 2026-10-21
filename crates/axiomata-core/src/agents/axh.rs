@@ -1056,6 +1056,10 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
             Some(format!("the run ended at its turn limit ({turns} turns)")),
         ),
         FinishReason::Cancelled => (1, Some("the run was cancelled".to_owned())),
+        FinishReason::Budget => (
+            1,
+            Some("Glut stopped: the run's budget is spent".to_owned()),
+        ),
         FinishReason::Failed => (1, Some("the model API failed".to_owned())),
         // The `error` event before names the call and the reason; this says what happened to the run.
         FinishReason::Refused => (
@@ -1915,6 +1919,7 @@ mod tests {
         notes.emit(Event::Usage {
             turn: 1,
             input_tokens: 5,
+            cached_input_tokens: 0,
             output_tokens: 2,
         });
         let joined = notes.join(Some("the model API failed"));

@@ -4,6 +4,7 @@
 //! action through the file queue.
 
 mod files_cmd;
+mod harness_card;
 mod harness_cmd;
 mod inbox_cmd;
 mod models_cmd;
@@ -287,7 +288,7 @@ enum EngineAction {
         /// What the UI shows, e.g. "Claude Code · Opus".
         #[arg(long)]
         label: String,
-        /// claude_code | opencode | mini.
+        /// claude_code | opencode | glut.
         #[arg(long, default_value = "opencode")]
         harness: String,
         /// Command line to run. Empty uses the harness's own default.
@@ -353,7 +354,7 @@ enum AgentAction {
     New {
         project: i64,
         name: String,
-        /// claude_code | opencode | mini.
+        /// claude_code | opencode | glut.
         #[arg(long, default_value = "opencode")]
         harness: String,
         /// Command line to run. Empty uses the harness's own default.

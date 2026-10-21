@@ -1228,7 +1228,7 @@ where the pane lives, nothing sets it on the canvas, and M7.2 puts the agent's w
 the same place. Full plan in [`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
 
 **M7.2 has begun.** CP4 adds *agent profiles*: `ide_agents` (migration 10, the crate's frozen
-`SCHEMA_SQL_V2`) holds a name, a harness (`claude_code` | `opencode` | `mini`), a command
+`SCHEMA_SQL_V2`) holds a name, a harness (`claude_code` | `opencode` | `mini`, since 2026-10-21 `glut`), a command
 line, a model and an env block, with `axiomata-cli ide agents …` and a menu in the IDE header
 to manage them. `panes/AgentPane.svelte` runs one: the harness in a terminal, a status line,
 a Restart button that remounts the terminal, and the side tab bar the milestone exists to
@@ -1508,6 +1508,14 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   once) — the older steps become a summary by the run's own model, the replaced part stays in the result store. Live
   on DeepSeek V4.1 Flash: a refused fetch run stopped after 4 steps (was 30+); an 8-file run in a 24k window compacted
   seven times and still named all eight codewords. §5 "Glut 2".
+- **Glut on cards built** (2026-10-21, `docs/plans/glut-cards.md`, D9 of `durable.md` revisited): the engine kind
+  `glut` (the former placeholder `mini`) works, reviews and plans cards like Claude Code and Opencode — the studio
+  writes the run's spec and the team server into the channel, the pane runs `axiomata-cli harness card`, asks come in
+  the pane and the app at once, the meter and the Flow tiles read Glut's event log, the session's remaining limits
+  become the run's budget (new in Glut: `RunConfig.budget`, `FinishReason::Budget`, `axh --max-tokens/--max-usd`,
+  `prices` in `~/.axh/settings.json`), the conversation goes on across turns and a lost turn resumes from its
+  journal. Live on DeepSeek V4.1 Flash with a scratch home: four cards worked and reported, an ask answered in the app
+  and one in the pane, a killed turn resumed.
 - **Glut effort built** (2026-10-21, `docs/plans/glut-effort.md`): the reasoning level from a command's or skill's
   `effort:`, `axh --effort`, the chat's `/effort`, `[agents.glut]`, `~/.axh/settings.json`; the model's thinking goes
   back while it works on the same prompt. §5 "Glut 2".

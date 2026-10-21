@@ -4,6 +4,7 @@
 //! * **Claude Code** gets `--mcp-config <channel>/mcp.json`: an app-owned file in the session's channel directory, mode
 //!   `0600`, rewritten at every start (A30). Nothing is written into the worktree — a file there would end up in the
 //!   take-over — and nothing into Claude's own settings.
+//! * **Glut** gets the same file, named in the run's spec beside it (`crate::glut_card`, `docs/plans/glut-cards.md`).
 //! * **Opencode** gets the server registered at its worktree on the shared service
 //!   (`PUT /api/experimental/mcp/axiomata`, the directory as the location). Measured against 2.0.22 (the A31 spike):
 //!   an `opencode.json` in the worktree is read once per location and cached, so a restart could not hand the server
@@ -23,6 +24,7 @@ use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use axiomata_harness::permissions::Mode;
 use axiomata_ide::lifecycle::{Channel, ChannelRoots};
 use axiomata_ide::model::Agent;
 use axiomata_ide::session_token;
@@ -689,6 +691,153 @@ fn wire_claude_with(
     }
 }
 
+/// What a card session on Glut may never do, whatever the role says: [`CLAUDE_CARD_DENIED`] in Glut's spelling. Glut's
+/// file tools stay in the worktree and protect its configuration files themselves, and its sandbox hides `~/.axh` and
+/// `~/.axiomata` from every command, so the deny list only has to carry what a command could still do in the worktree.
+const GLUT_CARD_DENIED: [&str; 9] = [
+    "Bash(git push)",
+    "Bash(git push *)",
+    "Bash(git * push)",
+    "Bash(git * push *)",
+    "Bash(git * --output*)",
+    "Bash(git * --no-index*)",
+    "Bash(git * send-pack*)",
+    "Edit(.claude/**)",
+    "Edit(.mcp.json)",
+];
+
+/// What a worker in the owner's auto mode is refused on Glut on top of [`GLUT_CARD_DENIED`]: the shell forms of
+/// [`CLAUDE_AUTO_DENIED`], all of them — the sandbox hides `~/.axiomata` and `~/.axh` too, but a machine without it,
+/// or an owner who turned it off, must not leave the auto mode with fewer locks than Claude Code's.
+const GLUT_AUTO_DENIED: [&str; 11] = [
+    "Bash(*.claude/*)",
+    "Bash(*.mcp.json*)",
+    "Bash(*opencode.json*)",
+    "Bash(*.git/hooks*)",
+    "Bash(*core.hooksPath*)",
+    "Bash(*axiomata-cli*)",
+    "Bash(*sqlite3*)",
+    "Bash(*.axiomata/*)",
+    "Bash(*.axh/*)",
+    "Bash(*.opencode/*)",
+    "Bash(*git push*)",
+];
+
+/// The rights of a Glut session (`docs/plans/glut-cards.md`, C4) as Glut's mode and rules — the same decisions
+/// [`claude_card_options`] makes for Claude Code: a worker's edits in its worktree go without asking (the owner's auto
+/// mode lets every command through but the denied ones), a reviewer or planner edits nothing and is asked about every
+/// command its role does not allow. The team tools of the role are allowed one by one.
+fn glut_card_rights(
+    role: Option<&Role>,
+    launch: Option<&Launch>,
+) -> (Mode, Vec<String>, Vec<String>) {
+    let mut allow: Vec<String> = role_tools(role)
+        .into_iter()
+        .map(|tool| format!("mcp__{SERVER_NAME}__{tool}"))
+        .collect();
+    if let Some(role) = role {
+        allow.extend(
+            role.permissions
+                .iter()
+                .filter(|rule| grantable(rule))
+                .map(|rule| rule.trim().to_owned()),
+        );
+    }
+    let mut deny: Vec<String> = GLUT_CARD_DENIED
+        .iter()
+        .map(|rule| (*rule).to_owned())
+        .collect();
+    let read_only = launch.is_some_and(Launch::read_only);
+    let auto = launch.is_some_and(Launch::auto_rights);
+    if auto {
+        deny.extend(GLUT_AUTO_DENIED.iter().map(|rule| (*rule).to_owned()));
+    }
+    if read_only {
+        deny.push("Edit".to_owned());
+    }
+    // A session the owner started for nothing in particular asks about every change, as Claude Code does there.
+    let mode = match launch {
+        Some(_) if auto => Mode::Auto,
+        Some(_) if !read_only => Mode::AcceptEdits,
+        _ => Mode::Default,
+    };
+    (mode, allow, deny)
+}
+
+/// Wires the server into a Glut session (`docs/plans/glut-cards.md`, C3): issues this start's secret, writes the
+/// server's configuration (Claude Code's shape, which Glut's `--mcp-config` reads) and the run's whole spec into the
+/// channel, and returns the spec's path plus what the owner is shown. The pane's command line names neither: the CLI
+/// finds the spec by the session's id.
+pub fn wire_glut(
+    roots: &ChannelRoots,
+    agent: &Agent,
+    cwd: &Path,
+    role: Option<&Role>,
+    launch: Option<&Launch>,
+) -> (Option<PathBuf>, AgentEntry) {
+    wire_glut_with(cli_path(), roots, agent, cwd, role, launch)
+}
+
+/// [`wire_glut`] with the CLI's path given, for the tests.
+fn wire_glut_with(
+    cli: Option<PathBuf>,
+    roots: &ChannelRoots,
+    agent: &Agent,
+    cwd: &Path,
+    role: Option<&Role>,
+    launch: Option<&Launch>,
+) -> (Option<PathBuf>, AgentEntry) {
+    let Some(cli) = cli else {
+        return (None, AgentEntry::unavailable(no_cli_note()));
+    };
+    let channel = Channel::for_agent(roots, agent.id);
+    let (mode, allow, deny) = glut_card_rights(role, launch);
+    let wired = (|| -> Result<PathBuf, crate::AxiomataError> {
+        let secret = session_token::issue(roots, agent.id)?;
+        let server = Server::new(
+            cli.clone(),
+            agent.id,
+            &secret,
+            launch.and_then(Launch::card_id),
+            launch.and_then(Launch::plan_id),
+            forwarded_from_process,
+        );
+        channel.write_private(CLAUDE_CONFIG_FILE, &server.claude_config())?;
+        let spec = crate::glut_card::CardSpec {
+            agent_id: agent.id,
+            cwd: cwd.to_path_buf(),
+            model: agent.model.clone().filter(|model| !model.trim().is_empty()),
+            mode: mode.name().to_owned(),
+            allow,
+            deny,
+            mcp_config: channel.dir().join(CLAUDE_CONFIG_FILE),
+            instructions: instructions(agent, role),
+            prompt: launch.map(|launch| start_prompt(agent, launch)),
+            // A reviewer's checkout is the worker's work: a guide the worker wrote must not become the judge's
+            // instructions.
+            project_guide: !launch.is_some_and(
+                |launch| matches!(launch, Launch::Card(card) if card.review.is_some()),
+            ),
+        };
+        crate::glut_card::write(roots, &spec)
+    })();
+    match wired {
+        Ok(path) => (
+            Some(path),
+            AgentEntry::new(
+                EntryStatus::Registered,
+                Some(&cli),
+                &caps_of(agent, role),
+                None,
+            ),
+        ),
+        Err(err) => (
+            None,
+            AgentEntry::unavailable(format!("the session's start could not be written: {err}")),
+        ),
+    }
+}
+
 /// Wires the server into an Opencode session at its worktree (`directory`) on `instance`, the app's service the
 /// session runs on.
 pub async fn wire_opencode(
@@ -962,6 +1111,88 @@ mod tests {
             "{prompt}"
         );
         assert!(prompt.contains("read_inbox"), "{prompt}");
+    }
+
+    #[test]
+    fn a_glut_start_writes_the_team_server_and_the_whole_spec_into_the_channel() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (agent, roots) = agent_in(&dir, "Dev", "allrounder");
+        let role = axiomata_roster::default_role();
+        let launch = Launch::Card(CardLaunch::work(42));
+        let worktree = dir.join("worktree");
+        let (spec_path, entry) = wire_glut_with(
+            Some(cli.clone()),
+            &roots,
+            &agent,
+            &worktree,
+            Some(&role),
+            Some(&launch),
+        );
+        assert_eq!(entry.status, EntryStatus::Registered);
+        let spec_path = spec_path.unwrap();
+        assert_eq!(
+            fs::metadata(&spec_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let spec = crate::glut_card::read(&roots, agent.id).unwrap();
+        assert_eq!(spec.cwd, worktree);
+        assert_eq!(spec.mode().unwrap(), Mode::AcceptEdits);
+        assert!(
+            spec.allow
+                .contains(&"mcp__axiomata__report_done".to_owned())
+        );
+        assert!(spec.deny.contains(&"Bash(git push *)".to_owned()));
+        assert!(spec.prompt.as_deref().unwrap().contains("#42"));
+        assert!(spec.instructions.contains("read_inbox"));
+        // The secret is in the server's own configuration, never in the spec the run reads.
+        let config: Value =
+            serde_json::from_str(&fs::read_to_string(&spec.mcp_config).unwrap()).unwrap();
+        let env = &config["mcpServers"][SERVER_NAME]["env"];
+        let secret = env["AXIOMATA_AGENT_TOKEN"].as_str().unwrap().to_owned();
+        assert!(session_token::verify(&roots, agent.id, &secret));
+        assert_eq!(env["AXIOMATA_CARD_ID"], "42");
+        assert!(!fs::read_to_string(&spec_path).unwrap().contains(&secret));
+        // The team server's file is one Glut reads as it is.
+        let servers = axiomata_harness::mcp::config::named(&spec.mcp_config).unwrap();
+        assert_eq!(servers.len(), 1);
+    }
+
+    #[test]
+    fn glut_rights_follow_the_same_decisions_as_claude_codes() {
+        let worker = Launch::Card(CardLaunch::work(1));
+        let auto = Launch::Card(CardLaunch::work(1).with_auto_rights(true));
+        let review = Launch::Card(CardLaunch::review(1, "Dev", "main"));
+        let planner = Launch::Plan(PlanLaunch {
+            plan_id: 3,
+            interview: false,
+        });
+        let role = axiomata_roster::default_role();
+        let (mode, _, deny) = glut_card_rights(Some(&role), Some(&worker));
+        assert_eq!(mode, Mode::AcceptEdits);
+        assert!(
+            !deny.contains(&"Edit".to_owned()),
+            "a worker edits its worktree"
+        );
+        let (mode, _, deny) = glut_card_rights(Some(&role), Some(&auto));
+        assert_eq!(mode, Mode::Auto);
+        assert!(
+            deny.contains(&"Bash(*git push*)".to_owned()),
+            "a push stays refused twice"
+        );
+        for launch in [&review, &planner] {
+            let (mode, _, deny) = glut_card_rights(Some(&reviewer()), Some(launch));
+            assert_eq!(mode, Mode::Default, "commands are asked");
+            assert!(deny.contains(&"Edit".to_owned()), "nothing is edited");
+        }
+        // A session the owner started for nothing in particular asks about every change.
+        let (mode, _, deny) = glut_card_rights(None, None);
+        assert_eq!(mode, Mode::Default);
+        assert!(!deny.contains(&"Edit".to_owned()));
+        // Every rule is one Glut reads.
+        for rule in GLUT_CARD_DENIED.iter().chain(GLUT_AUTO_DENIED.iter()) {
+            assert!(axiomata_harness::Rule::parse(rule).is_ok(), "{rule}");
+        }
     }
 
     #[test]

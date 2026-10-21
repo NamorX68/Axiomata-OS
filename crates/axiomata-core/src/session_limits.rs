@@ -8,7 +8,8 @@
 //! figure that would be made up.
 //!
 //! What a stop is: a file in the session's channel ([`Channel::set_limit_reached`]) that Claude Code's `PreToolUse` hook
-//! turns into a refusal of every further tool call, so the step it is in ends cleanly and nothing is left half written;
+//! turns into a refusal of every further tool call, so the step it is in ends cleanly and nothing is left half written
+//! (Glut's pane looks for the same file and ends the turn under way);
 //! an Opencode session, which has no such hook, is interrupted through the service. The card **keeps its claim and its
 //! worktree** — the owner decides, in the history of the card, whether to raise the limit (the role's) and go on, or to
 //! release the card. A stop that the limit no longer justifies (it was raised) lifts itself at the next look.
@@ -24,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use axiomata_ide::lifecycle::Channel;
 use axiomata_ide::model::{Agent, Harness};
-use axiomata_ide::usage::{ClaudeTally, Usage};
+use axiomata_ide::usage::{ClaudeTally, GlutTally, Usage};
 use axiomata_roster::{Billing, ResolvedLimits, Role, Tier};
 use serde::Serialize;
 
@@ -202,6 +203,8 @@ pub struct Meter {
     /// Where Claude Code keeps its transcripts.
     projects: PathBuf,
     transcripts: HashMap<PathBuf, ClaudeTally>,
+    /// How far each Glut session's event log was read (`docs/plans/glut-cards.md`, C6).
+    glut_logs: HashMap<PathBuf, GlutTally>,
     /// The most an Opencode session was read to have used: the service is asked for a bounded window of its messages,
     /// so a long session would otherwise read as using *less* once old messages fall out of it.
     opencode_floor: HashMap<String, Usage>,
@@ -226,6 +229,7 @@ impl Meter {
         Meter {
             projects,
             transcripts: HashMap::new(),
+            glut_logs: HashMap::new(),
             opencode_floor: HashMap::new(),
             services: None,
         }
@@ -313,7 +317,28 @@ impl Meter {
                     }
                 }
             }
-            Harness::Mini => Err(Unmeasured::NotMeasured),
+            Harness::Glut => {
+                let path = watched.channel.dir().join(crate::glut_card::EVENTS_FILE);
+                if !path.exists() {
+                    return Err(Unmeasured::NoRecordYet);
+                }
+                let mut tally = self.glut_logs.remove(&path).unwrap_or_default();
+                let reading = path.clone();
+                let (tally, read) = tokio::task::spawn_blocking(move || {
+                    let read = tally.advance(&reading);
+                    (tally, read)
+                })
+                .await
+                .map_err(|_| Unmeasured::ReadFailed)?;
+                let usage = tally.usage();
+                self.glut_logs.insert(path.clone(), tally);
+                if let Err(err) = read {
+                    tracing::debug!(%err, path = %path.display(), "could not read a Glut session's events");
+                    return Err(Unmeasured::ReadFailed);
+                }
+                seen.push(path);
+                Ok(usage)
+            }
         }
     }
 
@@ -467,6 +492,7 @@ impl Meter {
         }
         // A transcript of a session that is gone needs no memory.
         self.transcripts.retain(|path, _| seen.contains(path));
+        self.glut_logs.retain(|path, _| seen.contains(path));
         breaches
     }
 }
@@ -589,6 +615,42 @@ pub async fn card_usage(
         out.push(meter.read(entry, &config, &mut seen).await);
     }
     Ok(out)
+}
+
+/// What one card or plan session has used and may still use, `None` for a session the studio does not watch (one the
+/// owner started for nothing in particular) — for a harness that keeps its own run within what is left (Glut,
+/// `docs/plans/glut-cards.md` C6).
+///
+/// # Errors
+///
+/// A database error.
+pub async fn session_usage(
+    core: &AxiomataCore,
+    agent_id: i64,
+) -> Result<Option<SessionUsage>, AxiomataError> {
+    let Some(entry) = gather(core, None)?
+        .into_iter()
+        .find(|entry| entry.agent.id == agent_id)
+    else {
+        return Ok(None);
+    };
+    let config = core.config_read().clone();
+    let mut seen = Vec::new();
+    Ok(Some(
+        Meter::default().read(&entry, &config, &mut seen).await,
+    ))
+}
+
+/// What is left of a session's limits for its next run: tokens always, money only for an engine paid per token, given
+/// what the session spent (`spent`: `None` when its model has no price). A limit used up leaves `0`, so the run ends
+/// before its first call instead of running unbounded.
+pub fn left_of(usage: &SessionUsage, spent: Option<f64>) -> (u64, Option<f64>) {
+    let tokens = usage.limits.max_tokens.saturating_sub(usage.usage.tokens());
+    let money = match usage.billing {
+        Billing::Metered => spent.map(|spent| (usage.limits.max_cost_usd - spent).max(0.0)),
+        Billing::Subscription => None,
+    };
+    (tokens, money)
 }
 
 #[cfg(test)]
@@ -818,6 +880,43 @@ mod tests {
         .unwrap();
         let read = futures_block(meter.read(&world.watched, &config, &mut seen));
         assert_eq!((read.usage.tokens(), read.usage.steps), (330, 2));
+    }
+
+    #[test]
+    fn a_glut_session_is_counted_from_its_event_log_and_what_is_left_bounds_its_next_turn() {
+        let world = world(Harness::Glut);
+        let mut meter = Meter::default();
+        let config = Config::default();
+        let read = futures_block(meter.read(&world.watched, &config, &mut Vec::new()));
+        assert_eq!(
+            read.unmeasured,
+            Some(Unmeasured::NoRecordYet),
+            "nothing written yet"
+        );
+        std::fs::write(
+            world.watched.channel.dir().join(crate::glut_card::EVENTS_FILE),
+            concat!(
+                r#"{"event":"usage","turn":1,"input_tokens":700,"cached_input_tokens":300,"output_tokens":100}"#,
+                "\n",
+                r#"{"event":"tool_call","turn":1,"id":"a","name":"bash","arguments":"{}"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let read = futures_block(meter.read(&world.watched, &config, &mut Vec::new()));
+        assert!(read.measured);
+        assert_eq!((read.usage.tokens(), read.usage.steps), (500, 1));
+        // 1000 tokens of the limit, 500 used; money only with a figure of what was spent.
+        assert_eq!(left_of(&read, Some(0.25)), (500, Some(0.75)));
+        assert_eq!(left_of(&read, None), (500, None));
+        assert_eq!(
+            left_of(&read, Some(5.0)).1,
+            Some(0.0),
+            "used up is nothing, not unbounded"
+        );
+        let mut subscription = read.clone();
+        subscription.billing = Billing::Subscription;
+        assert_eq!(left_of(&subscription, Some(0.25)).1, None);
     }
 
     #[test]

@@ -28,6 +28,7 @@ pub mod editor_settings;
 pub mod editor_vi;
 pub mod error;
 pub mod files;
+pub mod glut_card;
 pub mod graph;
 /// The agentic IDE's core, re-exported as `axiomata_core::ide::…` for the same
 /// reason as `board` above — a plain re-export, not a wrapper.

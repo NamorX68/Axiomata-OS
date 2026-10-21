@@ -116,9 +116,13 @@ const OPENCODE_PREFIX: Record<ProviderId, string> = {
   ollama: "ollama/",
 };
 
-/** The models an engine of `harness` takes: Claude Code the bare Anthropic ids, the others `provider/model`. */
+/**
+ * The models an engine of `harness` takes: Claude Code the bare Anthropic ids, Glut the bare ids of the providers it
+ * speaks to (OpenRouter, Ollama — the chat provider's), Opencode `provider/model`.
+ */
 export function engineOptions(catalog: ModelCatalog | null, harness: string): ModelOption[] {
   if (harness === "claude_code") return optionsOf(catalog, "anthropic");
+  if (harness === "glut") return [...optionsOf(catalog, "open_router"), ...optionsOf(catalog, "ollama")];
   return (Object.keys(OPENCODE_PREFIX) as ProviderId[]).flatMap((p) => optionsOf(catalog, p, OPENCODE_PREFIX[p]));
 }
 

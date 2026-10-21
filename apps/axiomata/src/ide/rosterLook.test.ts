@@ -94,7 +94,7 @@ describe("how an agent is named", () => {
     expect(harnessLabel("opencode")).toBe("Opencode");
     expect(harnessBadge("claude_code")).toBe("CC");
     expect(harnessBadge("opencode")).toBe("OC");
-    expect(harnessBadge("mini")).toBe("M");
+    expect(harnessBadge("glut")).toBe("GL");
     expect(harnessBadge("other")).toBe("OT");
   });
 

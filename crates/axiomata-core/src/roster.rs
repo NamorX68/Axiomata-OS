@@ -43,7 +43,7 @@ fn harness_slug(harness: Harness) -> &'static str {
     match harness {
         Harness::ClaudeCode => "claude-code",
         Harness::Opencode => "opencode",
-        Harness::Mini => "mini",
+        Harness::Glut => "glut",
     }
 }
 
@@ -51,7 +51,7 @@ fn harness_label(harness: Harness) -> &'static str {
     match harness {
         Harness::ClaudeCode => "Claude Code",
         Harness::Opencode => "Opencode",
-        Harness::Mini => "Mini agent",
+        Harness::Glut => "Glut",
     }
 }
 
@@ -330,16 +330,16 @@ fn known_role(roles: &[Role], name: &str) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] for a harness that has no master (the mini harness); the agent store's refusals; a failing
+/// [`RosterError::Invalid`] for a harness that has no master (Glut, until it has a terminal UI of its own); the agent store's refusals; a failing
 /// database write. Nothing is created then.
 pub fn master_session(db: &Connection, project_id: i64, harness: AgentHarness) -> Result<Agent> {
     let name = match harness {
         AgentHarness::ClaudeCode => "master-claude-code",
         AgentHarness::Opencode => "master-opencode",
-        AgentHarness::Mini => {
+        AgentHarness::Glut => {
             return Err(RosterError::Invalid {
                 field: "harness",
-                reason: "only Claude Code and Opencode have a master session".into(),
+                reason: "only Claude Code and Opencode have a master session; Glut's comes with its terminal UI".into(),
             }
             .into());
         }
@@ -664,7 +664,7 @@ mod tests {
             claude.id,
             "asked again: the same"
         );
-        assert!(master_session(&db, project, AgentHarness::Mini).is_err());
+        assert!(master_session(&db, project, AgentHarness::Glut).is_err());
         assert!(known_role(&[], crate::ide::model::MASTER_ROLE).is_err());
         let edited = update_agent_on_engine(
             &db,

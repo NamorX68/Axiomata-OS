@@ -260,7 +260,7 @@ export interface IdeProject {
 }
 
 /** Which harness runs an agent. Mirrors `axiomata_ide::model::Harness`. */
-export type Harness = "claude_code" | "opencode" | "mini";
+export type Harness = "claude_code" | "opencode" | "glut";
 
 /** An agent *profile* — what to start, not something running (M7.2 CP4). */
 export interface IdeAgent {

@@ -165,7 +165,7 @@
   /* Agent harnesses (editor-look I7): an agent's tab is tinted with its harness's colour. */
   --ax-harness-claude_code: #d97757;
   --ax-harness-opencode: #6f9dff;
-  --ax-harness-mini: var(--ax-text-muted);
+  --ax-harness-glut: #e8b04a;
 
   /* ---------- neutral fallback palette (themes override) ---------- */
 
