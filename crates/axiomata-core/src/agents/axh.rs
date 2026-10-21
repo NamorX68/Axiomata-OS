@@ -90,6 +90,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     };
     let mut harness =
         Harness::prepare(&home, &request.cwd, &rights, request.timeout, config).await?;
+    harness.compact_for(config, ProviderRole::Skill, &endpoint.model);
     // Durable runs (D5): the run journals its steps; a resumed one goes on from them (D3).
     if let Some(journal) = &request.journal {
         harness.run_config.journal = Some(axiomata_harness::journal::JournalSpec {
@@ -288,6 +289,7 @@ pub(crate) async fn chat(
     };
     let mut harness =
         Harness::prepare(&home, &request.cwd, &rights, request.timeout, config).await?;
+    harness.compact_for(config, ProviderRole::Chat, &endpoint.model);
     // Glut 2 (D): an approved plan goes on in the mode the chat has without the switch. Nobody answers `exit_plan`
     // in the app's chat, so there the model presents its plan and the owner flips the switch.
     harness.run_config.build_mode = chat_mode(&declared, request.auto_approve_tools);
@@ -357,7 +359,15 @@ pub(crate) async fn chat(
     let (_, ended) = ending(outcome.reason, outcome.turns, request.timeout);
     if let Some(ended) = ended {
         let mut message = harness.notes.join(Some(&ended));
-        if continuing && matches!(outcome.reason, FinishReason::Failed | FinishReason::Timeout) {
+        // K7: a new chat is the way out only where compacting could not help — it failed, it is off, or the
+        // prompt still does not fit after it.
+        let too_long = message.contains(axiomata_harness::compact::COMPACTION_FAILED)
+            || axiomata_harness::model::mentions_context_overflow(&message)
+            || !harness.run_config.compaction.auto;
+        if continuing
+            && too_long
+            && matches!(outcome.reason, FinishReason::Failed | FinishReason::Timeout)
+        {
             message.push_str(" — if a long conversation keeps failing, start a new chat");
         }
         return Err(api_err(message));
@@ -366,6 +376,17 @@ pub(crate) async fn chat(
     if reply_markdown.is_empty() {
         return Err(api_err("Glut returned an empty reply".to_owned()));
     }
+    // K5: a quiet line above the answer; the part the summary replaced stays in the session's result store.
+    let compactions = harness.notes.compactions();
+    let reply_markdown = match compactions.first().zip(compactions.last()) {
+        Some(((before, _), (_, after))) => format!(
+            "*Conversation compacted — {} → {} tokens; the earlier part stays readable for the agent.*\n\n\
+             {reply_markdown}",
+            thousands(*before),
+            thousands(*after)
+        ),
+        None => reply_markdown,
+    };
     // Only an answered turn goes on record: a failed one leaves the conversation as it was.
     save_session(&sessions, &session_id, &conversation)?;
     let usage = outcome.usage;
@@ -750,6 +771,9 @@ struct Harness {
     sink: SharedSink,
     /// The owner's `effort` in `~/.axh/settings.json`: the run's when neither the run nor `[agents.glut]` names one.
     effort: Option<Effort>,
+    /// The owner's compaction switch and context windows in `~/.axh/settings.json` (#111, K2/K6).
+    compact_auto: bool,
+    context_windows: std::collections::HashMap<String, u32>,
 }
 
 impl Harness {
@@ -780,6 +804,8 @@ impl Harness {
         // own short system prompt stays as it is.
         let mut run_config = RunConfig::new(cwd);
         run_config.timeout = timeout;
+        // #112: the owner's limits in `~/.axh/settings.json`, as the CLI takes them — Axiomata has none of its own.
+        run_config.refusals = loaded.refusals;
         run_config.skill_dirs = skill_dirs.to_vec();
         // HS8 (B3): the `task` tool exists only for a run that names it in its
         // `allowed_tools` — the same declaration that is the gate's whole
@@ -848,8 +874,36 @@ impl Harness {
             notes,
             sink,
             effort: loaded.effort,
+            compact_auto: loaded.compact_auto,
+            context_windows: loaded.context_windows,
         })
     }
+
+    /// #111, K2: when the run compacts itself — Glut's own settings first, then the model's window as Axiomata's
+    /// catalog knows it; without either the run asks the provider's model list.
+    fn compact_for(&mut self, config: &Config, role: ProviderRole, model: &str) {
+        let window = self
+            .context_windows
+            .get(model)
+            .copied()
+            .or_else(|| catalog_window(config.agents.provider_for(role), model));
+        self.run_config.compaction = axiomata_harness::Compaction {
+            auto: self.compact_auto,
+            context_window: window,
+        };
+    }
+}
+
+/// The model's context window as the providers' catalog lists it (`model_catalog`, OpenRouter's `context_length`).
+fn catalog_window(provider: ProviderId, model: &str) -> Option<u32> {
+    crate::model_catalog::load()
+        .providers
+        .get(&provider)?
+        .models
+        .iter()
+        .find(|entry| entry.id == model)?
+        .context_length
+        .and_then(|tokens| u32::try_from(tokens).ok())
 }
 
 /// Where Glut keeps its chat conversations, one JSON-lines file per conversation.
@@ -1003,6 +1057,11 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
         ),
         FinishReason::Cancelled => (1, Some("the run was cancelled".to_owned())),
         FinishReason::Failed => (1, Some("the model API failed".to_owned())),
+        // The `error` event before names the call and the reason; this says what happened to the run.
+        FinishReason::Refused => (
+            1,
+            Some("Glut stopped: its calls kept being refused".to_owned()),
+        ),
         FinishReason::Timeout => (
             1,
             Some(
@@ -1163,10 +1222,23 @@ struct Notes {
     lines: Arc<Mutex<Vec<String>>>,
     /// The runs that took a snapshot (Glut 2, D) — what the chat's `/undo` puts back (#108).
     snapshot_runs: Arc<Mutex<Vec<String>>>,
+    /// The run's own compactions (#111, K5), estimated tokens before and after — a subagent never compacts.
+    compactions: Arc<Mutex<Vec<(u64, u64)>>>,
 }
 
 impl EventSink for Notes {
     fn emit(&mut self, event: Event) {
+        if let Event::Compacted {
+            before_tokens,
+            after_tokens,
+            ..
+        } = &event
+        {
+            self.compactions
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push((*before_tokens, *after_tokens));
+        }
         if let Event::Snapshot { run, .. } = &event {
             let mut runs = self
                 .snapshot_runs
@@ -1246,11 +1318,35 @@ impl Notes {
             .unwrap_or_else(|poison| poison.into_inner())
             .clone()
     }
+
+    /// The run's compactions so far, in order.
+    fn compactions(&self) -> Vec<(u64, u64)> {
+        self.compactions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+}
+
+/// `118k` — a token count as the chat's note shows it.
+fn thousands(tokens: u64) -> String {
+    if tokens < 1_000 {
+        tokens.to_string()
+    } else {
+        format!("{}k", (tokens + 500) / 1_000)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_compactions_note_reads_tokens_in_thousands() {
+        assert_eq!(thousands(950), "950");
+        assert_eq!(thousands(118_400), "118k");
+        assert_eq!(thousands(20_600), "21k");
+    }
 
     use crate::config::{ModelCost, ProviderSettings};
     use crate::skills::model::RunStatus;

@@ -169,6 +169,9 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         run_config.max_turns = turns;
     }
     // HS7: the owner's hooks (B1, the only ones that ever run), and the sandbox their commands run in (D5).
+    // Glut's own limits and compaction, as `axh` takes them (#112 R6, #111 K2/K6).
+    run_config.refusals = built.refusals;
+    run_config.compaction = built.compaction(&endpoint.model);
     run_config.hooks = built.hooks;
     run_config.sandbox = Some(built.sandbox.clone());
     // Glut 2 (G8): code mode as the owner set it in `[agents.glut]`, as the app's runs have it.
@@ -497,6 +500,15 @@ fn render(event: &Event) -> Option<String> {
             chars_after,
             ..
         } => format!("  ≈ {} · {chars_before} → {chars_after} chars", plain(what)),
+        // Glut robust (#111, K5): the older steps became a summary.
+        Event::Compacted {
+            before_tokens,
+            after_tokens,
+            replaced,
+            ..
+        } => format!(
+            "⇣ conversation compacted · {before_tokens} → {after_tokens} tokens · {replaced} messages summarised"
+        ),
         Event::Snapshot { turn, run, .. } => format!(
             "⟲ snapshot before step {turn} · axh undo --run {}",
             plain(run)

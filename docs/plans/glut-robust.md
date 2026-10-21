@@ -1,6 +1,7 @@
 # Glut robust — no endless refusals, compaction before the limit
 
-Status: **approved** by the owner 2026-10-21 ("Ja bau so", R4 at 5/15 as proposed). Cards #112 and the "Kürzen dreifach" item of #111.
+Status: **approved** by the owner 2026-10-21 ("Ja bau so", R4 at 5/15 as proposed); CP1–CP3 **built** 2026-10-21 on
+branch `glut-robust`, CP4 (live) open. Cards #112 and the "Kürzen dreifach" item of #111.
 
 ## Why
 
@@ -51,7 +52,7 @@ The other items of #111 stay on the card (Opencode out once Glut has a TUI, conn
 - **K1 — when:** before each model call, when the last call's prompt tokens plus the messages added since (estimated
   at 4 characters a token) plus the output reserve (`max_output_tokens`, else 8k) reach the window minus a reserve
   of **15 % (at least 16k)** — the measure Opencode and Pi chose too. Also at the start of a chat turn, the same way.
-- **K2 — the window, Glut's sources first:** `--context-window` / the run config, then `"context_window"` in
+- **K2 — the window, Glut's sources first:** `--context-window` / the run config, then `"contextWindow"` in
   `~/.axh/settings.json` (per model, `{ "model-id": 131072 }`), then what Axiomata passes from its catalog, then
   Glut asks the provider's model list once per run (`<base>/models`, OpenRouter answers `context_length`). Unknown
   (Ollama, a custom endpoint): **K4 only**.
@@ -87,3 +88,38 @@ The other items of #111 stay on the card (Opencode out once Glut has a TUI, conn
   and a provider that answers "context length exceeded" once.
 - **CP4 — live:** one long chat past a small configured window and one news-web run, both on DeepSeek V4.1 Flash;
   measure steps, cost and what the summary kept.
+
+## Built (2026-10-21)
+
+- **CP1 (#112):** `refusals.rs` (`Ledger`: per tool + target, and the run's total), fed in `run.rs` `perform` from the
+  gate's log (direct and script calls alike), a hook's block and the `task` judgement; a subagent's count arrives with
+  its `RunOutcome.refusals` (R5). `FinishReason::Refused` (`axh` exit 1; core: "Glut stopped: its calls kept being
+  refused", the `error` event naming the call). `"refusals": {"repeat", "total"}` in the owner's
+  `~/.axh/settings.json` (`RefusalLimits`, checked: repeat ≥ 2, total ≥ repeat); the total's note starts at a third of
+  it (5 of 15). Once a limit is reached a script's further calls are not run.
+- **CP2 (#111, K1/K2/K6):** `Compaction { auto, context_window }` in `RunConfig`; `"compact": {"auto"}` and
+  `"contextWindow": {"<model>": tokens}` in the owner's settings; `axh --context-window`, `--no-auto-compact`; Axiomata
+  passes its catalog's `context_length` below the settings (`Harness::compact_for`). Without a window the run asks
+  `GET <base>/v1/models` once (`ChatModel::context_window`), and only past 16k estimated tokens.
+- **CP3 (#111, K3–K5, K7):** `compact::compact_older` (system prompt, latest user message and the newest whole steps up
+  to 20k tokens stay — less in a small window, at most half of the room — the rest is summarised by the run's model);
+  `model::is_context_overflow` (K4, one retry). `Event::Compacted`, `Line::Compacted` (resume goes on from it), the
+  summary metered as a `Usage` event. The chat shows "*Conversation compacted — 118k → 21k tokens …*" above the answer;
+  "start a new chat" only when compacting failed, is off, or the prompt still does not fit.
+- **K3, corrected while building:** the journal is deleted when a run ends, so it keeps nothing. Instead, what a
+  compaction replaces goes into the run's result store as JSON lines, and the summary names its id — the model reads it
+  back with `read_full_result`, as a relocated result (Glut lean, N2); in the chat the store lives beside the session
+  (`<id>.results`), so it stays.
+- **After the reviews (2026-10-21):** refusals count once per tool and target *per call* (the network proxy judges every
+  connection — one `npm install` retrying a denied host is one attempt); a run ended by refusals still answers the
+  other calls of its last reply; `axiomata-cli harness run` takes the limits and the compaction too; a window below
+  4,096 tokens is refused in the settings and the flag and ignored from a catalog or list; each reserve takes at most a
+  quarter of the window (an 8k model compacts from 4k, keeps 2k) and a run compacts again only after it grew by a
+  quarter of the room; "too long" counts only on 400/413/422, never on a 429's "too many tokens per minute"; the
+  summary names the source of a request found in tool output, and the model's reasoning stays out of the stored part.
+- **Left open, small:** a Stop hook's message is a user message, so after one the cut keeps it as "the task" and
+  summarises the real one; a kept step's "unchanged re-read" pointer may name a read that was summarised away (its text
+  is in the store); a resumed skill run's store is new, so a summary's id from before the resume answers "earlier run"
+  (as relocated results already do); a script's own "a script cannot start …" refusals are not counted; a project's
+  settings file with a malformed `refusals`/`compact`/`contextWindow` still fails the load although its values are
+  ignored.
