@@ -678,14 +678,24 @@ impl CardSink {
 
 impl EventSink for CardSink {
     fn emit(&mut self, event: Event) {
-        // The streamed pieces of text are the pane's alone: the whole text follows as one event.
+        // The streamed pieces of text and thinking are the pane's alone: the whole text follows as one event, and
+        // the thinking is no part of the log the tiles and the meter read.
         if let Some(log) = &mut self.log
-            && !matches!(event, Event::TextDelta { .. })
+            && !streamed(&event)
             && let Some(line) = logged(&event, chrono::Utc::now())
         {
             let _ = writeln!(log, "{line}");
         }
         self.readable.emit(event);
+    }
+}
+
+/// A streamed piece of text or thinking — a subagent's too: the pane shows them, the log keeps only whole events.
+fn streamed(event: &Event) -> bool {
+    match event {
+        Event::TextDelta { .. } | Event::ReasoningDelta { .. } => true,
+        Event::Sub { event, .. } => streamed(event),
+        _ => false,
     }
 }
 

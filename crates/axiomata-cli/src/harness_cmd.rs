@@ -517,8 +517,12 @@ fn render(event: &Event) -> Option<String> {
             "⟲ snapshot before step {turn} · axh undo --run {}",
             plain(run)
         ),
-        // The readable lines show the whole answer once; its pieces are for a `--json` reader.
-        Event::Usage { .. } | Event::Error { .. } | Event::TextDelta { .. } => return None,
+        // The readable lines show the whole answer once; its pieces, and the model's thinking, are for a `--json`
+        // reader.
+        Event::Usage { .. }
+        | Event::Error { .. }
+        | Event::TextDelta { .. }
+        | Event::ReasoningDelta { .. } => return None,
         // A subagent's events, indented by their depth (HS8, D8). Its own finished line reads `↳`, not
         // `■`: two run-looking finished lines would have a reader count the run's end twice.
         Event::Sub { depth, event } => {
