@@ -6,7 +6,8 @@
   Otherwise ↑/↓ walk the input history.
 
   The conversation's settings sit at the bar's right end, so they can be set before the first question: Plan/Build,
-  Glut's effort (`EffortSwitch.svelte`) and a new conversation (⌘N while the input has the focus, `core/chatKeys.ts`).
+  Glut's effort (`EffortSwitch.svelte`) and a new conversation; in the input ⇧⇥ switches Plan/Build and ⌘N starts
+  afresh (`core/chatKeys.ts`).
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -25,7 +26,7 @@
     send,
     turns,
   } from "../core/chat";
-  import { isNewSessionPress } from "../core/chatKeys";
+  import { isModeTogglePress, isNewSessionPress } from "../core/chatKeys";
   import {
     type CommandEntry,
     commandEntries,
@@ -137,6 +138,11 @@
       if (canStartOver) newSession();
       return;
     }
+    if (isModeTogglePress(e)) {
+      e.preventDefault();
+      planMode.update((planning) => !planning);
+      return;
+    }
     if (listOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         const step = e.key === "ArrowDown" ? 1 : -1;
@@ -217,8 +223,8 @@
       class:on={$planMode}
       aria-pressed={$planMode}
       title={$planMode
-        ? "Plan mode: the agent reads and plans, changes nothing — click to let it build"
-        : "Build mode: the agent may change things — click to only plan"}
+        ? "Plan mode: the agent reads and plans, changes nothing — click (or ⇧⇥ in the field) to let it build"
+        : "Build mode: the agent may change things — click (or ⇧⇥ in the field) to only plan"}
       onclick={() => planMode.update((planning) => !planning)}
     >
       {$planMode ? "Plan" : "Build"}

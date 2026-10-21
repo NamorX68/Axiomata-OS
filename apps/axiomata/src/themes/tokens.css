@@ -88,8 +88,9 @@
   /* Slide-ins (chat, staged panels) — deliberately unhurried. */
   --ax-dur-slow: 560ms;
 
-  /* Assistant bar / chat panel widths; the bar never spans an ultra-wide screen. */
-  --ax-assistant-width: calc(820px * var(--ax-ui-scale));
+  /* Assistant bar / chat panel widths; the bar never spans an ultra-wide screen. The bar is as wide as the chat above
+     it: it carries the conversation's settings too (Plan/Build, effort, new session). */
+  --ax-assistant-width: var(--ax-chat-width);
   --ax-chat-width: calc(900px * var(--ax-ui-scale));
 
   /* Canvas tile grid (drag / resize snap to it): 16 of the canvas's unscaled

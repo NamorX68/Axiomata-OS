@@ -149,6 +149,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "⌘K", what: "Open / close the search (the spotlight)" },
       { keys: "⌘,", what: "Open the settings" },
       { keys: "⌘N", what: "In the chat input: a new conversation (the Studio's new note elsewhere)" },
+      { keys: "⇧⇥", what: "In the chat input: switch between Plan and Build" },
       { keys: "⌘W", what: "Close the topmost window (the spotlight, else the top panel); not in a terminal" },
       { keys: "Esc", what: "Close the topmost window — in a file window only on a rendered page or a picture" },
       { keys: "F1 / F5, F2 / F10, F3, F4", what: "While the debugger is stopped: continue, step over, out, into" },
