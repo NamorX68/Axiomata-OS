@@ -60,4 +60,8 @@ Reference behaviour: the owner's Ghostty (main) and Warp, measured with `glut-pr
 - TB1–TB4 built 2026-10-22 (crate 109 tests, glue 16, frontend: `terminalInput`, `terminalMouse`, `TerminalScreen`,
   `terminalWheel` tests), after a security review (D4's focus and rate limit, the paste and OSC bounds, D8) and a
   code review (wide pairs mended after erases and resizes, URLs with `;`, `?1000l` ends any tracking, ⌘-click on links
-  in panes that have the mouse). Open: TB5, measured in a Studio pane by the owner; the URL shown on hover.
+  in panes that have the mouse).
+- TB5 measured 2026-10-22 by the owner: `glut-probe` in a pane answers like Ghostty (only the pixel cell size and kitty
+  graphics stay unanswered), OSC 52 works after the switch to `pbcopy`, Glut, Claude Code and Opencode look "more like
+  in Ghostty", the cursor's place included; the selection was made a stronger accent. TUI0b done. Left for later: the
+  link's URL shown on hover.
