@@ -646,7 +646,7 @@ impl Drop for Withdraw {
 fn describe(answer: Answer) -> &'static str {
     match answer {
         Answer::Allow => "allowed",
-        Answer::AllowAlways => "allowed always",
+        Answer::AllowAlways | Answer::AllowWithin(_) => "allowed always",
         Answer::Deny => "refused",
     }
 }
@@ -783,6 +783,7 @@ mod tests {
         AskRequest {
             tool: "bash".into(),
             target: "wc -l README.md".into(),
+            scopes: Vec::new(),
         }
     }
 
