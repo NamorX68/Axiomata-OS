@@ -1735,6 +1735,8 @@ mod tests {
             command: command.into(),
             folder: String::new(),
             unsandboxed: false,
+            // As a skill's commands run: in the sandbox.
+            sandboxed: true,
         }
     }
 
@@ -1827,8 +1829,10 @@ mod tests {
             .await
             .is_ok()
         );
-        // … and a command asks, which nobody answers.
-        let refused = gate.judge("bash", &bash("git status")).await.unwrap_err();
+        // … a command that only reads too (Glut TUI1e) …
+        assert!(gate.judge("bash", &bash("git status")).await.is_ok());
+        // … and any other command asks, which nobody answers.
+        let refused = gate.judge("bash", &bash("make")).await.unwrap_err();
         assert!(refused.contains("no one to ask"), "{refused}");
     }
 
