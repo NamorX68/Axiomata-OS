@@ -13,10 +13,15 @@ import { chord, type KeyLike, type Platform } from "../core/keys";
 /** Mirrors `axiomata_terminal::MouseReporting`. */
 export type MouseReporting = "off" | "x10" | "sgr";
 
+/** Mirrors `axiomata_terminal::MouseTracking`: which mouse events beyond the wheel the program asked for (TUI0b). */
+export type MouseTracking = "off" | "clicks" | "drags" | "motion";
+
 /** What the running program asked for, from the last screen event. */
 export interface WheelState {
   mouse: MouseReporting;
   altScreen: boolean;
+  /** `?1`: arrow keys in application mode (`ESC O A`), as the program asked (TUI0b). */
+  appCursorKeys?: boolean;
 }
 
 /** What one wheel step does: bytes for the program, or a number of history lines (positive = further back). */
@@ -45,7 +50,8 @@ export function wheelAction(lines: number, state: WheelState, row: number, col: 
     return one ? { kind: "send", bytes: repeat(one, steps) } : null;
   }
   if (state.altScreen) {
-    return { kind: "send", bytes: repeat(encoder.encode(up ? "\x1b[A" : "\x1b[B"), steps) };
+    const prefix = state.appCursorKeys ? "\x1bO" : "\x1b[";
+    return { kind: "send", bytes: repeat(encoder.encode(prefix + (up ? "A" : "B")), steps) };
   }
   return { kind: "history", lines };
 }

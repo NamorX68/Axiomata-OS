@@ -33,6 +33,12 @@ describe("wheelAction", () => {
     expect(text(down.bytes)).toBe("\x1b[B");
   });
 
+  it("sends the arrow keys in application mode when the program asked for it", () => {
+    const up = wheelAction(1, { mouse: "off", altScreen: true, appCursorKeys: true }, 0, 0);
+    if (up?.kind !== "send") throw new Error("expected bytes");
+    expect(text(up.bytes)).toBe("\x1bOA");
+  });
+
   it("scrolls the terminal's own history on the primary screen", () => {
     expect(wheelAction(3, { mouse: "off", altScreen: false }, 0, 0)).toEqual({ kind: "history", lines: 3 });
   });

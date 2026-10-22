@@ -2,11 +2,29 @@
 
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// Fallback shell when `$SHELL` isn't set (should be rare on macOS/Linux).
 const FALLBACK_SHELL: &str = "/bin/zsh";
+
+/// The writing half of a PTY, shareable: input from the pane and the terminal's answers to the program go through it.
+#[derive(Clone)]
+pub struct PtyWriter(Arc<Mutex<Box<dyn Write + Send>>>);
+
+impl PtyWriter {
+    /// Writes `bytes` whole and flushes them.
+    ///
+    /// # Errors
+    ///
+    /// The PTY's error, e.g. once the shell is gone.
+    pub fn write(&self, bytes: &[u8]) -> io::Result<()> {
+        let mut writer = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        writer.write_all(bytes)?;
+        writer.flush()
+    }
+}
 
 /// A running PTY with a shell process attached.
 ///
@@ -22,7 +40,7 @@ const FALLBACK_SHELL: &str = "/bin/zsh";
 /// caller's own read/write loop ends before the shell was told to exit).
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: PtyWriter,
     /// `None` only while [`Drop`] is handing it to the reaper thread.
     child: Option<Box<dyn Child + Send + Sync>>,
 }
@@ -122,7 +140,9 @@ impl PtySession {
         // PTY would never signal EOF even after the shell is gone).
         drop(pair.slave);
 
-        let writer = pair.master.take_writer().map_err(io::Error::other)?;
+        let writer = PtyWriter(Arc::new(Mutex::new(
+            pair.master.take_writer().map_err(io::Error::other)?,
+        )));
 
         Ok(Self {
             master: pair.master,
@@ -134,8 +154,13 @@ impl PtySession {
     /// Writes input bytes (already translated to the right escape bytes, if
     /// any) to the shell.
     pub fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.writer.write_all(bytes)?;
-        self.writer.flush()
+        self.writer.write(bytes)
+    }
+
+    /// A handle that writes to the same PTY (TUI0b): a write blocks while the program does not read its input, so a
+    /// caller holding a lock others need writes through this after letting the lock go.
+    pub fn writer(&self) -> PtyWriter {
+        self.writer.clone()
     }
 
     /// Resizes the PTY, so the shell and any full-screen program running in

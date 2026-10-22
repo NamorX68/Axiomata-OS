@@ -111,13 +111,18 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { Channel } from "@tauri-apps/api/core";
+  import { openUrl } from "@tauri-apps/plugin-opener";
 
   import type { ModuleContext } from "../core/types";
   import {
     cellFont,
+    cssColorToRgb,
     draw,
     DEFAULT_CURSOR_STYLE,
     measureChar,
+    mergeRows,
+    openableUrl,
+    programCursorStyle,
     selectionText,
     type CellPos,
     type CharMetrics,
@@ -126,7 +131,8 @@
   } from "./TerminalScreen";
   import { outputRefAt, rowText, type OutputRef } from "../core/outputLinks";
   import { platform } from "../core/keys";
-  import { keyToBytes, terminalKeyRoute } from "./terminalInput";
+  import { encodeKey, terminalKeyRoute } from "./terminalInput";
+  import { focusReport, mouseReport, wantsReport, type MouseKind } from "./terminalMouse";
   import { createSequenceGuard } from "./terminalScrollback";
   import {
     WheelAccumulator,
@@ -136,6 +142,7 @@
     scrollThumb,
     wheelAction,
     type MouseReporting,
+    type MouseTracking,
   } from "./terminalWheel";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
   import { DEFAULT_THEME, THEME_DEFAULT_COLORS, THEMES } from "./terminalThemes";
@@ -191,7 +198,8 @@
   type TerminalEvent =
     | {
         type: "screen";
-        rows: TermCell[][];
+        /** Only the rows that changed since the previous frame; `null` keeps the row drawn (TUI0b). */
+        rows: (TermCell[] | null)[];
         cursor_row: number;
         cursor_col: number;
         bracketed_paste: boolean;
@@ -199,6 +207,14 @@
         mouse: MouseReporting;
         alt_screen: boolean;
         scrollback: number;
+        cursor_visible: boolean;
+        cursor_shape: number;
+        mouse_tracking: MouseTracking;
+        focus_events: boolean;
+        app_cursor_keys: boolean;
+        kitty_flags: number;
+        new_links: string[];
+        clipboard?: string;
       }
     | { type: "exited" };
 
@@ -216,6 +232,15 @@
   let liveRows: TermCell[][] = [];
   let liveCursor: CellPos | null = null;
   let bracketedPaste = $state(false);
+  // What the program asked of the terminal (TUI0b): a hidden cursor and its shape, the OSC 8 links its cells point
+  // into, and what the input must send — mouse events, focus reports, the cursor keys' mode, kitty keyboard flags.
+  let cursorVisible = true;
+  let cursorShape = 0;
+  let links: string[] = [];
+  let mouseTracking: MouseTracking = "off";
+  let focusEvents = false;
+  let appCursorKeys = false;
+  let kittyFlags = 0;
 
   // How far up (in lines) the view is scrolled into scrollback, and the
   // on-demand fetch that fills in for the live rows while it's non-zero.
@@ -300,6 +325,40 @@
     return scrollOffset === 0 ? liveRows : (historyRows ?? liveRows);
   }
 
+  /** When a program last put text on the clipboard, and the note that says it did. */
+  let lastProgramCopy = 0;
+  let copyNote = $state("");
+  let copyNoteTimeout: ReturnType<typeof setTimeout> | undefined;
+  /** How often a program may write the clipboard, and how long the note stays. */
+  const PROGRAM_COPY_GAP_MS = 1000;
+  const COPY_NOTE_MS = 2500;
+
+  /** A program's OSC 52 write (D4 in `docs/plans/terminal-tui.md`): the text lands on the clipboard only while this
+   *  pane has the focus — a pane in the background cannot swap what the owner is about to paste —, at most once a
+   *  second, and the pane says it happened. */
+  function programCopied(text: string): void {
+    const now = performance.now();
+    if (document.activeElement !== inputEl || now - lastProgramCopy < PROGRAM_COPY_GAP_MS) return;
+    lastProgramCopy = now;
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        copyNote = `the program copied ${text.length} characters`;
+        clearTimeout(copyNoteTimeout);
+        copyNoteTimeout = setTimeout(() => (copyNote = ""), COPY_NOTE_MS);
+      })
+      .catch(() => {});
+  }
+
+  /** The pane's text and background as RGB, which a program's OSC 10/11 query is answered with (TUI0b) — a TUI picks
+   *  its light or dark look by them. `null` when a theme colour is no plain RGB. */
+  function paneColors(): { foreground: number[]; background: number[] } | null {
+    const { fg, bg } = currentDefaultColors();
+    const foreground = cssColorToRgb(fg);
+    const background = cssColorToRgb(bg);
+    return foreground && background ? { foreground, background } : null;
+  }
+
   function readThemeColors(): void {
     const cs = getComputedStyle(document.documentElement);
     const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
@@ -308,6 +367,8 @@
     // The cursor is where the terminal lives: the glow, the orange family even in a theme with another accent (G2).
     cursorColor = v("--ax-glow", cursorColor);
     selectionColor = v("--ax-accent-muted", selectionColor);
+    const colors = paneColors();
+    if (sessionId && colors) void ctx.invoke("terminal_set_colors", { id: sessionId, colors }).catch(() => {});
     // CP6 architecture-review finding (HIGH): these four feed `draw()`
     // directly, but nothing else re-triggers a paint when only the theme
     // changed — without this, a live theme swap could sit unpainted
@@ -578,7 +639,7 @@
         needsRedraw = false;
         // No cursor while scrolled into history (nothing "live" to point at
         // there) or once the shell has ended.
-        const cursor = !ended && sessionId && scrollOffset === 0 && blinkOn ? liveCursor : null;
+        const cursor = !ended && sessionId && scrollOffset === 0 && blinkOn && cursorVisible ? liveCursor : null;
         const selection = selStart && selEnd ? { start: selStart, end: selEnd } : null;
         const { fg: resolvedDefaultFg, bg: resolvedDefaultBg } = currentDefaultColors();
         context2d.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -593,7 +654,7 @@
           selectionColor,
           font: currentFont(),
           fontWeight,
-          cursorStyle: currentCursorStyle(),
+          cursorStyle: programCursorStyle(cursorShape, currentCursorStyle()),
           palette: currentPalette(),
           // Owner decision (docs/plans/terminal.md, Checkpoint 5b): on by
           // default — only `terminalSettings.boldIsBright === false` turns it off.
@@ -728,8 +789,16 @@
         needsRedraw = true;
         return;
       }
-      liveRows = event.rows;
+      liveRows = mergeRows(liveRows, event.rows);
       liveCursor = { row: event.cursor_row, col: event.cursor_col };
+      cursorVisible = event.cursor_visible;
+      cursorShape = event.cursor_shape;
+      mouseTracking = event.mouse_tracking;
+      focusEvents = event.focus_events;
+      appCursorKeys = event.app_cursor_keys;
+      kittyFlags = event.kitty_flags;
+      if (event.new_links.length > 0) links = [...links, ...event.new_links];
+      if (event.clipboard) programCopied(event.clipboard);
       bracketedPaste = event.bracketed_paste;
       mouseReporting = event.mouse;
       scrollbackLen = event.scrollback;
@@ -776,7 +845,7 @@
       sessionId = await ctx.invoke<string>("terminal_spawn", {
         rows,
         cols,
-        options: { shell, cwd, env, scrollbackLimit },
+        options: { shell, cwd, env, scrollbackLimit, colors: paneColors() },
         onOutput,
       });
       // Bug found on a genuine app restart (not reproducible via dev
@@ -874,7 +943,7 @@
 
   /** `lines` of wheel (positive = up) at a cell: to the program, as arrow keys, or through the history (`terminalWheel.ts`). */
   function applyWheel(lines: number, row: number, col: number): void {
-    const action = wheelAction(lines, { mouse: mouseReporting, altScreen }, row, col);
+    const action = wheelAction(lines, { mouse: mouseReporting, altScreen, appCursorKeys }, row, col);
     if (!action) return;
     if (action.kind === "history") scrollHistoryTo(scrollOffset + action.lines);
     // A report to the program is no typing: it must not snap a scrolled view back, nor count as the owner's input.
@@ -925,7 +994,46 @@
     };
   }
 
+  /** The button the program was sent a press of and is waiting to hear released (TUI0b), and the cell of the last
+   *  report — a drag or a move is reported once per cell, not per pixel. */
+  let reportedButton: number | null = null;
+  let reportedCell: CellPos | null = null;
+
+  /** Whether the pointer goes to the program (D3 in `docs/plans/terminal-tui.md`): it asked for the mouse, the live
+   *  screen is showing, and Shift is not held — Shift keeps it for the pane's own selection, as in Ghostty. */
+  function mouseForProgram(e: MouseEvent): boolean {
+    if (mouseTracking === "off" || mouseReporting === "off" || scrollOffset !== 0 || e.shiftKey || ended) return false;
+    // ⌘/Ctrl on a link opens it, in Claude Code's, Opencode's and Glut's panes too, which all ask for the mouse.
+    return !(e instanceof PointerEvent && (urlAt(e) || linkAt(e)));
+  }
+
+  /** Sends one mouse report of `kind` at the pointer's cell, if the program wants that kind. */
+  function reportMouse(kind: MouseKind, e: PointerEvent, button: number): void {
+    const cell = cellFromEvent(e);
+    if (!cell || mouseReporting === "off" || !wantsReport(kind, mouseTracking)) return;
+    // A drag that leaves the pane is reported at its edge, as other terminals do.
+    const pos = {
+      row: Math.min(Math.max(cell.row, 0), Math.max(lastRows - 1, 0)),
+      col: Math.min(Math.max(cell.col, 0), Math.max(lastCols - 1, 0)),
+    };
+    if ((kind === "drag" || kind === "move") && reportedCell?.row === pos.row && reportedCell?.col === pos.col) return;
+    reportedCell = pos;
+    const report = mouseReport(kind, button, e, mouseReporting, pos.row, pos.col);
+    if (report) writeRaw(report);
+  }
+
+  /** The link under the pointer when the button went down: a click opens it only if it is still the link when the
+   *  button comes up — a program cannot swap the target under a click. */
+  let urlAtDown: string | null = null;
+
   function handlePointerDown(e: PointerEvent): void {
+    urlAtDown = urlAt(e);
+    if (mouseForProgram(e)) {
+      canvasEl?.setPointerCapture(e.pointerId);
+      reportedButton = e.button;
+      reportMouse("press", e, e.button);
+      return;
+    }
     const pos = cellFromEvent(e);
     if (!pos) return;
     canvasEl?.setPointerCapture(e.pointerId); // keep tracking past the canvas's own edge during a drag
@@ -934,6 +1042,14 @@
     selStart = pos;
     selEnd = pos;
     needsRedraw = true;
+  }
+
+  /** The URL of the OSC 8 link under the pointer while ⌘ (or Ctrl) is held, if the pane may open it (TUI0b). */
+  function urlAt(e: PointerEvent): string | null {
+    if (!(e.metaKey || e.ctrlKey)) return null;
+    const pos = cellFromEvent(e);
+    const cell = pos ? displayRows()[pos.row]?.[pos.col] : undefined;
+    return cell?.link ? openableUrl(links[cell.link - 1]) : null;
   }
 
   /** The file location under the pointer while ⌘ (or Ctrl) is held, if the host wants them. */
@@ -945,7 +1061,12 @@
   }
 
   function handlePointerMove(e: PointerEvent): void {
-    if (canvasEl) canvasEl.style.cursor = !selecting && linkAt(e) ? "pointer" : "";
+    if (reportedButton !== null) {
+      reportMouse("drag", e, reportedButton);
+      return;
+    }
+    if (!selecting && mouseForProgram(e)) reportMouse("move", e, 0);
+    if (canvasEl) canvasEl.style.cursor = !selecting && (urlAt(e) || linkAt(e)) ? "pointer" : "";
     if (!selecting) return;
     const pos = cellFromEvent(e);
     if (!pos) return;
@@ -957,9 +1078,31 @@
   /** A genuine drag copies the covered text; a plain click (no drag) just
    *  clears whatever was selected before — matching how most terminals
    *  treat a click as "deselect", not "select one character". */
+  /** A press the program heard whose release never came (the pointer was taken away): it is told the button is up. */
+  function handlePointerCancel(e: PointerEvent): void {
+    if (reportedButton === null) return;
+    reportMouse("release", e, reportedButton);
+    reportedButton = null;
+    reportedCell = null;
+  }
+
   function handlePointerUp(e: PointerEvent): void {
+    if (reportedButton !== null) {
+      reportMouse("release", e, reportedButton);
+      reportedButton = null;
+      reportedCell = null;
+      return;
+    }
     if (!selecting) return;
     selecting = false;
+    const url = dragged ? null : urlAt(e);
+    if (url && url === urlAtDown) {
+      selStart = null;
+      selEnd = null;
+      needsRedraw = true;
+      void openUrl(url).catch(() => {});
+      return;
+    }
     const link = dragged ? null : linkAt(e);
     if (link) {
       selStart = null;
@@ -1013,18 +1156,18 @@
     e.preventDefault();
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (!text) return;
-    const payload = bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text;
+    // An ESC in the pasted text could end the bracket early (`ESC [ 201 ~`) and type the rest as commands: it goes.
+    const payload = bracketedPaste ? `\x1b[200~${text.split("\x1b").join("")}\x1b[201~` : text;
     sendBytes(encoder.encode(payload));
   }
 
   /** Keys that either produce no native `input` event or need a specific C0
    *  control byte instead of literal text — everything else (printable
    *  characters, IME composition, paste) is handled by `handleInput` below.
-   *  The actual key->byte mapping is `terminalInput.keyToBytes`, a plain
-   *  function pulled out of this handler (architecture review, Checkpoint
-   *  3) so its Ctrl+letter arithmetic and C0 mappings get real unit test
-   *  coverage instead of being reachable only through a live
-   *  `KeyboardEvent`. */
+   *  The actual key->byte mapping is `terminalInput.encodeKey`, a plain
+   *  function outside this handler so it has real unit tests — with the
+   *  modes the program asked for (application cursor keys, the kitty
+   *  keyboard protocol, TUI0b). */
   function handleKeydown(e: KeyboardEvent): void {
     // Scrolling by keyboard (card #80) comes first: ⌘⇧↑/↓ is the wheel, Shift+PageUp/… pages through the history.
     const scrollLines = scrollKeyLines(e, $platform);
@@ -1050,7 +1193,7 @@
       return;
     }
     if (route === "paste" || route === "app") return;
-    const bytes = keyToBytes(e.key, e.ctrlKey && route !== "typing", e.shiftKey);
+    const bytes = encodeKey(e, { appCursorKeys, kittyFlags }, route === "typing");
     if (!bytes) return;
     e.preventDefault();
     sendBytes(bytes);
@@ -1305,6 +1448,7 @@
     resizeObserver?.disconnect();
     themeObserver?.disconnect();
     flipObserver?.disconnect();
+    clearTimeout(copyNoteTimeout);
     if (sessionId) void ctx.invoke("terminal_close", { id: sessionId });
   });
 </script>
@@ -1326,11 +1470,19 @@
       onpointerdown={handlePointerDown}
       onpointermove={handlePointerMove}
       onpointerup={handlePointerUp}
+      onpointercancel={handlePointerCancel}
+      onlostpointercapture={handlePointerCancel}
+      oncontextmenu={(e) => {
+        // A right click the program gets is its own, not the webview's menu.
+        if (mouseForProgram(e)) e.preventDefault();
+      }}
     ></canvas>
     {#if ended}
       <div class="banner">[process exited]</div>
     {:else if scrollOffset > 0}
       <div class="banner">history — scroll down to return</div>
+    {:else if copyNote}
+      <div class="banner">{copyNote}</div>
     {/if}
     {#if thumb}
       <!-- The history's scrollbar (card #80): where the view is, and a thumb to drag. -->
@@ -1357,6 +1509,8 @@
       spellcheck="false"
       onkeydown={handleKeydown}
       oninput={handleInput}
+      onfocus={() => focusEvents && writeRaw(focusReport(true))}
+      onblur={() => focusEvents && writeRaw(focusReport(false))}
       onpaste={handlePaste}
       oncopy={handleCopy}
     />

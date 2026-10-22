@@ -1,85 +1,88 @@
 import { describe, expect, it } from "vitest";
 
 import type { KeyLike } from "../core/keys";
-import { keyToBytes, terminalKeyRoute } from "./terminalInput";
+import { encodeKey, PLAIN_KEYS, terminalKeyRoute, type KeyPress } from "./terminalInput";
 
-describe("keyToBytes", () => {
-  it("maps Ctrl+letter to its C0 control byte (Ctrl+A..Z -> 0x01..0x1a)", () => {
-    expect(keyToBytes("a", true)).toEqual(new Uint8Array([0x01]));
-    expect(keyToBytes("A", true)).toEqual(new Uint8Array([0x01]));
-    expect(keyToBytes("c", true)).toEqual(new Uint8Array([0x03]));
-    expect(keyToBytes("z", true)).toEqual(new Uint8Array([0x1a]));
+describe("encodeKey", () => {
+  const press = (key: string, held: Partial<KeyPress> = {}): KeyPress => ({
+    key,
+    code: "",
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...held,
+  });
+  const text = (bytes: Uint8Array | null) => (bytes ? new TextDecoder().decode(bytes) : null);
+  const plain = (key: string, held: Partial<KeyPress> = {}) => text(encodeKey(press(key, held), PLAIN_KEYS));
+  const kitty = (key: string, held: Partial<KeyPress> = {}) =>
+    text(encodeKey(press(key, held), { appCursorKeys: false, kittyFlags: 1 }));
+
+  it("sends the control bytes a shell's line editor expects", () => {
+    expect(plain("a", { ctrlKey: true, code: "KeyA" })).toBe("\x01");
+    expect(plain("C", { ctrlKey: true, shiftKey: true, code: "KeyC" })).toBe("\x03");
+    expect(plain("[", { ctrlKey: true })).toBe("\x1b");
+    expect(plain(" ", { ctrlKey: true, code: "Space" })).toBe("\x00");
+    expect(plain("Enter")).toBe("\r");
+    expect(plain("Backspace")).toBe("\x7f");
+    expect(plain("Tab")).toBe("\t");
+    expect(plain("Tab", { shiftKey: true })).toBe("\x1b[Z");
+    expect(plain("Escape")).toBe("\x1b");
+    expect(plain("Delete")).toBe("\x1b[3~");
+    expect(plain("PageUp")).toBe("\x1b[5~");
   });
 
-  it("does not map Ctrl+non-letter", () => {
-    expect(keyToBytes("1", true)).toBeNull();
-    expect(keyToBytes("Enter", true)).not.toBeNull(); // Enter is its own case, not Ctrl-mapped
+  it("leaves printable text and modifier keys alone to the input event", () => {
+    expect(plain("a", { code: "KeyA" })).toBeNull();
+    expect(plain("A", { shiftKey: true, code: "KeyA" })).toBeNull();
+    expect(plain("Shift")).toBeNull();
+    expect(plain("k", { metaKey: true, code: "KeyK" })).toBeNull();
   });
 
-  it("maps Enter/Backspace/Tab/Escape to their fixed C0 bytes regardless of Ctrl", () => {
-    expect(keyToBytes("Enter", false)).toEqual(new Uint8Array([0x0d]));
-    expect(keyToBytes("Backspace", false)).toEqual(new Uint8Array([0x7f]));
-    expect(keyToBytes("Tab", false)).toEqual(new Uint8Array([0x09]));
-    expect(keyToBytes("Escape", false)).toEqual(new Uint8Array([0x1b]));
+  it("puts modifiers on cursor, editing and F-keys and honours the cursor keys' application mode", () => {
+    expect(plain("ArrowUp")).toBe("\x1b[A");
+    expect(text(encodeKey(press("ArrowUp"), { appCursorKeys: true, kittyFlags: 0 }))).toBe("\x1bOA");
+    expect(plain("ArrowRight", { ctrlKey: true })).toBe("\x1b[1;5C");
+    expect(plain("ArrowUp", { altKey: true })).toBe("\x1b[1;3A");
+    expect(plain("Home", { shiftKey: true })).toBe("\x1b[1;2H");
+    expect(plain("Delete", { ctrlKey: true })).toBe("\x1b[3;5~");
+    expect(plain("F1")).toBe("\x1bOP");
+    expect(plain("F2", { shiftKey: true })).toBe("\x1b[1;2Q");
+    expect(plain("F5")).toBe("\x1b[15~");
+    expect(plain("F12", { ctrlKey: true })).toBe("\x1b[24;5~");
   });
 
-  it("returns null for a plain printable key (left to the input-event path)", () => {
-    expect(keyToBytes("a", false)).toBeNull();
-    expect(keyToBytes("5", false)).toBeNull();
+  it("tells Shift, Alt and Ctrl with Enter and Backspace apart", () => {
+    expect(plain("Enter", { shiftKey: true })).toBe("\x1b\r");
+    expect(plain("Enter", { altKey: true })).toBe("\x1b\r");
+    expect(plain("Backspace", { altKey: true })).toBe("\x1b\x7f");
+    expect(plain("Backspace", { ctrlKey: true })).toBe("\x08");
+    expect(kitty("Enter", { shiftKey: true })).toBe("\x1b[13;2u");
+    expect(kitty("Enter", { ctrlKey: true })).toBe("\x1b[13;5u");
+    expect(kitty("Enter"), "plain Enter stays legacy under the kitty protocol").toBe("\r");
   });
 
-  it("returns null for keys with no mapping at all (bare modifier keys, unhandled function keys)", () => {
-    expect(keyToBytes("Shift", false)).toBeNull();
-    expect(keyToBytes("F1", false)).toBeNull();
+  it("uses Option as Alt only where it composes nothing (German layout: Option+L is @)", () => {
+    expect(plain("@", { altKey: true, code: "KeyL" })).toBeNull();
+    expect(plain("∫", { altKey: true, code: "KeyB" })).toBeNull();
+    expect(plain("b", { altKey: true, code: "KeyB" })).toBe("\x1bb");
+    expect(kitty("b", { altKey: true, code: "KeyB" })).toBe("\x1b[98;3u");
   });
 
-  // Checkpoint 5i (owner-reported: shell autosuggestion-accept via → did
-  // nothing) — standard xterm "normal cursor key mode" (DECCKM reset) CSI
-  // sequences, the encoding a shell's own line editor always expects. See
-  // this file's own `keyToBytes` comment for the full story, including the
-  // one known limitation (a full-screen program in DECCKM "application
-  // cursor key" mode isn't specially handled — not tracked by the engine
-  // at all yet).
-  it("maps arrow keys to their xterm normal-mode CSI sequences", () => {
-    expect(keyToBytes("ArrowUp", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x41]));
-    expect(keyToBytes("ArrowDown", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x42]));
-    expect(keyToBytes("ArrowRight", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x43]));
-    expect(keyToBytes("ArrowLeft", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x44]));
+  it("disambiguates under the kitty protocol: Escape and Ctrl+letter as CSI u", () => {
+    expect(kitty("Escape")).toBe("\x1b[27u");
+    expect(kitty("c", { ctrlKey: true, code: "KeyC" })).toBe("\x1b[99;5u");
+    expect(kitty("Tab", { shiftKey: true }), "Shift+Tab stays CSI Z, which crossterm reads as BackTab").toBe("\x1b[Z");
   });
 
-  it("maps Home/End/PageUp/PageDown/Delete to their standard CSI sequences", () => {
-    expect(keyToBytes("Home", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x48]));
-    expect(keyToBytes("End", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x46]));
-    expect(keyToBytes("PageUp", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x35, 0x7e]));
-    expect(keyToBytes("PageDown", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x36, 0x7e]));
-    expect(keyToBytes("Delete", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x33, 0x7e]));
+  it("reads Ctrl with Option by the key's plain letter, and keeps Ctrl+Shift+Tab as CSI Z", () => {
+    expect(plain("ﬁ", { ctrlKey: true, altKey: true, code: "KeyF" })).toBe("\x1b\x06");
+    expect(plain("Tab", { ctrlKey: true, shiftKey: true })).toBe("\x1b[Z");
+    expect(kitty("Backspace", { altKey: true })).toBe("\x1b[127;3u");
   });
 
-  // Checkpoint 5q (owner-reported: Shift+Tab — Claude Code's own mode-
-  // cycling shortcut — did nothing in this terminal). `shiftKey` is a new,
-  // defaulted-to-`false` third parameter; every other `keyToBytes` call in
-  // this file (all two-argument) exercises that default and must keep
-  // returning plain Tab's 0x09, unchanged.
-  it("maps Shift+Tab to CSI Z, and plain Tab to 0x09 regardless of the shiftKey default", () => {
-    expect(keyToBytes("Tab", false, true)).toEqual(new Uint8Array([0x1b, 0x5b, 0x5a]));
-    expect(keyToBytes("Tab", false, false)).toEqual(new Uint8Array([0x09]));
-    expect(keyToBytes("Tab", false)).toEqual(new Uint8Array([0x09])); // shiftKey defaults to false
-  });
-
-  it("Ctrl+Shift+Tab still maps to CSI Z (Ctrl-letter branch only ever matches single-character keys)", () => {
-    expect(keyToBytes("Tab", true, true)).toEqual(new Uint8Array([0x1b, 0x5b, 0x5a]));
-  });
-
-  it("arrow/navigation keys are unaffected by Ctrl (no Ctrl+key mapping exists for any of them)", () => {
-    // `ctrlKey && key.length === 1` only matches single-character keys —
-    // every key in this group is a multi-character `e.key` value, so the
-    // Ctrl-letter branch never applies to any of them regardless of
-    // `ctrlKey`; each still maps to its own plain sequence.
-    const bytes = new Uint8Array([0x1b, 0x5b, 0x43]);
-    for (const key of ["ArrowRight", "Home", "End", "PageUp", "PageDown", "Delete"]) {
-      expect(keyToBytes(key, true), key).not.toBeNull();
-    }
-    expect(keyToBytes("ArrowRight", true)).toEqual(bytes);
+  it("leaves characters to the input event while AltGr types them", () => {
+    expect(text(encodeKey(press("@", { ctrlKey: true, altKey: true, code: "KeyQ" }), PLAIN_KEYS, true))).toBeNull();
   });
 });
 

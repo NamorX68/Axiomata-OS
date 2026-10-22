@@ -13,6 +13,12 @@ unicode-width.workspace = true
 # can send them straight over IPC instead of hand-rolling a parallel DTO —
 # a plain derive, not a step back on the "no Tauri/axiomata-core" rule.
 serde.workspace = true
+# OSC 52: a program puts text on the clipboard base64-encoded (TUI0b).
+base64.workspace = true
+
+[dev-dependencies]
+# The wire form of a cell is checked as JSON, the form the glue sends.
+serde_json.workspace = true
 
 [[bin]]
 name = "term-poc"

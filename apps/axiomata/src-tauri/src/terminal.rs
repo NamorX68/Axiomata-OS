@@ -38,9 +38,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, Once};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use axiomata_terminal::{Cell, MouseReporting, PtySession, Terminal};
+use axiomata_terminal::{Cell, MouseReporting, MouseTracking, PtySession, Terminal};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -67,7 +67,10 @@ use tauri::{AppHandle, Manager, State};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalEvent {
     Screen {
-        rows: Vec<Vec<Cell>>,
+        /// One entry per screen row: the row's cells where it changed since the previous frame, `null` where it did
+        /// not (TUI0b) — the renderer keeps what it drew. Every row is sent after a resize and on a session's first
+        /// frame.
+        rows: Vec<Option<Vec<Cell>>>,
         cursor_row: u16,
         cursor_col: u16,
         bracketed_paste: bool,
@@ -83,6 +86,21 @@ pub enum TerminalEvent {
         alt_screen: bool,
         /// How many lines of history lie above the screen — the scrollbar's length.
         scrollback: usize,
+        /// Whether the cursor is shown (`?25`) and its shape (DECSCUSR, 0–6).
+        cursor_visible: bool,
+        cursor_shape: u8,
+        /// What the input must send (TUI0b): which mouse events beyond the wheel, focus reports, the cursor keys'
+        /// application mode, the kitty keyboard protocol's flags.
+        mouse_tracking: MouseTracking,
+        focus_events: bool,
+        app_cursor_keys: bool,
+        kitty_flags: u16,
+        /// OSC 8 URLs new since the previous frame: the renderer appends them to its table, a cell's `link` `n` is the
+        /// table's entry `n - 1`.
+        new_links: Vec<String>,
+        /// Text the program put on the clipboard (OSC 52) since the previous frame.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        clipboard: Option<String>,
     },
     /// The shell process ended (on its own, or the PTY tore down) — not an
     /// error, and not something `terminal_write`/`_resize` should still be
@@ -109,6 +127,39 @@ struct Session {
     terminal: Terminal,
     on_output: Channel<TerminalEvent>,
     dirty: bool,
+    /// What the renderer was last sent (TUI0b): only rows that differ from it travel again.
+    sent: Sent,
+    /// Since when the program has held a synchronized frame (`?2026`) the ticker is waiting out.
+    held_since: Option<Instant>,
+    /// Where the terminal's answers go to be written (TUI0b): a thread of the session's own, so a program that does
+    /// not read its input blocks that thread, never the reader draining its output. `None` in tests without one.
+    replies: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+}
+
+/// How many answers may wait for the writer: past it they are dropped — a stale answer is worth nothing, and a flood
+/// of queries must not queue without bound.
+const PENDING_REPLIES: usize = 16;
+
+/// Starts the thread that writes a session's answers to its PTY; it ends when the session (its sender) goes.
+fn spawn_reply_writer(
+    writer: axiomata_terminal::PtyWriter,
+) -> std::sync::mpsc::SyncSender<Vec<u8>> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<Vec<u8>>(PENDING_REPLIES);
+    thread::spawn(move || {
+        for replies in receiver {
+            if writer.write(&replies).is_err() {
+                break;
+            }
+        }
+    });
+    sender
+}
+
+/// What a session's renderer already has: the rows of the last frame and how many links.
+#[derive(Default)]
+struct Sent {
+    rows: Vec<Vec<Cell>>,
+    links: usize,
 }
 
 /// Tauri-managed registry of running terminal sessions, keyed by the id
@@ -145,17 +196,27 @@ fn next_session_id() -> String {
     format!("term-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-/// A session's current screen as a `TerminalEvent::Screen`. Takes `&mut
-/// Terminal` (not `&Terminal`, unlike every other read-only accessor in this
-/// file) because `bell` reads and clears `Screen::take_bell()` as a side
-/// effect — see that method's own doc comment for why it's consume-once
-/// rather than a plain getter.
-fn screen_event(terminal: &mut Terminal) -> TerminalEvent {
+/// A session's current screen as a `TerminalEvent::Screen`, carrying only what `sent` does not have yet — and
+/// updating `sent` to it. Takes `&mut Terminal` because `bell` and `clipboard` are taken from it, read once.
+fn screen_event(terminal: &mut Terminal, sent: &mut Sent) -> TerminalEvent {
     let bell = terminal.take_bell();
+    let clipboard = terminal.take_clipboard();
     let screen = terminal.screen();
     let (cursor_row, cursor_col) = screen.cursor();
+    let now = screen.rows();
+    // A resize or a first frame: every row, the renderer starts over.
+    let whole = sent.rows.len() != now.len()
+        || sent.rows.first().map(Vec::len) != now.first().map(Vec::len);
+    let rows = now
+        .iter()
+        .enumerate()
+        .map(|(at, row)| (whole || sent.rows[at] != *row).then(|| row.clone()))
+        .collect();
+    sent.rows = now.to_vec();
+    let new_links = screen.links()[sent.links..].to_vec();
+    sent.links = screen.links().len();
     TerminalEvent::Screen {
-        rows: screen.rows().to_vec(),
+        rows,
         cursor_row,
         cursor_col,
         bracketed_paste: screen.bracketed_paste(),
@@ -163,7 +224,28 @@ fn screen_event(terminal: &mut Terminal) -> TerminalEvent {
         mouse: screen.mouse_reporting(),
         alt_screen: screen.in_alt_screen(),
         scrollback: screen.scrollback_len(),
+        cursor_visible: screen.cursor_visible(),
+        cursor_shape: screen.cursor_shape(),
+        mouse_tracking: screen.mouse_tracking(),
+        focus_events: screen.focus_events(),
+        app_cursor_keys: screen.app_cursor_keys(),
+        kitty_flags: screen.kitty_flags(),
+        new_links,
+        clipboard,
     }
+}
+
+/// The longest a program's synchronized frame (`?2026`) holds the pane back: one that never ends it still gets drawn.
+const SYNC_HOLD: Duration = Duration::from_millis(150);
+
+/// Whether a session's frame waits for the program to finish drawing it (`?2026` on, for at most [`SYNC_HOLD`]).
+fn held(session: &mut Session, now: Instant) -> bool {
+    if !session.terminal.screen().synchronized() {
+        session.held_since = None;
+        return false;
+    }
+    let since = *session.held_since.get_or_insert(now);
+    now.duration_since(since) < SYNC_HOLD
 }
 
 /// How often [`spawn_flush_ticker`] checks sessions for unsent output. 8ms
@@ -206,12 +288,15 @@ fn spawn_flush_ticker(app: AppHandle) {
             let sessions = app.state::<TerminalSessions>();
             let mut guard = sessions.lock();
             let mut dead = Vec::new();
+            let now = Instant::now();
             for (id, session) in guard.iter_mut() {
-                if !session.dirty {
+                // `held` runs on every tick, so the end of one synchronized frame is seen even when the next one starts
+                // before anything else changed.
+                if held(session, now) || !session.dirty {
                     continue;
                 }
                 session.dirty = false;
-                let event = screen_event(&mut session.terminal);
+                let event = screen_event(&mut session.terminal, &mut session.sent);
                 if session.on_output.send(event).is_err() {
                     dead.push(id.clone());
                 }
@@ -290,6 +375,16 @@ pub struct TerminalSpawnOptions {
     /// via `Terminal::with_scrollback_limit`, including `Some(0)` for no
     /// scrollback at all — see that method's own doc comment.
     pub scrollback_limit: Option<usize>,
+    /// The pane's foreground and background (TUI0b), which a program's OSC 10/11 query is answered with — a TUI picks
+    /// its light or dark look by them. `None` leaves such queries unanswered.
+    pub colors: Option<PaneColors>,
+}
+
+/// A pane's text and background colours as RGB.
+#[derive(Clone, Copy, Deserialize)]
+pub struct PaneColors {
+    pub foreground: [u8; 3],
+    pub background: [u8; 3],
 }
 
 /// How long a terminal may take to start before the pane is told it did not. A start that hangs (the child process stuck
@@ -337,14 +432,18 @@ pub async fn terminal_spawn(
         }
     };
     let mut reader = pty.try_clone_reader().map_err(|err| err.to_string())?;
-    let terminal = match options.scrollback_limit {
+    let mut terminal = match options.scrollback_limit {
         Some(limit) => Terminal::new(rows, cols).with_scrollback_limit(limit),
         None => Terminal::new(rows, cols),
     };
+    if let Some(colors) = options.colors {
+        terminal.set_colors(colors.foreground, colors.background);
+    }
 
     TICKER_STARTED.call_once(|| spawn_flush_ticker(app.clone()));
 
     let id = next_session_id();
+    let replies = spawn_reply_writer(pty.writer());
     sessions.lock().insert(
         id.clone(),
         Session {
@@ -352,6 +451,9 @@ pub async fn terminal_spawn(
             terminal,
             on_output: on_output.clone(),
             dirty: false,
+            sent: Sent::default(),
+            held_since: None,
+            replies: Some(replies),
         },
     );
 
@@ -375,6 +477,15 @@ pub async fn terminal_spawn(
             };
             session.terminal.feed(&buf[..n]);
             session.dirty = true;
+            // What the program asked the terminal (TUI0b) is answered at once: a TUI waits for these before it
+            // draws. They are handed to the session's writer thread: a program that does not read its input blocks
+            // that write, and must neither stop this thread draining its output nor hold the registry's lock.
+            let replies = session.terminal.take_replies();
+            if !replies.is_empty()
+                && let Some(sender) = &session.replies
+            {
+                let _ = sender.try_send(replies);
+            }
         }
         // One forced flush of whatever the ticker hasn't sent yet, before
         // the session disappears — otherwise the frontend's last-seen screen
@@ -389,7 +500,7 @@ pub async fn terminal_spawn(
         if let Some(session) = guard.get_mut(&closing_id)
             && session.dirty
         {
-            let event = screen_event(&mut session.terminal);
+            let event = screen_event(&mut session.terminal, &mut session.sent);
             let _ = session.on_output.send(event);
         }
         // Removing the whole `Session` here — not just the `PtySession` —
@@ -417,11 +528,13 @@ pub fn terminal_write(
     id: String,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    let mut guard = sessions.lock();
-    let session = guard
-        .get_mut(&id)
+    // The write happens outside the registry's lock: it blocks while the program does not read its input (TUI0b).
+    let writer = sessions
+        .lock()
+        .get(&id)
+        .map(|session| session.pty.writer())
         .ok_or_else(|| format!("no terminal session {id:?}"))?;
-    session.pty.write(&data).map_err(|err| err.to_string())
+    writer.write(&data).map_err(|err| err.to_string())
 }
 
 /// Resizes a session's PTY (tile resize -> `SIGWINCH` for the shell) and its
@@ -444,6 +557,24 @@ pub fn terminal_resize(
         .resize(rows, cols)
         .map_err(|err| err.to_string())?;
     session.terminal.resize(rows, cols);
+    Ok(())
+}
+
+/// Hands a session the colours it is drawn with now (the theme changed): OSC 10/11 queries are answered with them.
+/// An unknown `id` is an error, as for `terminal_write`.
+#[tauri::command]
+pub fn terminal_set_colors(
+    sessions: State<'_, TerminalSessions>,
+    id: String,
+    colors: PaneColors,
+) -> Result<(), String> {
+    let mut guard = sessions.lock();
+    let session = guard
+        .get_mut(&id)
+        .ok_or_else(|| format!("no terminal session {id:?}"))?;
+    session
+        .terminal
+        .set_colors(colors.foreground, colors.background);
     Ok(())
 }
 
@@ -559,6 +690,9 @@ mod tests {
                 terminal,
                 on_output: Channel::new(|_| Ok(())),
                 dirty: false,
+                sent: Sent::default(),
+                held_since: None,
+                replies: None,
             },
         );
         assert!(sessions.lock().contains_key("term-test"));
@@ -617,13 +751,13 @@ mod tests {
             cursor_row,
             cursor_col,
             ..
-        } = screen_event(&mut terminal)
+        } = screen_event(&mut terminal, &mut Sent::default())
         else {
             panic!("expected a Screen event");
         };
         let line_of = |row: &[Cell]| row.iter().map(|c| c.ch).collect::<String>();
-        assert_eq!(line_of(&rows[0]), "hi   ");
-        assert_eq!(line_of(&rows[1]), "     ");
+        assert_eq!(line_of(rows[0].as_ref().unwrap()), "hi   ");
+        assert_eq!(line_of(rows[1].as_ref().unwrap()), "     ");
         assert_eq!((cursor_row, cursor_col), (0, 2));
     }
 
@@ -638,18 +772,19 @@ mod tests {
         let mut terminal = Terminal::new(1, 2);
         terminal.feed(b"\x1b[1;31mA");
 
-        let TerminalEvent::Screen { rows, .. } = screen_event(&mut terminal) else {
+        let TerminalEvent::Screen { rows, .. } = screen_event(&mut terminal, &mut Sent::default())
+        else {
             panic!("expected a Screen event");
         };
 
-        let hot = rows[0][0];
+        let hot = rows[0].as_ref().unwrap()[0];
         assert_eq!(hot.ch, 'A');
         assert_eq!(hot.fg, Color::Indexed { index: 1 });
         assert!(hot.bold);
 
         // The second cell was never printed to, so it must keep the
         // renderer's default rather than also picking up the bold-red pen.
-        let untouched = rows[0][1];
+        let untouched = rows[0].as_ref().unwrap()[1];
         assert_eq!(untouched.fg, Color::Default);
         assert!(!untouched.bold);
     }
@@ -664,7 +799,7 @@ mod tests {
 
         let TerminalEvent::Screen {
             bracketed_paste, ..
-        } = screen_event(&mut terminal)
+        } = screen_event(&mut terminal, &mut Sent::default())
         else {
             panic!("expected a Screen event");
         };
@@ -673,7 +808,7 @@ mod tests {
         terminal.feed(b"\x1b[?2004h");
         let TerminalEvent::Screen {
             bracketed_paste, ..
-        } = screen_event(&mut terminal)
+        } = screen_event(&mut terminal, &mut Sent::default())
         else {
             panic!("expected a Screen event");
         };
@@ -689,7 +824,7 @@ mod tests {
             alt_screen,
             scrollback,
             ..
-        } = screen_event(&mut terminal)
+        } = screen_event(&mut terminal, &mut Sent::default())
         else {
             panic!("expected a Screen event");
         };
@@ -701,11 +836,87 @@ mod tests {
         terminal.feed(b"\x1b[?1049h\x1b[?1000;1006h");
         let TerminalEvent::Screen {
             mouse, alt_screen, ..
-        } = screen_event(&mut terminal)
+        } = screen_event(&mut terminal, &mut Sent::default())
         else {
             panic!("expected a Screen event");
         };
         assert_eq!((mouse, alt_screen), (MouseReporting::Sgr, true));
+    }
+
+    /// TUI0b: a frame carries only the rows that changed since the one before; the links and the clipboard text
+    /// travel once.
+    #[test]
+    fn a_frame_carries_only_what_changed_since_the_last_one() {
+        let mut terminal = Terminal::new(3, 4);
+        let mut sent = Sent::default();
+        terminal.feed(b"ab");
+        let TerminalEvent::Screen { rows, .. } = screen_event(&mut terminal, &mut sent) else {
+            panic!("expected a Screen event");
+        };
+        assert!(rows.iter().all(Option::is_some), "the first frame is whole");
+        terminal.feed(b"\r\n\x1b]8;;https://a.example\x1b\\cd\x1b]8;;\x1b\\\x1b]52;c;aGk=\x07");
+        let TerminalEvent::Screen {
+            rows,
+            new_links,
+            clipboard,
+            ..
+        } = screen_event(&mut terminal, &mut sent)
+        else {
+            panic!("expected a Screen event");
+        };
+        assert_eq!(
+            rows.iter().map(Option::is_some).collect::<Vec<_>>(),
+            [false, true, false]
+        );
+        assert_eq!(new_links, ["https://a.example"]);
+        assert_eq!(clipboard.as_deref(), Some("hi"));
+        let TerminalEvent::Screen {
+            rows,
+            new_links,
+            clipboard,
+            ..
+        } = screen_event(&mut terminal, &mut sent)
+        else {
+            panic!("expected a Screen event");
+        };
+        assert!(rows.iter().all(Option::is_none) && new_links.is_empty() && clipboard.is_none());
+        terminal.resize(2, 4);
+        let TerminalEvent::Screen { rows, .. } = screen_event(&mut terminal, &mut sent) else {
+            panic!("expected a Screen event");
+        };
+        assert!(
+            rows.len() == 2 && rows.iter().all(Option::is_some),
+            "a resize sends it whole"
+        );
+    }
+
+    /// TUI0b: a frame the program draws under `?2026` waits for it to finish — but never longer than `SYNC_HOLD`.
+    #[test]
+    fn a_synchronized_frame_is_held_for_a_while_and_no_longer() {
+        let pty = PtySession::spawn(1, 5, Some("/bin/sh"), None, &[])
+            .expect("a shell must start for this test");
+        let (channel, _events) = recording_channel();
+        let mut session = Session {
+            pty,
+            terminal: Terminal::new(1, 5),
+            on_output: channel,
+            dirty: true,
+            sent: Sent::default(),
+            held_since: None,
+            replies: None,
+        };
+        let start = Instant::now();
+        assert!(!held(&mut session, start), "nothing synchronized: not held");
+        session.terminal.feed(b"\x1b[?2026h");
+        assert!(held(&mut session, start));
+        assert!(held(&mut session, start + SYNC_HOLD / 2));
+        assert!(
+            !held(&mut session, start + SYNC_HOLD),
+            "a frame never ended is drawn anyway"
+        );
+        session.terminal.feed(b"\x1b[?2026l");
+        assert!(!held(&mut session, start + SYNC_HOLD));
+        assert!(session.held_since.is_none());
     }
 
     /// `screen_event`'s `bell` field (Checkpoint 5b) has to actually read
@@ -716,19 +927,22 @@ mod tests {
     fn screen_event_bell_is_true_once_then_false_again() {
         let mut terminal = Terminal::new(1, 5);
 
-        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal) else {
+        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal, &mut Sent::default())
+        else {
             panic!("expected a Screen event");
         };
         assert!(!bell, "no BEL has arrived yet");
 
         terminal.feed(b"\x07");
-        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal) else {
+        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal, &mut Sent::default())
+        else {
             panic!("expected a Screen event");
         };
         assert!(bell);
 
         // The same BEL must not show up again in the *next* snapshot.
-        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal) else {
+        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal, &mut Sent::default())
+        else {
             panic!("expected a Screen event");
         };
         assert!(!bell);
@@ -780,6 +994,9 @@ mod tests {
             terminal: Terminal::new(1, 5),
             on_output: channel,
             dirty: false,
+            sent: Sent::default(),
+            held_since: None,
+            replies: None,
         };
         assert!(!session.dirty, "a fresh session has nothing pending");
 
@@ -799,7 +1016,7 @@ mod tests {
         // / `session.dirty = false` / `screen_event` / `send` sequence.
         if session.dirty {
             session.dirty = false;
-            let event = screen_event(&mut session.terminal);
+            let event = screen_event(&mut session.terminal, &mut session.sent);
             session
                 .on_output
                 .send(event)
@@ -822,7 +1039,7 @@ mod tests {
         // nothing changed, so there's nothing to coalesce or send.
         if session.dirty {
             session.dirty = false;
-            let event = screen_event(&mut session.terminal);
+            let event = screen_event(&mut session.terminal, &mut session.sent);
             session
                 .on_output
                 .send(event)
@@ -858,6 +1075,9 @@ mod tests {
                 terminal,
                 on_output: channel.clone(),
                 dirty: true,
+                sent: Sent::default(),
+                held_since: None,
+                replies: None,
             },
         );
 
@@ -867,7 +1087,7 @@ mod tests {
         if let Some(session) = guard.get_mut("term-exit-dirty")
             && session.dirty
         {
-            let event = screen_event(&mut session.terminal);
+            let event = screen_event(&mut session.terminal, &mut session.sent);
             let _ = session.on_output.send(event);
         }
         guard.remove("term-exit-dirty");
@@ -909,6 +1129,9 @@ mod tests {
                 terminal: Terminal::new(1, 5),
                 on_output: channel.clone(),
                 dirty: false,
+                sent: Sent::default(),
+                held_since: None,
+                replies: None,
             },
         );
 
@@ -916,7 +1139,7 @@ mod tests {
         if let Some(session) = guard.get_mut("term-exit-clean")
             && session.dirty
         {
-            let event = screen_event(&mut session.terminal);
+            let event = screen_event(&mut session.terminal, &mut session.sent);
             let _ = session.on_output.send(event);
         }
         guard.remove("term-exit-clean");

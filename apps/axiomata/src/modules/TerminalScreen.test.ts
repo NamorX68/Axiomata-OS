@@ -3,8 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   BLOCK_ELEMENT_RECTS,
   BOX_DRAWING_LINES,
+  cellColors,
   cellFont,
+  cssColorToRgb,
   isCellSelected,
+  mergeRows,
+  openableUrl,
+  programCursorStyle,
   POWERLINE_SHAPES,
   resolveBgColor,
   resolveColor,
@@ -339,5 +344,56 @@ describe("POWERLINE_SHAPES (owner, 2026-10-12)", () => {
   it("points the arrows and caps towards the side they close", () => {
     expect(POWERLINE_SHAPES["\ue0b0"]).toMatchObject({ points: [[0, 0], [1, 0.5], [0, 1]] });
     expect(POWERLINE_SHAPES["\ue0b6"]).toMatchObject({ kind: "half-ellipse", bulge: "left" });
+  });
+});
+
+describe("TUI0b: what a full-screen program draws", () => {
+  it("swaps text and background for reverse video, defaults included", () => {
+    const reversed = { ...cell("x"), reverse: true };
+    expect(cellColors(reversed, "#eeeeee", "#111111", THEMES.xterm, false)).toEqual({
+      fg: "#111111",
+      bg: "#eeeeee",
+      bgIsDefault: false,
+    });
+    expect(cellColors(cell("x"), "#eeeeee", "#111111", THEMES.xterm, false).bgIsDefault).toBe(true);
+  });
+
+  it("takes the cursor shape the program asked for, the setting where it asked for the default", () => {
+    expect(programCursorStyle(0, "outline")).toBe("outline");
+    expect(programCursorStyle(2, "outline")).toBe("block");
+    expect(programCursorStyle(4, "block")).toBe("underline");
+    expect(programCursorStyle(6, "block")).toBe("bar");
+  });
+
+  it("keeps the rows a frame does not carry", () => {
+    const before = [row("ab"), row("cd")];
+    expect(mergeRows(before, [null, row("xy")]).map((r) => r.map((c) => c.ch).join(""))).toEqual(["ab", "xy"]);
+  });
+
+  it("opens only web and mail links", () => {
+    expect(openableUrl("https://example.com/a")).toBe("https://example.com/a");
+    expect(openableUrl("mailto:a@b.c")).toBe("mailto:a@b.c");
+    expect(openableUrl("mailto:a@b.c?attach=/etc/passwd")).toBe("mailto:a@b.c");
+    expect(openableUrl("javascript:alert(1)")).toBeNull();
+    expect(openableUrl("file:///etc/passwd")).toBeNull();
+    expect(openableUrl("vscode://x")).toBeNull();
+    expect(openableUrl("not a url")).toBeNull();
+    expect(openableUrl(undefined)).toBeNull();
+  });
+
+  it("reads the theme's colours as RGB for OSC 10/11", () => {
+    expect(cssColorToRgb("#1a1b26")).toEqual([0x1a, 0x1b, 0x26]);
+    expect(cssColorToRgb("#fff")).toEqual([255, 255, 255]);
+    expect(cssColorToRgb("rgb(10, 20, 30)")).toEqual([10, 20, 30]);
+    expect(cssColorToRgb("var(--x)")).toBeNull();
+  });
+
+  it("copies a wide character once and a combining mark with its letter", () => {
+    const wide: TermCell[] = [
+      { ...cell("漢"), wide: true },
+      { ...cell(" "), spacer: true },
+      { ...cell("e"), combining: "\u0301" },
+    ];
+    expect(selectionText([wide], { row: 0, col: 0 }, { row: 0, col: 2 })).toBe("漢e\u0301");
   });
 });

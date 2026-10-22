@@ -17,9 +17,15 @@
 //! `ESC 7`/`ESC 8` saved cursor plus `ESC D`/`E`/`M`. A raw capture of
 //! Claude Code's TUI showed it scrolls its transcript with `CSI 2;21r`
 //! `CSI nS` `CSI r` — dropping those left the old lines in place and drew
-//! the new ones over them. Still no wide-char spacer cells (a width-2
-//! character occupies one cell and simply advances the cursor by 2 — real
-//! terminals also blank the following cell, not implemented here).
+//! the new ones over them.
+//!
+//! TUI0b (`docs/plans/terminal-tui.md`) made it a terminal a full-screen TUI
+//! can rely on: it answers the queries a TUI starts with (device attributes,
+//! DECRQM, the cursor position, XTVERSION, colours, the kitty keyboard
+//! query), keeps `?25`, focus, synchronized output and the mouse modes apart,
+//! the rest of SGR (dim, italic, reverse, invisible, strike, underline styles
+//! and colour), wide characters as a cell and its spacer, combining marks,
+//! OSC 8 URLs and OSC 52 clipboard writes.
 
 use std::collections::VecDeque;
 
@@ -94,14 +100,82 @@ pub struct Cell {
     /// terminals) *suppresses* that fallback underline for its own
     /// hyperlink-hover styling instead — this crate had no OSC 8 handling
     /// at all, so every one of those underline bytes rendered permanently,
-    /// looking visibly different from Ghostty. Deliberately just a `bool`
-    /// (not the actual URL/id): the only consumer so far is the renderer's
-    /// "was this underlined via a hyperlink, and if so don't draw the
-    /// underline" decision — no click-to-open support yet, which is the
-    /// only reason an actual URL would matter. See [`Screen::active_hyperlink`]
+    /// looking visibly different from Ghostty. The renderer's "was this
+    /// underlined via a hyperlink, and if so don't draw the underline"
+    /// decision reads this; the URL itself is [`Self::link`]'s (TUI0b). See
+    /// [`Screen::active_hyperlink`]
     /// for how this gets set, and why it's tracked independently of `pen`'s
     /// own SGR-reset lifecycle rather than as a `pen`-only attribute.
     pub hyperlink: bool,
+    /// The rest of the SGR attributes a TUI draws with (TUI0b): faint text, italics, foreground and background
+    /// swapped, text that takes its cell but is not shown, a line through it. Left out of the wire form while off.
+    #[serde(skip_serializing_if = "is_false")]
+    pub dim: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub italic: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub reverse: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub invisible: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub strike: bool,
+    /// How `underline` is drawn when it is not a single straight line (`CSI 4:3 m` curly, `21` double, …).
+    #[serde(skip_serializing_if = "UnderlineStyle::is_plain")]
+    pub underline_style: UnderlineStyle,
+    /// The underline's own colour (`58`), the text's when default.
+    #[serde(skip_serializing_if = "Color::is_default")]
+    pub underline_color: Color,
+    /// The first half of a character two cells wide; the cell to its right is its [`Self::spacer`].
+    #[serde(skip_serializing_if = "is_false")]
+    pub wide: bool,
+    /// The second half of a wide character: drawn by the cell to its left, nothing of its own.
+    #[serde(skip_serializing_if = "is_false")]
+    pub spacer: bool,
+    /// A combining mark drawn over `ch` (`e` + U+0301 is `é`); one is kept, more are dropped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combining: Option<char>,
+    /// The OSC 8 link this cell belongs to: an id into [`Screen::links`] (1-based), 0 for none or a link past the
+    /// table's cap.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub link: u32,
+}
+
+/// How an underline is drawn (SGR `4:n`, `21`) while `underline` is on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnderlineStyle {
+    #[default]
+    Single,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
+}
+
+impl UnderlineStyle {
+    /// The single straight line, which the wire form leaves out.
+    fn is_plain(&self) -> bool {
+        *self == UnderlineStyle::Single
+    }
+}
+
+impl Color {
+    fn is_default(&self) -> bool {
+        *self == Color::Default
+    }
+}
+
+/// A colour parameter as a byte: past 255 it is 255, not what is left after cutting it (300 would be 44).
+fn byte(value: u16) -> u8 {
+    u8::try_from(value).unwrap_or(u8::MAX)
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl Default for Cell {
@@ -113,9 +187,48 @@ impl Default for Cell {
             bold: false,
             underline: false,
             hyperlink: false,
+            dim: false,
+            italic: false,
+            reverse: false,
+            invisible: false,
+            strike: false,
+            underline_style: UnderlineStyle::Single,
+            underline_color: Color::Default,
+            wide: false,
+            spacer: false,
+            combining: None,
+            link: 0,
         }
     }
 }
+
+/// Which mouse events the program asked for (`?1000` clicks, `?1002` clicks and drags, `?1003` all motion too).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseTracking {
+    #[default]
+    Off,
+    Clicks,
+    Drags,
+    Motion,
+}
+
+/// The most OSC 8 links a screen keeps: a program that opens a new one for every line of a long log stops getting new
+/// ids past it, its text stays marked as a link without one.
+const MAX_LINKS: usize = 4096;
+/// The longest URL an OSC 8 link keeps.
+const MAX_LINK_BYTES: usize = 2048;
+/// The most text an OSC 52 write may put on the clipboard.
+const MAX_CLIPBOARD_BYTES: usize = 1024 * 1024;
+/// How the terminal names itself to XTVERSION (`CSI > q`).
+const TERMINAL_NAME: &str = "Axiomata";
+/// How deep the kitty keyboard protocol's flag stack goes.
+const KITTY_STACK: usize = 16;
+/// The kitty keyboard flags the pane's input speaks: disambiguate escape codes (1) — what Glut, Claude Code and
+/// Opencode ask for. A program asking for more gets this one; the query answers what is in force.
+const KITTY_KNOWN_FLAGS: u16 = 0b1;
+/// The most answers kept for the program before it reads them.
+const MAX_REPLY_BYTES: usize = 64 * 1024;
 
 /// The currently-inactive primary screen's state, kept aside while the
 /// alternate screen is showing (`Screen::saved_primary`) so `CSI ?1049l`
@@ -136,6 +249,7 @@ struct SavedPrimary {
     /// bug `Screen::active_hyperlink`'s own doc comment already warns about
     /// for `CSI 0 m` — just at this boundary instead of that one.
     active_hyperlink: bool,
+    active_link: u32,
 }
 
 /// What `ESC 7` (DECSC) keeps for a later `ESC 8` (DECRC): the cursor
@@ -233,11 +347,38 @@ pub struct Screen {
     scroll_bottom: usize,
     /// Set by `ESC 7`, read by `ESC 8` — see [`SavedCursor`].
     saved_cursor: Option<SavedCursor>,
-    /// Whether a mouse tracking mode is on (`?1000`, `?1002` or `?1003`): the program wants button and wheel events
-    /// itself. Only the wheel is reported so far (card #80); clicks stay the terminal's, for selecting text.
-    mouse_tracking: bool,
+    /// Which mouse events the program asked for (`?1000`, `?1002`, `?1003`): it wants them itself.
+    mouse_tracking: MouseTracking,
     /// Whether the program asked for the SGR mouse encoding (`?1006`).
     mouse_sgr: bool,
+    /// What the terminal answers the program (TUI0b): device attributes, mode reports, the cursor position, colours —
+    /// the glue writes it back to the PTY after each feed ([`Self::take_replies`]).
+    replies: Vec<u8>,
+    /// `?25`: a TUI hides the cursor while it draws, or for good when it draws its own.
+    cursor_visible: bool,
+    /// DECSCUSR (`CSI n SP q`): 0/1 blinking block, 2 block, 3/4 underline, 5/6 bar.
+    cursor_shape: u8,
+    /// `?1`: the cursor keys send `ESC O A` instead of `ESC [ A`.
+    app_cursor_keys: bool,
+    /// `?1004`: the program wants to hear when the pane gains and loses focus.
+    focus_events: bool,
+    /// `?2026`: the program is drawing a frame that must not be shown half done.
+    synchronized: bool,
+    /// The kitty keyboard protocol's flags (`CSI > f u` pushes, `CSI < n u` pops, `CSI = f;m u` sets): the stack of
+    /// the screen showing now; the other screen's is kept in [`Self::other_kitty_flags`], as the protocol keeps one
+    /// per screen.
+    kitty_flags: Vec<u16>,
+    other_kitty_flags: Vec<u16>,
+    /// The OSC 8 links seen, their id is the index plus one ([`Cell::link`]).
+    links: Vec<String>,
+    /// The link printed characters belong to now, 0 for none (see [`Self::active_hyperlink`]).
+    active_link: u32,
+    /// Text a program put on the clipboard (OSC 52), until the glue takes it.
+    clipboard: Option<String>,
+    /// The pane's foreground and background, for OSC 10/11 queries; `None` leaves them unanswered.
+    colors: Option<([u8; 3], [u8; 3])>,
+    /// The next OSC is one [`crate::Terminal`] cut off for its length: it ends without being acted on.
+    drop_osc: bool,
 }
 
 impl Screen {
@@ -264,8 +405,21 @@ impl Screen {
             scroll_top: 0,
             scroll_bottom: rows - 1,
             saved_cursor: None,
-            mouse_tracking: false,
+            mouse_tracking: MouseTracking::Off,
             mouse_sgr: false,
+            replies: Vec::new(),
+            cursor_visible: true,
+            cursor_shape: 0,
+            app_cursor_keys: false,
+            focus_events: false,
+            synchronized: false,
+            kitty_flags: Vec::new(),
+            other_kitty_flags: Vec::new(),
+            links: Vec::new(),
+            active_link: 0,
+            clipboard: None,
+            colors: None,
+            drop_osc: false,
         }
     }
 
@@ -296,8 +450,31 @@ impl Screen {
             for (new_cell, &old_cell) in new_row.iter_mut().zip(old_row.iter()) {
                 *new_cell = old_cell;
             }
+            // A narrower screen can cut a wide character in half at its right edge.
+            Self::mend_wide(new_row);
         }
         grid
+    }
+
+    /// Blanks the half of any wide character whose other half an erase, a shift or a resize took away (TUI0b): half a
+    /// wide character cannot be drawn. A blanked cell keeps its colours.
+    fn mend_wide(row: &mut [Cell]) {
+        let orphan = |cell: Cell| Cell {
+            ch: ' ',
+            wide: false,
+            spacer: false,
+            combining: None,
+            link: 0,
+            hyperlink: false,
+            ..cell
+        };
+        for at in 0..row.len() {
+            let pair_ends_here = row[at].wide && !row.get(at + 1).is_some_and(|next| next.spacer);
+            let pair_starts_before = row[at].spacer && (at == 0 || !row[at - 1].wide);
+            if pair_ends_here || pair_starts_before {
+                row[at] = orphan(row[at]);
+            }
+        }
     }
 
     /// Resizes the active grid (see `resized_grid`) and clamps the
@@ -391,10 +568,70 @@ impl Screen {
     /// How the program wants mouse wheel turns delivered — see [`MouseReporting`].
     pub fn mouse_reporting(&self) -> MouseReporting {
         match (self.mouse_tracking, self.mouse_sgr) {
-            (false, _) => MouseReporting::Off,
-            (true, false) => MouseReporting::X10,
-            (true, true) => MouseReporting::Sgr,
+            (MouseTracking::Off, _) => MouseReporting::Off,
+            (_, false) => MouseReporting::X10,
+            (_, true) => MouseReporting::Sgr,
         }
+    }
+
+    /// Which mouse events beyond the wheel the program wants — see [`MouseTracking`].
+    pub fn mouse_tracking(&self) -> MouseTracking {
+        self.mouse_tracking
+    }
+
+    /// Whether the cursor is shown (`?25`).
+    pub fn cursor_visible(&self) -> bool {
+        self.cursor_visible
+    }
+
+    /// The cursor's shape as DECSCUSR set it (0–6, 0 the terminal's default).
+    pub fn cursor_shape(&self) -> u8 {
+        self.cursor_shape
+    }
+
+    /// Whether the cursor keys are in application mode (`?1`).
+    pub fn app_cursor_keys(&self) -> bool {
+        self.app_cursor_keys
+    }
+
+    /// Whether the program wants focus in/out reports (`?1004`).
+    pub fn focus_events(&self) -> bool {
+        self.focus_events
+    }
+
+    /// Whether the program is in the middle of a synchronized frame (`?2026`).
+    pub fn synchronized(&self) -> bool {
+        self.synchronized
+    }
+
+    /// The kitty keyboard protocol flags in force (0: the protocol is off).
+    pub fn kitty_flags(&self) -> u16 {
+        self.kitty_flags.last().copied().unwrap_or(0)
+    }
+
+    /// The OSC 8 links seen so far; [`Cell::link`] `n` is `links()[n - 1]`.
+    pub fn links(&self) -> &[String] {
+        &self.links
+    }
+
+    /// The pane's colours, which OSC 10/11 queries are answered with.
+    pub fn set_colors(&mut self, foreground: [u8; 3], background: [u8; 3]) {
+        self.colors = Some((foreground, background));
+    }
+
+    /// What the terminal has to answer the program since the last call — the caller writes it to the PTY.
+    pub fn take_replies(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.replies)
+    }
+
+    /// Makes the OSC being read end without being acted on — it was cut off for its length.
+    pub(crate) fn drop_next_osc(&mut self) {
+        self.drop_osc = true;
+    }
+
+    /// Text a program put on the clipboard (OSC 52) since the last call.
+    pub fn take_clipboard(&mut self) -> Option<String> {
+        self.clipboard.take()
     }
 
     /// Reads and clears whether a BEL (`0x07`) has arrived since the last
@@ -479,6 +716,7 @@ impl Screen {
             wrap_pending: self.wrap_pending,
             pen: self.pen,
             active_hyperlink: self.active_hyperlink,
+            active_link: self.active_link,
         });
         self.cursor_row = 0;
         self.cursor_col = 0;
@@ -488,6 +726,9 @@ impl Screen {
         // itself — a hyperlink open on the primary screen has nothing to do
         // with the alternate screen's own, entirely separate content.
         self.active_hyperlink = false;
+        self.active_link = 0;
+        // The kitty keyboard protocol keeps a stack per screen.
+        std::mem::swap(&mut self.kitty_flags, &mut self.other_kitty_flags);
         self.in_alt_screen = true;
     }
 
@@ -506,6 +747,9 @@ impl Screen {
         self.cursor_col = saved.cursor_col.min(self.cols - 1);
         self.pen = saved.pen;
         self.active_hyperlink = saved.active_hyperlink;
+        self.active_link = saved.active_link;
+        std::mem::swap(&mut self.kitty_flags, &mut self.other_kitty_flags);
+        self.other_kitty_flags.clear();
         self.wrap_pending = saved.wrap_pending;
         // The scroll region is left as it is, like xterm: a well-behaved
         // program resets it (`CSI r`) on its way out, and `resize` resets it
@@ -513,9 +757,10 @@ impl Screen {
         self.in_alt_screen = false;
     }
 
-    /// Applies a DEC private mode (`CSI ?<code>h`/`l`): 1049 (alternate
-    /// screen), 2004 (bracketed paste) and the mouse modes 1000/1002/1003/1006;
-    /// anything else (cursor visibility `?25`, etc.) is a silent no-op, same
+    /// Applies a DEC private mode (`CSI ?<code>h`/`l`): 1 (application cursor
+    /// keys), 25 (cursor shown), 1049 (alternate screen), 1004 (focus
+    /// reports), 2004 (bracketed paste), 2026 (synchronized output) and the
+    /// mouse modes 1000/1002/1003/1006; anything else is a silent no-op, same
     /// convention as an unrecognized plain CSI action.
     fn set_private_mode(&mut self, code: u16, enabled: bool) {
         match code {
@@ -527,12 +772,41 @@ impl Screen {
                 }
             }
             2004 => self.bracketed_paste = enabled,
-            // X10-compatible, button-event and any-event tracking all mean "send me the wheel"; which of them is on
-            // only matters for motion reports, which are not sent.
-            1000 | 1002 | 1003 => self.mouse_tracking = enabled,
+            1 => self.app_cursor_keys = enabled,
+            25 => self.cursor_visible = enabled,
+            1004 => self.focus_events = enabled,
+            2026 => self.synchronized = enabled,
+            1000 | 1002 | 1003 => {
+                let asked = match code {
+                    1000 => MouseTracking::Clicks,
+                    1002 => MouseTracking::Drags,
+                    _ => MouseTracking::Motion,
+                };
+                // Turning any of the three off ends mouse tracking, as in xterm and Ghostty: a program that switched
+                // on 1002 and off only 1000 must not leave reports flowing into the shell.
+                self.mouse_tracking = if enabled { asked } else { MouseTracking::Off };
+            }
             1006 => self.mouse_sgr = enabled,
             _ => {}
         }
+    }
+
+    /// A DEC private mode's state for DECRQM (`CSI ? n $ p`): `Some(set)` for the modes this terminal keeps, `None`
+    /// for one it does not know.
+    fn private_mode(&self, code: u16) -> Option<bool> {
+        Some(match code {
+            1 => self.app_cursor_keys,
+            25 => self.cursor_visible,
+            1000 => self.mouse_tracking == MouseTracking::Clicks,
+            1002 => self.mouse_tracking == MouseTracking::Drags,
+            1003 => self.mouse_tracking == MouseTracking::Motion,
+            1004 => self.focus_events,
+            1006 => self.mouse_sgr,
+            1049 => self.in_alt_screen,
+            2004 => self.bracketed_paste,
+            2026 => self.synchronized,
+            _ => return None,
+        })
     }
 
     /// Scrolls the scroll region up by `n` lines: its top lines drop out,
@@ -719,11 +993,46 @@ impl Screen {
         }
     }
 
+    /// Makes room at `(row, col)` for a new character: when the cell there is half of a wide character, the other half
+    /// is blanked too — half a wide character cannot be drawn.
+    fn clear_cell(&mut self, row: usize, col: usize) {
+        let blank = self.blank_cell();
+        let here = self.grid[row][col];
+        if here.spacer && col > 0 {
+            self.grid[row][col - 1] = blank;
+        }
+        if here.wide && col + 1 < self.cols {
+            self.grid[row][col + 1] = blank;
+        }
+        self.grid[row][col] = blank;
+    }
+
+    /// Puts a combining mark on the character before the cursor (on the cursor's own cell while a wrap is pending,
+    /// where that character still is). The first mark is kept, a second is dropped.
+    fn combine(&mut self, mark: char) {
+        let row = self.cursor_row;
+        let mut col = if self.wrap_pending {
+            self.cursor_col
+        } else if self.cursor_col > 0 {
+            self.cursor_col - 1
+        } else {
+            return;
+        };
+        if self.grid[row][col].spacer && col > 0 {
+            col -= 1;
+        }
+        let cell = &mut self.grid[row][col];
+        if cell.combining.is_none() && cell.ch != ' ' {
+            cell.combining = Some(mark);
+        }
+    }
+
     fn clear_range(&mut self, row: usize, from_col: usize, to_col_exclusive: usize) {
         let blank = self.blank_cell();
         for cell in &mut self.grid[row][from_col..to_col_exclusive] {
             *cell = blank;
         }
+        Self::mend_wide(&mut self.grid[row]);
     }
 
     /// Implements CSI `J` (erase in display); `mode` follows the standard ED
@@ -781,29 +1090,62 @@ impl Screen {
         }
     }
 
-    /// Applies one `m` (SGR) sequence's parameters to the pen. Parameters
-    /// are flattened (colon-grouped subparams and semicolon-separated ones
-    /// alike) into one sequence and walked with an explicit index so the
-    /// extended-colour forms (`38;5;n`, `38;2;r;g;b`) can consume the right
-    /// number of trailing values.
+    /// Applies one `m` (SGR) sequence's parameters to the pen. Parameters come in groups: a colon joins
+    /// sub-parameters into one group (`4:3` a curly underline, `38:2::r:g:b`), a semicolon starts the next (`38;5;n`,
+    /// whose colour takes the following groups). Groups are walked with an explicit index so the semicolon forms of
+    /// the extended colours can consume the right number of groups after them.
     fn apply_sgr(&mut self, params: &Params) {
-        let flat: Vec<u16> = params
-            .iter()
-            .flat_map(|group| group.iter().copied())
-            .collect();
-        if flat.is_empty() {
+        let groups: Vec<&[u16]> = params.iter().collect();
+        if groups.is_empty() {
             // A bare `CSI m` means `CSI 0 m` — full reset.
             self.pen = Cell::default();
             return;
         }
         let mut i = 0;
-        while i < flat.len() {
-            match flat[i] {
+        while i < groups.len() {
+            let group = groups[i];
+            let code = group.first().copied().unwrap_or(0);
+            match code {
                 0 => self.pen = Cell::default(),
                 1 => self.pen.bold = true,
-                4 => self.pen.underline = true,
-                22 => self.pen.bold = false,
-                24 => self.pen.underline = false,
+                2 => self.pen.dim = true,
+                3 => self.pen.italic = true,
+                4 => match group.get(1) {
+                    Some(0) => self.pen.underline = false,
+                    Some(&style) => {
+                        self.pen.underline = true;
+                        self.pen.underline_style = match style {
+                            2 => UnderlineStyle::Double,
+                            3 => UnderlineStyle::Curly,
+                            4 => UnderlineStyle::Dotted,
+                            5 => UnderlineStyle::Dashed,
+                            _ => UnderlineStyle::Single,
+                        };
+                    }
+                    None => {
+                        self.pen.underline = true;
+                        self.pen.underline_style = UnderlineStyle::Single;
+                    }
+                },
+                7 => self.pen.reverse = true,
+                8 => self.pen.invisible = true,
+                9 => self.pen.strike = true,
+                21 => {
+                    self.pen.underline = true;
+                    self.pen.underline_style = UnderlineStyle::Double;
+                }
+                22 => {
+                    self.pen.bold = false;
+                    self.pen.dim = false;
+                }
+                23 => self.pen.italic = false,
+                24 => {
+                    self.pen.underline = false;
+                    self.pen.underline_style = UnderlineStyle::Single;
+                }
+                27 => self.pen.reverse = false,
+                28 => self.pen.invisible = false,
+                29 => self.pen.strike = false,
                 code @ 30..=37 => {
                     self.pen.fg = Color::Indexed {
                         index: (code - 30) as u8,
@@ -816,6 +1158,7 @@ impl Screen {
                     }
                 }
                 49 => self.pen.bg = Color::Default,
+                59 => self.pen.underline_color = Color::Default,
                 code @ 90..=97 => {
                     self.pen.fg = Color::Indexed {
                         index: (code - 90 + 8) as u8,
@@ -826,45 +1169,171 @@ impl Screen {
                         index: (code - 100 + 8) as u8,
                     }
                 }
-                code @ (38 | 48) => {
-                    let is_fg = code == 38;
-                    match flat.get(i + 1) {
-                        Some(5) => {
-                            if let Some(&idx) = flat.get(i + 2) {
-                                let color = Color::Indexed { index: idx as u8 };
-                                if is_fg {
-                                    self.pen.fg = color;
-                                } else {
-                                    self.pen.bg = color;
-                                }
-                            }
-                            i += 2;
+                code @ (38 | 48 | 58) => {
+                    let (color, used) = if group.len() > 1 {
+                        (Self::colon_color(&group[1..]), 0)
+                    } else {
+                        Self::semicolon_color(&groups[i + 1..])
+                    };
+                    if let Some(color) = color {
+                        match code {
+                            38 => self.pen.fg = color,
+                            48 => self.pen.bg = color,
+                            _ => self.pen.underline_color = color,
                         }
-                        Some(2) => {
-                            if let (Some(&r), Some(&g), Some(&b)) =
-                                (flat.get(i + 2), flat.get(i + 3), flat.get(i + 4))
-                            {
-                                let color = Color::Rgb {
-                                    r: r as u8,
-                                    g: g as u8,
-                                    b: b as u8,
-                                };
-                                if is_fg {
-                                    self.pen.fg = color;
-                                } else {
-                                    self.pen.bg = color;
-                                }
-                            }
-                            i += 4;
-                        }
-                        _ => {}
                     }
+                    i += used;
                 }
-                // Everything else (italic, blink, reverse, strikethrough,
-                // …) is out of Checkpoint 2's "grundlegend" scope.
+                // Blink, overline, fonts, …: not drawn here.
                 _ => {}
             }
             i += 1;
+        }
+    }
+
+    /// An extended colour written with colons, its sub-parameters after the 38/48/58: `5:n`, `2:r:g:b`, or
+    /// `2:colourspace:r:g:b` (the ITU form, whose colour space is ignored).
+    fn colon_color(sub: &[u16]) -> Option<Color> {
+        match sub {
+            [5, index, ..] => Some(Color::Indexed {
+                index: byte(*index),
+            }),
+            [2, _, r, g, b, ..] | [2, r, g, b] => Some(Color::Rgb {
+                r: byte(*r),
+                g: byte(*g),
+                b: byte(*b),
+            }),
+            _ => None,
+        }
+    }
+
+    /// An extended colour written with semicolons, in the groups after the 38/48/58: the colour (if complete) and how
+    /// many groups it took.
+    fn semicolon_color(rest: &[&[u16]]) -> (Option<Color>, usize) {
+        let value = |at: usize| rest.get(at).and_then(|group| group.first()).copied();
+        match value(0) {
+            Some(5) => (
+                value(1).map(|index| Color::Indexed { index: byte(index) }),
+                2,
+            ),
+            Some(2) => match (value(1), value(2), value(3)) {
+                (Some(r), Some(g), Some(b)) => (
+                    Some(Color::Rgb {
+                        r: byte(r),
+                        g: byte(g),
+                        b: byte(b),
+                    }),
+                    4,
+                ),
+                _ => (None, 4),
+            },
+            _ => (None, 0),
+        }
+    }
+
+    /// A CSI sequence with a private marker or an intermediate byte (`?`, `>`, `<`, `=`, `$`, space): DEC private
+    /// modes, the queries a TUI sends at start, the kitty keyboard protocol and the cursor's shape. These are never SGR
+    /// or a cursor move just because their final byte is one's: an owner-reported bug had `CSI > 4 m` (xterm's
+    /// `modifyOtherKeys`) read as "underline" for a whole session. What is not listed is ignored.
+    fn marked_csi(&mut self, params: &Params, intermediates: &[u8], action: char) {
+        let first = params
+            .iter()
+            .next()
+            .and_then(|group| group.first().copied())
+            .unwrap_or(0);
+        match (intermediates, action) {
+            // One sequence may set several modes at once (`CSI ?1000;1006h`).
+            (b"?", 'h' | 'l') => {
+                for group in params.iter() {
+                    if let Some(&code) = group.first() {
+                        self.set_private_mode(code, action == 'h');
+                    }
+                }
+            }
+            // DECXCPR: the cursor position, marked private.
+            (b"?", 'n') if first == 6 => {
+                let (row, col) = (self.cursor_row + 1, self.cursor_col + 1);
+                self.reply(&format!("\x1b[?{row};{col}R"));
+            }
+            // DECRQM: 1 set, 2 reset, 0 not known.
+            (b"?$", 'p') => {
+                let state = match self.private_mode(first) {
+                    Some(true) => 1,
+                    Some(false) => 2,
+                    None => 0,
+                };
+                self.reply(&format!("\x1b[?{first};{state}$y"));
+            }
+            (b"$", 'p') => self.reply(&format!("\x1b[{first};0$y")),
+            // DA2: a VT220-class terminal, version 10, no ROM cartridge.
+            (b">", 'c') => self.reply("\x1b[>1;10;0c"),
+            // XTVERSION.
+            (b">", 'q') => {
+                let version = env!("CARGO_PKG_VERSION");
+                self.reply(&format!("\x1bP>|{TERMINAL_NAME} {version}\x1b\\"));
+            }
+            // The kitty keyboard protocol: the query, push, pop and set.
+            (b"?", 'u') => {
+                let flags = self.kitty_flags();
+                self.reply(&format!("\x1b[?{flags}u"));
+            }
+            (b">", 'u') => {
+                // The stack is bounded, as kitty bounds it: a program pushing in a loop cannot grow it for ever.
+                if self.kitty_flags.len() >= KITTY_STACK {
+                    self.kitty_flags.remove(0);
+                }
+                self.kitty_flags.push(first & KITTY_KNOWN_FLAGS);
+            }
+            (b"<", 'u') => {
+                let n = (first.max(1) as usize).min(self.kitty_flags.len());
+                self.kitty_flags.truncate(self.kitty_flags.len() - n);
+            }
+            (b"=", 'u') => {
+                let mode = params
+                    .iter()
+                    .nth(1)
+                    .and_then(|group| group.first().copied())
+                    .unwrap_or(1);
+                let flags = first & KITTY_KNOWN_FLAGS;
+                let now = self.kitty_flags();
+                let next = match mode {
+                    2 => now | flags,
+                    3 => now & !flags,
+                    _ => flags,
+                };
+                match self.kitty_flags.last_mut() {
+                    Some(top) => *top = next,
+                    None => self.kitty_flags.push(next),
+                }
+            }
+            // DECSCUSR.
+            (b" ", 'q') if first <= 6 => self.cursor_shape = first as u8,
+            _ => {}
+        }
+    }
+
+    /// The id of OSC 8 link `uri` (1-based), the one it already has if seen before; 0 for a URL too long or past the
+    /// table's cap.
+    fn link_id(&mut self, uri: &[u8]) -> u32 {
+        if uri.len() > MAX_LINK_BYTES {
+            return 0;
+        }
+        let uri = String::from_utf8_lossy(uri);
+        if let Some(at) = self.links.iter().position(|known| *known == uri) {
+            return at as u32 + 1;
+        }
+        if self.links.len() >= MAX_LINKS {
+            return 0;
+        }
+        self.links.push(uri.into_owned());
+        self.links.len() as u32
+    }
+
+    /// Queues `text` to be written back to the program.
+    fn reply(&mut self, text: &str) {
+        // A program that floods queries without reading the answers must not grow this without bound.
+        if self.replies.len() + text.len() <= MAX_REPLY_BYTES {
+            self.replies.extend_from_slice(text.as_bytes());
         }
     }
 
@@ -901,10 +1370,13 @@ impl Screen {
 
 impl Perform for Screen {
     fn print(&mut self, c: char) {
-        // Zero-width characters (combining marks, …) aren't modeled in
-        // Checkpoint 2 — skipped rather than occupying a cell of their own.
         let width = match c.width() {
-            Some(0) | None => return,
+            // A combining mark (or another zero-width character) goes onto the cell before the cursor.
+            Some(0) => {
+                self.combine(c);
+                return;
+            }
+            None => return,
             Some(w) => w,
         };
         // A pending wrap from the *previous* character finally happens now,
@@ -915,6 +1387,14 @@ impl Perform for Screen {
             self.cursor_col = 0;
             self.line_feed();
         }
+        // A wide character that would not fit in the last column goes to the next line whole, as in xterm.
+        if width == 2 && self.cursor_col + 1 >= self.cols && self.cols > 1 {
+            self.clear_cell(self.cursor_row, self.cursor_col);
+            self.cursor_col = 0;
+            self.line_feed();
+        }
+        let (row, col) = (self.cursor_row, self.cursor_col);
+        self.clear_cell(row, col);
         let mut cell = self.pen;
         cell.ch = c;
         // Not part of `pen` — see `Self::active_hyperlink`'s own doc
@@ -922,7 +1402,19 @@ impl Perform for Screen {
         // cell, rather than living on `pen` and following its SGR-reset
         // lifecycle.
         cell.hyperlink = self.active_hyperlink;
-        self.grid[self.cursor_row][self.cursor_col] = cell;
+        cell.link = self.active_link;
+        if width == 2 && col + 1 < self.cols {
+            self.clear_cell(row, col + 1);
+            cell.wide = true;
+            // The spacer carries the pen (its background is drawn) but no character: a copied line holds the wide
+            // character once.
+            self.grid[row][col + 1] = Cell {
+                ch: ' ',
+                spacer: true,
+                ..cell
+            };
+        }
+        self.grid[row][col] = cell;
         self.cursor_col += width;
         if self.cursor_col >= self.cols {
             self.cursor_col = self.cols - 1;
@@ -972,20 +1464,8 @@ impl Perform for Screen {
         // even printed, with nothing after it to ever turn underline back
         // off again. Silently no-op'd here instead, same convention as the
         // unrecognized-sequence fallback at the bottom of this method.
-        if let Some(&marker) = intermediates.first() {
-            if marker == b'?' {
-                match action {
-                    // One sequence may set several modes at once (`CSI ?1000;1006h`).
-                    'h' | 'l' => {
-                        for group in params.iter() {
-                            if let Some(&code) = group.first() {
-                                self.set_private_mode(code, action == 'h');
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
+        if !intermediates.is_empty() {
+            self.marked_csi(params, intermediates, action);
             return;
         }
         self.wrap_pending = false;
@@ -1056,7 +1536,22 @@ impl Perform for Screen {
             '@' => self.insert_chars(Self::first_param_or(params, 1) as usize),
             'P' => self.delete_chars(Self::first_param_or(params, 1) as usize),
             'X' => self.erase_chars(Self::first_param_or(params, 1) as usize),
-            // Anything else (device queries, tab stops, ANSI modes, …) is a
+            // DA1: a VT220 with ANSI colour — what a TUI asks first to learn that someone answers at all.
+            'c' if Self::first_param_or(params, 0) == 0 => self.reply("\x1b[?62;22c"),
+            'n' => match Self::first_param_or(params, 0) {
+                5 => self.reply("\x1b[0n"),
+                6 => {
+                    let (row, col) = (self.cursor_row + 1, self.cursor_col + 1);
+                    self.reply(&format!("\x1b[{row};{col}R"));
+                }
+                _ => {}
+            },
+            // XTWINOPS 18: the text area's size in characters (the pixel sizes are the renderer's, not known here).
+            't' if Self::first_param_or(params, 0) == 18 => {
+                let (rows, cols) = (self.rows, self.cols);
+                self.reply(&format!("\x1b[8;{rows};{cols}t"));
+            }
+            // Anything else (tab stops, ANSI modes, …) is a
             // silent no-op rather than a guess that could corrupt the grid.
             _ => {}
         }
@@ -1106,24 +1601,68 @@ impl Perform for Screen {
     /// closes one (the standard `ESC]8;;ST` closing form has an empty, not
     /// missing, third segment, but a missing one is treated the same way
     /// defensively rather than leaving a hyperlink stuck open on a
-    /// malformed sequence). Every other OSC number (window title, clipboard,
-    /// …) is silently ignored — same "unrecognized is a no-op" convention
-    /// `csi_dispatch` already uses, not a gap specific to this method.
+    /// malformed sequence). The URI is kept in [`Screen::links`], each cell
+    /// carries its id ([`Cell::link`], TUI0b); the `id=` parameter is not
+    /// needed for that and is ignored.
     ///
-    /// `params[1]` (the `id=...` parameter) and `params[2]` itself (the
-    /// actual URI) are both read here only far enough to decide open/closed
-    /// — neither is stored on [`Cell`]. Intentional, scoped-down debt, not
-    /// an oversight: [`Cell::hyperlink`] is a plain `bool` because the only
-    /// consumer today is the renderer's "don't draw the fallback underline"
-    /// decision, which needs no more than that. Click-to-open, or grouping
-    /// same-link cells for a Ghostty-style hover highlight across the whole
-    /// span, would need the URI (and possibly this `id=`) threaded through
-    /// [`Cell`]/the wire format for real — a future implementer picking
-    /// that up doesn't need to rediscover that both are available here and
-    /// simply not kept yet.
-    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
-        if params.first() == Some(&b"8".as_slice()) {
-            self.active_hyperlink = params.get(2).is_some_and(|uri| !uri.is_empty());
+    /// Also OSC 52 (a clipboard write; a read is never answered) and OSC
+    /// 10/11 queries (answered with the pane's colours once it gave them).
+    /// Every other OSC number (window title, …) is silently ignored — same
+    /// "unrecognized is a no-op" convention `csi_dispatch` already uses.
+    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+        if std::mem::take(&mut self.drop_osc) {
+            return;
+        }
+        match params.first().copied() {
+            Some(b"8") => {
+                // vte splits the payload at every `;`, also those inside the URL (`;jsessionid=…`): put them back.
+                let uri = params.get(2..).unwrap_or_default().join(&b';');
+                self.active_hyperlink = !uri.is_empty();
+                self.active_link = if uri.is_empty() {
+                    0
+                } else {
+                    self.link_id(&uri)
+                };
+            }
+            // A program puts text on the clipboard; a read (`?`) is never answered — the clipboard is the owner's.
+            Some(b"52") => {
+                let Some(data) = params.get(2) else {
+                    return;
+                };
+                if *data == b"?" || data.len() > MAX_CLIPBOARD_BYTES * 4 / 3 + 4 {
+                    return;
+                }
+                use base64::Engine as _;
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data)
+                    && let Ok(text) = String::from_utf8(bytes)
+                {
+                    self.clipboard = Some(text);
+                }
+            }
+            // The foreground and background colours asked for (`OSC 10 ; ?`, `OSC 11 ; ?`, also both at once as
+            // `OSC 10 ; ? ; ?`), answered with the same terminator the query used.
+            Some(number @ (b"10" | b"11")) => {
+                let Some((foreground, background)) = self.colors else {
+                    return;
+                };
+                let terminator = if bell_terminated { "\x07" } else { "\x1b\\" };
+                let first: u8 = if number == b"10" { 10 } else { 11 };
+                for (at, value) in params[1..].iter().enumerate() {
+                    if *value != b"?" {
+                        continue;
+                    }
+                    let which = first + at as u8;
+                    let [r, g, b] = match which {
+                        10 => foreground,
+                        11 => background,
+                        _ => continue,
+                    };
+                    self.reply(&format!(
+                        "\x1b]{which};rgb:{r:02x}{r:02x}/{g:02x}{g:02x}/{b:02x}{b:02x}{terminator}"
+                    ));
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -2292,5 +2831,254 @@ mod tests {
         parser.advance(&mut screen, b"\x1b[?1000;2004l");
         assert_eq!(screen.mouse_reporting(), MouseReporting::Off);
         assert!(!screen.bracketed_paste());
+    }
+
+    /// TUI0b: a screen fed `bytes`.
+    fn fed(rows: u16, cols: u16, bytes: &[u8]) -> Screen {
+        let mut screen = Screen::new(rows, cols);
+        vte::Parser::new().advance(&mut screen, bytes);
+        screen
+    }
+
+    fn replies(screen: &mut Screen) -> String {
+        String::from_utf8(screen.take_replies()).unwrap()
+    }
+
+    #[test]
+    fn the_queries_a_tui_sends_at_start_are_answered() {
+        let mut screen = fed(
+            24,
+            80,
+            b"ab\x1b[c\x1b[>c\x1b[>q\x1b[5n\x1b[6n\x1b[?6n\x1b[18t\x1b[?u",
+        );
+        let said = replies(&mut screen);
+        assert_eq!(
+            said,
+            format!(
+                "\x1b[?62;22c\x1b[>1;10;0c\x1bP>|Axiomata {}\x1b\\\x1b[0n\x1b[1;3R\x1b[?1;3R\x1b[8;24;80t\x1b[?0u",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+        assert!(screen.take_replies().is_empty(), "taken once");
+    }
+
+    #[test]
+    fn decrqm_reports_the_modes_kept_and_says_so_for_others() {
+        let mut screen = fed(
+            4,
+            10,
+            b"\x1b[?2026h\x1b[?2026$p\x1b[?1004$p\x1b[?9999$p\x1b[4$p",
+        );
+        assert_eq!(
+            replies(&mut screen),
+            "\x1b[?2026;1$y\x1b[?1004;2$y\x1b[?9999;0$y\x1b[4;0$y"
+        );
+        assert!(screen.synchronized());
+    }
+
+    #[test]
+    fn colours_are_answered_only_once_the_pane_gave_them_and_with_the_querys_terminator() {
+        let mut screen = fed(2, 10, b"\x1b]11;?\x07");
+        assert!(
+            screen.take_replies().is_empty(),
+            "no colours known: no guess"
+        );
+        screen.set_colors([0xee, 0xee, 0xee], [0x1a, 0x1b, 0x26]);
+        vte::Parser::new().advance(&mut screen, b"\x1b]11;?\x07\x1b]10;?;?\x1b\\");
+        assert_eq!(
+            replies(&mut screen),
+            "\x1b]11;rgb:1a1a/1b1b/2626\x07\x1b]10;rgb:eeee/eeee/eeee\x1b\\\x1b]11;rgb:1a1a/1b1b/2626\x1b\\"
+        );
+    }
+
+    #[test]
+    fn the_cursor_mouse_focus_and_key_modes_are_kept() {
+        let mut screen = fed(
+            2,
+            10,
+            b"\x1b[?25l\x1b[?1h\x1b[?1004h\x1b[5 q\x1b[?1002h\x1b[?1006h",
+        );
+        assert!(!screen.cursor_visible());
+        assert!(screen.app_cursor_keys());
+        assert!(screen.focus_events());
+        assert_eq!(screen.cursor_shape(), 5);
+        assert_eq!(screen.mouse_tracking(), MouseTracking::Drags);
+        assert_eq!(screen.mouse_reporting(), MouseReporting::Sgr);
+        vte::Parser::new().advance(&mut screen, b"\x1b[?1000l\x1b[?25h");
+        assert_eq!(
+            screen.mouse_tracking(),
+            MouseTracking::Off,
+            "turning off any tracking mode ends tracking, as in xterm"
+        );
+        assert!(screen.cursor_visible());
+    }
+
+    #[test]
+    fn the_kitty_keyboard_flags_push_pop_set_and_belong_to_their_screen() {
+        let mut screen = fed(2, 10, b"\x1b[>0u\x1b[>31u");
+        assert_eq!(
+            screen.kitty_flags(),
+            1,
+            "flags the input does not speak are dropped"
+        );
+        vte::Parser::new().advance(&mut screen, b"\x1b[<u");
+        assert_eq!(screen.kitty_flags(), 0);
+        vte::Parser::new().advance(&mut screen, b"\x1b[=1;2u");
+        assert_eq!(screen.kitty_flags(), 1, "mode 2 adds flags");
+        vte::Parser::new().advance(&mut screen, b"\x1b[=1;3u");
+        assert_eq!(screen.kitty_flags(), 0, "mode 3 takes them away");
+        vte::Parser::new().advance(&mut screen, b"\x1b[=1u\x1b[>1u");
+        vte::Parser::new().advance(&mut screen, b"\x1b[?1049h");
+        assert_eq!(
+            screen.kitty_flags(),
+            0,
+            "the alternate screen has its own stack"
+        );
+        vte::Parser::new().advance(&mut screen, b"\x1b[?1049l");
+        assert_eq!(screen.kitty_flags(), 1, "and the main screen's comes back");
+        vte::Parser::new().advance(&mut screen, b"\x1b[<99u");
+        assert_eq!(
+            screen.kitty_flags(),
+            0,
+            "popping more than there is empties it"
+        );
+    }
+
+    #[test]
+    fn the_other_sgr_attributes_and_underline_styles_are_kept_and_reset() {
+        let screen = fed(
+            1,
+            20,
+            b"\x1b[2;3;7;8;9ma\x1b[22;23;27;28;29mb\x1b[4:3;58:2::255:0:0mc\x1b[21md\x1b[4:0me",
+        );
+        let a = screen.cell(0, 0);
+        assert!(a.dim && a.italic && a.reverse && a.invisible && a.strike);
+        let b = screen.cell(0, 1);
+        assert!(!b.dim && !b.italic && !b.reverse && !b.invisible && !b.strike);
+        let c = screen.cell(0, 2);
+        assert!(
+            c.underline && !c.italic,
+            "4:3 is a curly underline, not underline and italic"
+        );
+        assert_eq!(c.underline_style, UnderlineStyle::Curly);
+        assert_eq!(c.underline_color, Color::Rgb { r: 255, g: 0, b: 0 });
+        assert_eq!(screen.cell(0, 3).underline_style, UnderlineStyle::Double);
+        assert!(!screen.cell(0, 4).underline);
+        let semicolons = fed(1, 4, b"\x1b[38;2;1;2;3;48;5;9;3mx");
+        let x = semicolons.cell(0, 0);
+        assert_eq!(x.fg, Color::Rgb { r: 1, g: 2, b: 3 });
+        assert_eq!(x.bg, Color::Indexed { index: 9 });
+        assert!(
+            x.italic,
+            "the group after a complete colour is read on its own"
+        );
+    }
+
+    #[test]
+    fn a_wide_character_takes_two_cells_and_overwriting_half_of_it_blanks_both() {
+        let mut screen = fed(2, 6, "ab漢c".as_bytes());
+        assert!(screen.cell(0, 2).wide && screen.cell(0, 3).spacer);
+        assert_eq!(
+            screen.line_text(0),
+            "ab漢 c ",
+            "the character once, its spacer blank"
+        );
+        assert_eq!(screen.cell(0, 4).ch, 'c');
+        vte::Parser::new().advance(&mut screen, b"\x1b[1;4Hx");
+        assert_eq!(
+            screen.cell(0, 2).ch,
+            ' ',
+            "the left half went with the right"
+        );
+        assert!(!screen.cell(0, 2).wide && !screen.cell(0, 3).spacer);
+        assert_eq!(screen.cell(0, 3).ch, 'x');
+        let wrapped = fed(2, 4, "abc漢".as_bytes());
+        assert_eq!(
+            wrapped.line_text(0),
+            "abc ",
+            "a wide character does not split over the edge"
+        );
+        assert!(wrapped.cell(1, 0).wide);
+    }
+
+    #[test]
+    fn erasing_shifting_or_narrowing_through_a_wide_character_leaves_no_half_of_it() {
+        // An erase from the spacer on (EL 0) takes the wide character's right half: the left half goes too.
+        let mut screen = fed(1, 6, "a漢b".as_bytes());
+        vte::Parser::new().advance(&mut screen, b"\x1b[1;3H\x1b[K");
+        assert!(!screen.cell(0, 1).wide && screen.cell(0, 1).ch == ' ');
+        // A delete at the wide character pulls its spacer to the front of the line's tail: no orphan spacer stays.
+        let mut shifted = fed(1, 6, "a漢b".as_bytes());
+        vte::Parser::new().advance(&mut shifted, b"\x1b[1;2H\x1b[P");
+        assert!((0..6).all(|col| !shifted.cell(0, col).spacer || shifted.cell(0, col - 1).wide));
+        // A resize that cuts the pair at the new edge.
+        let mut narrow = fed(1, 6, "abcd漢".as_bytes());
+        narrow.resize(1, 5);
+        assert!(!narrow.cell(0, 4).wide);
+    }
+
+    #[test]
+    fn a_link_keeps_the_semicolons_in_its_url() {
+        let screen = fed(1, 4, b"\x1b]8;;https://a.example/x;jsessionid=1\x1b\\a");
+        assert_eq!(screen.links(), ["https://a.example/x;jsessionid=1"]);
+    }
+
+    #[test]
+    fn an_incomplete_or_too_large_colour_is_read_safely() {
+        let screen = fed(1, 4, b"\x1b[38;2;10mx\x1b[38;5;300my");
+        assert_eq!(
+            screen.cell(0, 0).fg,
+            Color::Default,
+            "an incomplete colour changes nothing"
+        );
+        assert_eq!(
+            screen.cell(0, 1).fg,
+            Color::Indexed { index: 255 },
+            "past 255 is 255"
+        );
+    }
+
+    #[test]
+    fn a_combining_mark_stays_on_its_character() {
+        let screen = fed(1, 4, "e\u{301}x".as_bytes());
+        assert_eq!(screen.cell(0, 0).ch, 'e');
+        assert_eq!(screen.cell(0, 0).combining, Some('\u{301}'));
+        assert_eq!(screen.cell(0, 1).ch, 'x');
+    }
+
+    #[test]
+    fn links_keep_their_url_and_the_same_url_its_id() {
+        let screen = fed(
+            1,
+            12,
+            b"\x1b]8;;https://a.example\x1b\\ab\x1b]8;;\x1b\\c\x1b]8;id=2;https://a.example\x1b\\d",
+        );
+        assert_eq!(screen.links(), ["https://a.example"]);
+        assert_eq!(screen.cell(0, 0).link, 1);
+        assert!(screen.cell(0, 1).hyperlink);
+        assert_eq!(screen.cell(0, 2).link, 0);
+        assert_eq!(screen.cell(0, 3).link, 1, "the same URL keeps its id");
+    }
+
+    #[test]
+    fn a_program_may_write_the_clipboard_but_never_read_it() {
+        let mut screen = fed(1, 4, b"\x1b]52;c;aGVsbG8=\x07");
+        assert_eq!(screen.take_clipboard().as_deref(), Some("hello"));
+        assert_eq!(screen.take_clipboard(), None);
+        vte::Parser::new().advance(&mut screen, b"\x1b]52;c;?\x07");
+        assert_eq!(screen.take_clipboard(), None);
+        assert!(
+            screen.take_replies().is_empty(),
+            "a read request is not answered"
+        );
+    }
+
+    #[test]
+    fn new_attributes_stay_out_of_the_wire_form_while_off() {
+        let plain = serde_json::to_string(&Cell::default()).unwrap();
+        assert!(
+            !plain.contains("dim") && !plain.contains("\"link\"") && !plain.contains("wide"),
+            "{plain}"
+        );
     }
 }

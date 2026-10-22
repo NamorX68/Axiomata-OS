@@ -373,6 +373,7 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_close,
             terminal::terminal_scrollback,
+            terminal::terminal_set_colors,
         ])
         .setup(|app| {
             // Core init, the startup memory sync, and the routine scheduler —

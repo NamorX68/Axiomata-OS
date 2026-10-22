@@ -1,11 +1,10 @@
 /**
  * Pure keyboard-to-byte mapping for the terminal module (Checkpoint 3
- * review follow-up). Split out of `terminal.svelte`'s `handleKeydown` for
- * the same reason `TerminalScreen.ts` already pulled colour resolution out
- * of `draw()`: this is real, non-trivial domain logic (the Ctrl+letter
- * arithmetic, the fixed C0 control-byte mappings) that was previously
- * trapped inside a Svelte event handler taking a live `KeyboardEvent`,
- * with no way to unit-test it directly.
+ * review follow-up), split out of `terminal.svelte`'s `handleKeydown` so it
+ * is unit-testable. Since TUI0b (`docs/plans/terminal-tui.md`) it encodes
+ * what a full-screen TUI tells apart: modifiers on every functional key,
+ * F-keys, Alt, the cursor keys' application mode and the kitty keyboard
+ * protocol's disambiguated presses.
  */
 
 import { chord, type KeyLike, type Platform } from "../core/keys";
@@ -29,106 +28,143 @@ export function terminalKeyRoute(e: KeyLike, on: Platform): TerminalKeyRoute {
   return "app";
 }
 
+/** What the running program asked the keyboard for (TUI0b), from the last screen event. */
+export interface KeyMode {
+  /** `?1`: cursor keys in application mode send `ESC O A` instead of `ESC [ A`. */
+  appCursorKeys: boolean;
+  /** The kitty keyboard protocol's flags; flag 1 (disambiguate) is the one the pane speaks. */
+  kittyFlags: number;
+}
+
+/** No program asked for anything: what a shell's line editor expects. */
+export const PLAIN_KEYS: KeyMode = { appCursorKeys: false, kittyFlags: 0 };
+
+/** A key press as `encodeKey` reads it: the `KeyboardEvent` fields it needs. */
+export type KeyPress = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">;
+
+/** Kitty's "disambiguate escape codes" flag. */
+const KITTY_DISAMBIGUATE = 1;
+
+/** Cursor keys: their final byte, after `ESC [` (or `ESC O` in application mode), or `CSI 1 ; m` with modifiers. */
+const CURSOR_KEYS: Readonly<Record<string, string>> = {
+  ArrowUp: "A",
+  ArrowDown: "B",
+  ArrowRight: "C",
+  ArrowLeft: "D",
+  Home: "H",
+  End: "F",
+};
+
+/** Editing keys and F5–F12: `CSI n ~`, `CSI n ; m ~` with modifiers. */
+const TILDE_KEYS: Readonly<Record<string, number>> = {
+  Insert: 2,
+  Delete: 3,
+  PageUp: 5,
+  PageDown: 6,
+  F5: 15,
+  F6: 17,
+  F7: 18,
+  F8: 19,
+  F9: 20,
+  F10: 21,
+  F11: 23,
+  F12: 24,
+};
+
+/** F1–F4: `ESC O P` … `ESC O S`, `CSI 1 ; m P` with modifiers. */
+const PF_KEYS: Readonly<Record<string, string>> = { F1: "P", F2: "Q", F3: "R", F4: "S" };
+
+/** Ctrl with these characters gives the C0 control bytes beyond the letters: `Ctrl+[` is Escape, `Ctrl+Space` NUL. */
+const CTRL_SYMBOLS: Readonly<Record<string, number>> = {
+  " ": 0x00,
+  "@": 0x00,
+  "[": 0x1b,
+  "\\": 0x1c,
+  "]": 0x1d,
+  "^": 0x1e,
+  "_": 0x1f,
+};
+
+const encoder = new TextEncoder();
+const bytes = (text: string) => encoder.encode(text);
+
+/** xterm's modifier parameter: 1 plus Shift 1, Alt 2, Ctrl 4. */
+function modifierParam(e: KeyPress): number {
+  return 1 + (e.shiftKey ? 1 : 0) + (e.altKey ? 2 : 0) + (e.ctrlKey ? 4 : 0);
+}
+
+/** The character a letter or digit key gives without modifiers, from its physical position (`KeyA` → `a`), so a
+ *  composed character can be told from a plain one. */
+function baseCharacter(code: string): string | null {
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1].toLowerCase();
+  const digit = /^Digit([0-9])$/.exec(code);
+  return digit ? digit[1] : null;
+}
+
 /**
- * Maps one key press to the raw byte(s) to forward to the shell — the keys
- * that either produce no native `input` event or need a specific C0
- * control byte or CSI escape sequence instead of literal text (Checkpoint
- * 5i added the latter — see the `ArrowUp` case below for the full story).
- * `null` means "not one of these", i.e. let the caller's `input`-event path
- * handle it instead (printable characters, IME composition, paste — see
- * `terminal.svelte`'s own `handleInput`).
+ * The bytes a key press sends to the program, or `null` where the native `input` event types it (printable text, a
+ * character Option composes, IME). Covers what a full-screen TUI tells apart (TUI0b): modifiers on cursor, editing and
+ * F-keys in xterm's `CSI 1 ; m X` / `CSI n ; m ~` form, the cursor keys' application mode, F1–F12, Shift/Alt/Ctrl with
+ * Enter, Tab and Backspace, Ctrl with letters and the C0 symbols, and the kitty keyboard protocol's disambiguated
+ * `CSI code ; m u` for the presses the legacy encoding cannot tell apart.
  *
- * `shiftKey` defaults to `false` so every pre-existing call site (this
- * file's own tests included) keeps compiling unchanged — only `Tab` reads
- * it at all (see that case below).
+ * Option is Alt only where it composes nothing (D2 in `docs/plans/terminal-tui.md`): on a German Mac layout it types
+ * `@ { } [ ] | \`, so Option+L stays `@`; Option+B (which gives `∫`) is not Alt either — only a key whose character
+ * equals its plain one, and the functional keys. `typing` (AltGr elsewhere) leaves every character to `input`.
  */
-export function keyToBytes(key: string, ctrlKey: boolean, shiftKey: boolean = false): Uint8Array | null {
-  if (ctrlKey && key.length === 1) {
-    const code = key.toUpperCase().charCodeAt(0);
-    if (code >= 65 && code <= 90) {
-      return new Uint8Array([code - 64]); // Ctrl+A..Z -> 0x01..0x1a
-    }
+export function encodeKey(e: KeyPress, mode: KeyMode, typing = false): Uint8Array | null {
+  const m = modifierParam(e);
+  const kitty = (mode.kittyFlags & KITTY_DISAMBIGUATE) !== 0;
+  const ESC = "\x1b";
+  const cursor = CURSOR_KEYS[e.key];
+  if (cursor) {
+    if (m > 1) return bytes(`${ESC}[1;${m}${cursor}`);
+    return bytes(`${ESC}${mode.appCursorKeys ? "O" : "["}${cursor}`);
   }
-  switch (key) {
+  const tilde = TILDE_KEYS[e.key];
+  if (tilde !== undefined) return bytes(m > 1 ? `${ESC}[${tilde};${m}~` : `${ESC}[${tilde}~`);
+  const pf = PF_KEYS[e.key];
+  if (pf) return bytes(m > 1 ? `${ESC}[1;${m}${pf}` : `${ESC}O${pf}`);
+  switch (e.key) {
     case "Enter":
-      return new Uint8Array([0x0d]);
-    case "Backspace":
-      return new Uint8Array([0x7f]);
+      if (kitty && m > 1) return bytes(`${ESC}[13;${m}u`);
+      // Shift+Enter as Alt+Enter: what the owner's Ghostty sends and Claude Code and Glut read as a new line.
+      if (e.altKey || e.shiftKey) return bytes(`${ESC}\r`);
+      return bytes("\r");
     case "Tab":
-      // Owner-reported: Shift+Tab (Claude Code's own mode-cycling shortcut —
-      // plan mode / auto-accept-edits / etc.) did nothing in this terminal.
-      // Root cause: plain Tab's fixed 0x09 byte was returned unconditionally,
-      // `shiftKey` never even looked at. `CSI Z` (Cursor Backward Tabulation)
-      // is the standard xterm sequence a `shiftKey`-modified Tab produces —
-      // not "reverse-tab" in the literal terminal sense here, but the de
-      // facto convention readline/zle and most full-screen TUIs (Claude
-      // Code's own CLI included) already listen for specifically to detect
-      // Shift+Tab, since a browser's `KeyboardEvent` has no C0 byte of its
-      // own for a *shifted* Tab the way it does for plain Tab.
-      return shiftKey ? new Uint8Array([0x1b, 0x5b, 0x5a]) : new Uint8Array([0x09]); // \x1b[Z or \t
+      // `CSI Z` is Shift+Tab everywhere, also under the kitty protocol, where crossterm reads it as BackTab.
+      if (e.shiftKey && !e.altKey && !(kitty && e.ctrlKey)) return bytes(`${ESC}[Z`);
+      if (kitty && m > 1) return bytes(`${ESC}[9;${m}u`);
+      return bytes(e.altKey ? `${ESC}\t` : "\t");
+    case "Backspace":
+      if (kitty && m > 1) return bytes(`${ESC}[127;${m}u`);
+      if (e.ctrlKey) return new Uint8Array([0x08]);
+      return e.altKey ? bytes(`${ESC}\x7f`) : new Uint8Array([0x7f]);
     case "Escape":
-      // A single C0 byte, unlike arrow keys/etc. below (a full CSI
-      // sequence, e.g. `\x1b[A`) — cheap to support and critical for vim's
-      // own mode switching (found live: neovim opened and worked, but
-      // Escape did nothing without this).
-      return new Uint8Array([0x1b]);
-    // Checkpoint 5i (owner-reported: shell autosuggestion — a greyed
-    // suggested completion already rendered correctly, e.g. typing `ls`
-    // showing `ls -altr` with `-altr` dim, since that's just the shell's
-    // own program output — but pressing → to accept it, like Ghostty, did
-    // nothing at all: these nine keys fell through to the `default: null`
-    // case below and were never forwarded to the PTY, at all, full stop.
-    // Not autosuggestion-specific — this silently broke shell history
-    // recall (↑/↓), in-line cursor movement (←/→), and Home/End/PageUp/
-    // PageDown/Delete for every session, the whole time; it just hadn't
-    // been noticed yet. Sequences below are the standard xterm "normal
-    // cursor key mode" (DECCKM reset) encoding — what a shell's own line
-    // editor (zsh's zle, GNU readline) always expects regardless of any
-    // program-requested mode switch, and confirmed (architecture review)
-    // against `infocmp xterm-256color` / xterm's own `ctlseqs.txt` — not
-    // the rxvt/VT220-style `\x1b[1~`/`\x1b[4~` convention some other
-    // terminals use for Home/End, which would have been the wrong choice
-    // given the PTY is always spawned with `TERM=xterm-256color`
-    // (`crates/axiomata-terminal/src/pty.rs`). Known limitation, not
-    // addressed here: a full-screen program that has switched into DECCKM
-    // "application cursor key" mode (`\x1b[?1h` — vim and other TUIs
-    // commonly do) technically expects `\x1bO`-prefixed sequences instead
-    // of `\x1b[`-prefixed ones for the *cursor-key group* specifically —
-    // per xterm's own terminfo, that's the four arrows AND Home/End
-    // (`kcuu1`/`khome`/etc. all have an `\x1bO...` app-mode counterpart);
-    // PageUp/PageDown/Delete are NOT part of that group and always use
-    // the same `\x1b[…~` form regardless of mode, so only the six
-    // cursor-key entries carry this caveat. This engine doesn't track
-    // DECCKM at all yet (`crates/axiomata-terminal`'s `set_private_mode`
-    // silently no-ops on mode 1), so those six always use normal-mode
-    // encoding even inside such a program. In practice this matches what
-    // most terminfo databases already accept for arrows specifically
-    // (vim in particular is documented to recognize both forms
-    // defensively), so this is expected to work for ordinary vim/htop/
-    // less use — if a specific full-screen program is ever found where
-    // arrows or Home/End misbehave, that's the concrete case to finally
-    // add DECCKM tracking for, not a reason to withhold this fix
-    // (shell-prompt use, the overwhelming common case, needs it right now
-    // and isn't affected by DECCKM at all).
-    case "ArrowUp":
-      return new Uint8Array([0x1b, 0x5b, 0x41]); // \x1b[A
-    case "ArrowDown":
-      return new Uint8Array([0x1b, 0x5b, 0x42]); // \x1b[B
-    case "ArrowRight":
-      return new Uint8Array([0x1b, 0x5b, 0x43]); // \x1b[C
-    case "ArrowLeft":
-      return new Uint8Array([0x1b, 0x5b, 0x44]); // \x1b[D
-    case "Home":
-      return new Uint8Array([0x1b, 0x5b, 0x48]); // \x1b[H
-    case "End":
-      return new Uint8Array([0x1b, 0x5b, 0x46]); // \x1b[F
-    case "PageUp":
-      return new Uint8Array([0x1b, 0x5b, 0x35, 0x7e]); // \x1b[5~
-    case "PageDown":
-      return new Uint8Array([0x1b, 0x5b, 0x36, 0x7e]); // \x1b[6~
-    case "Delete":
-      return new Uint8Array([0x1b, 0x5b, 0x33, 0x7e]); // \x1b[3~ (forward-delete, distinct from Backspace)
-    default:
-      return null;
+      if (kitty) return bytes(m > 1 ? `${ESC}[27;${m}u` : `${ESC}[27u`);
+      return bytes(e.altKey ? `${ESC}${ESC}` : ESC);
   }
+  if (e.key.length !== 1 || typing || e.metaKey) return null;
+  const base = baseCharacter(e.code);
+  // Option composes when the character differs from the key's plain one (`@` from L); a symbol key has no plain one
+  // known here and is left to `input` too.
+  const altAsAlt = e.altKey && base !== null && e.key.toLowerCase() === base;
+  if (e.ctrlKey) {
+    // The key's plain letter where it has one: with Option held too, WebKit may report a composed character.
+    const letter = base !== null && base >= "a" && base <= "z" ? base : e.key.toLowerCase();
+    if (kitty) {
+      const code = (base ?? letter).codePointAt(0) ?? 0;
+      return bytes(`${ESC}[${code};${m}u`);
+    }
+    const prefix = e.altKey ? ESC : "";
+    if (letter >= "a" && letter <= "z") return bytes(prefix + String.fromCharCode(letter.charCodeAt(0) - 96));
+    const symbol = CTRL_SYMBOLS[e.key];
+    return symbol === undefined ? null : bytes(prefix + String.fromCharCode(symbol));
+  }
+  if (altAsAlt) {
+    if (kitty) return bytes(`${ESC}[${(base ?? e.key).codePointAt(0) ?? 0};${m}u`);
+    return bytes(ESC + e.key);
+  }
+  return null;
 }

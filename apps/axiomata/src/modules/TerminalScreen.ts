@@ -37,7 +37,23 @@ export interface TermCell {
   bold: boolean;
   underline: boolean;
   hyperlink: boolean;
+  /** TUI0b: the rest of SGR and the cell's place in a wide character, a combining mark and its OSC 8 link. The engine
+   *  leaves each out while it is off (`skip_serializing_if`), so every one is optional here. */
+  dim?: boolean;
+  italic?: boolean;
+  reverse?: boolean;
+  invisible?: boolean;
+  strike?: boolean;
+  underline_style?: UnderlineStyle;
+  underline_color?: TermColor;
+  wide?: boolean;
+  spacer?: boolean;
+  combining?: string;
+  link?: number;
 }
+
+/** How an underline is drawn; absent means a single straight line. */
+export type UnderlineStyle = "single" | "double" | "curly" | "dotted" | "dashed";
 
 /** The xterm 256-colour cube's 6 possible levels per channel — indices
  *  16-231 encode r/g/b each 0-5 against this table (the standard xterm
@@ -217,7 +233,9 @@ export function selectionText(rows: readonly (readonly TermCell[])[], start: Cel
     lines.push(
       row
         .slice(Math.max(0, fromCol), Math.min(toCol, row.length))
-        .map((c) => c.ch)
+        // A wide character's spacer holds nothing of its own; a combining mark goes with its character.
+        .filter((c) => !c.spacer)
+        .map((c) => c.ch + (c.combining ?? ""))
         .join(""),
     );
   }
@@ -321,7 +339,8 @@ const CURSOR_LINE_WIDTH = 2;
  *  it needs a real 2D canvas context, which jsdom doesn't implement, so
  *  this file's canvas-drawing behaviour is verified live against real
  *  Chromium via `agent-browser` instead (see `docs/plans/terminal.md`). */
-export function cellFont(font: string, bold: boolean, weight?: number): string {
+export function cellFont(font: string, bold: boolean, weight?: number, italic = false): string {
+  if (italic) return `italic ${cellFont(font, bold, weight)}`;
   if (bold) return `bold ${font}`;
   // `!== undefined`, not a truthy check (architecture review, Checkpoint
   // 5h) — a weight of `0` is invalid CSS and shouldn't reach here in
@@ -730,6 +749,110 @@ export function shouldDrawUnderline(cell: TermCell): boolean {
   return cell.underline && !cell.hyperlink;
 }
 
+/** A cell's text and background colour as drawn (TUI0b): reverse video swaps them, a default on either side taking the
+ *  pane's default of the other side, as in xterm. */
+export function cellColors(
+  cell: TermCell,
+  defaultFg: string,
+  defaultBg: string,
+  palette: readonly string[],
+  boldIsBright: boolean,
+): { fg: string; bg: string; bgIsDefault: boolean } {
+  const fg = resolveColor(cell.fg, defaultFg, { palette, bright: cell.bold && boldIsBright });
+  const bg = resolveBgColor(cell.bg, defaultBg, palette);
+  if (cell.reverse) return { fg: bg, bg: fg, bgIsDefault: false };
+  return { fg, bg, bgIsDefault: cell.bg.type === "default" };
+}
+
+/** The cursor shape a program asked for with DECSCUSR (`CSI n SP q`), or the owner's setting for 0 (the terminal's
+ *  default): 1/2 block, 3/4 underline, 5/6 bar — the blinking and steady variants alike, the setting decides
+ *  blinking. */
+export function programCursorStyle(shape: number, setting: CursorStyle): CursorStyle {
+  if (shape === 1 || shape === 2) return "block";
+  if (shape === 3 || shape === 4) return "underline";
+  if (shape === 5 || shape === 6) return "bar";
+  return setting;
+}
+
+/** The screen after a frame (TUI0b): the engine sends only the rows that changed, `null` for the rest; a frame of
+ *  another height is whole. */
+export function mergeRows(previous: readonly TermCell[][], update: readonly (TermCell[] | null)[]): TermCell[][] {
+  return update.map((row, at) => row ?? previous[at] ?? []);
+}
+
+/** A link's URL if the pane may open it: only `http`, `https` and `mailto` — a program's link to `file:` or a custom
+ *  scheme could start anything on the Mac. */
+export function openableUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    // A mail link opens a draft to its address, nothing more: its query can name attachments some mail apps honour.
+    if (parsed.protocol === "mailto:") return `mailto:${parsed.pathname}`;
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A CSS colour as RGB (`#rgb`, `#rrggbb`, `rgb(r, g, b)`), for telling a program the pane's colours (OSC 10/11);
+ *  `null` for any other form. */
+export function cssColorToRgb(css: string): [number, number, number] | null {
+  const text = css.trim().toLowerCase();
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/.exec(text);
+  if (short) {
+    return [short[1], short[2], short[3]].map((digit) => parseInt(digit + digit, 16)) as [number, number, number];
+  }
+  const long = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})(?:[0-9a-f]{2})?$/.exec(text);
+  if (long) return [long[1], long[2], long[3]].map((pair) => parseInt(pair, 16)) as [number, number, number];
+  const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/.exec(text);
+  if (rgb) return [rgb[1], rgb[2], rgb[3]].map((part) => Math.min(255, Number(part))) as [number, number, number];
+  return null;
+}
+
+/** How strongly faint text (SGR 2) is drawn: the same colour, partly through. */
+const DIM_ALPHA = 0.55;
+/** How far a curly underline swings above and below its line, in canvas units; one wave per cell. */
+const CURLY_AMPLITUDE = 1.5;
+
+/** Draws `cell`'s underline in its style, from `x` across `width` at the baseline below `y`. */
+function drawUnderline(
+  ctx: CanvasRenderingContext2D,
+  style: UnderlineStyle,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  ascent: number,
+): void {
+  const base = y + Math.min(ascent + 1, height - 2);
+  switch (style) {
+    case "double":
+      ctx.fillRect(x, base, width, 1);
+      ctx.fillRect(x, base + 2, width, 1);
+      break;
+    case "curly": {
+      ctx.beginPath();
+      for (let at = 0; at <= width; at += 1) {
+        const wave = base + 0.5 + Math.sin((at / width) * Math.PI * 2) * CURLY_AMPLITUDE;
+        if (at === 0) ctx.moveTo(x + at, wave);
+        else ctx.lineTo(x + at, wave);
+      }
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.stroke();
+      break;
+    }
+    case "dotted":
+      for (let at = 0; at < width; at += 2) ctx.fillRect(x + at, base, 1, 1);
+      break;
+    case "dashed":
+      for (let at = 0; at < width; at += 4) ctx.fillRect(x + at, base, Math.min(2, width - at), 1);
+      break;
+    default:
+      ctx.fillRect(x, base, width, 1);
+  }
+}
+
 /**
  * Draws the whole grid: every cell's background rect, then (skipped for a
  * blank space — nothing to draw) its glyph, with an underline rect where
@@ -803,33 +926,32 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
       const isCursor = cursor !== null && cursor.row === r && cursor.col === c;
       const isBlockCursor = isCursor && cursorStyle === "block";
 
+      const colors = cellColors(cell, defaultFg, defaultBg, palette, boldIsBright);
+      // A wide character paints both of its cells, so its spacer, drawn after it, would cover its right half: the
+      // spacer paints nothing — a cursor a program put there is drawn as an outline, which leaves the glyph legible.
+      if (cell.spacer) {
+        if (isCursor) {
+          ctx.strokeStyle = cursorColor;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+        }
+        continue;
+      }
+      const span = cell.wide ? cw * 2 : cw;
       if (isBlockCursor) {
         ctx.fillStyle = cursorColor; // the cursor itself is never affected by backgroundOpacity
-        ctx.fillRect(x, y, cw, ch);
+        ctx.fillRect(x, y, span, ch);
       } else {
         // `backgroundOpacity` only applies to a cell with no explicit
         // background of its own (about to be filled with `defaultBg`) — see
         // `DrawOptions.backgroundOpacity`'s own doc comment for why an
         // explicit per-cell background (e.g. a colored prompt) stays opaque.
-        //
-        // Real bug, Checkpoint 5n (owner-reported, live-tested at the real
-        // Mac app): this call was missing `{ palette }` entirely — every
-        // *indexed* background colour (SGR `4x`/`48;5;n`, exactly what a
-        // shell prompt's coloured segments use) silently fell back to
-        // `resolveColor`'s own `THEMES[DEFAULT_THEME]` default (xterm),
-        // regardless of `terminalSettings.theme`. The *foreground* call a
-        // few lines below already passed `palette` correctly, which is
-        // exactly why text/icon colours looked theme-correct while segment
-        // *background* pills (blue, grey, …) stayed hard xterm colours no
-        // matter which theme — Catppuccin Mocha included — was selected.
-        // Confirmed with a minimal reproduction bypassing the shell prompt
-        // entirely (`printf '\033[44m    \033[0m\n'`, raw SGR 44 = indexed
-        // background blue): still rendered xterm's harsh `#0000ee`, not
-        // Catppuccin's `#89b4fa`, proving this was a real engine bug, not
-        // a shell/prompt-configuration issue.
-        ctx.globalAlpha = cell.bg.type === "default" ? backgroundOpacity : 1;
-        ctx.fillStyle = resolveBgColor(cell.bg, defaultBg, palette);
-        ctx.fillRect(x, y, cw, ch);
+        // Every indexed background resolves against the theme's palette
+        // (Checkpoint 5n: a missing `palette` once left prompt pills in
+        // xterm's colours under every theme) — `cellColors` passes it.
+        ctx.globalAlpha = colors.bgIsDefault ? backgroundOpacity : 1;
+        ctx.fillStyle = colors.bg;
+        ctx.fillRect(x, y, span, ch);
         ctx.globalAlpha = 1;
       }
       // Drawn as a translucent overlay on top of the cell's own background
@@ -838,26 +960,37 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
       // regardless of `backgroundOpacity` (see that option's doc comment).
       if (selection && isCellSelected(r, c, selection.start, selection.end)) {
         ctx.fillStyle = selectionColor;
-        ctx.fillRect(x, y, cw, ch);
+        ctx.fillRect(x, y, span, ch);
       }
 
-      if (cell.ch !== " ") {
-        const fg = isBlockCursor
-          ? defaultBg
-          : resolveColor(cell.fg, defaultFg, { palette, bright: cell.bold && boldIsBright });
+      // The character, two cells wide for a wide one. Invisible text (SGR 8) takes its cells and shows nothing; an
+      // underline or a line through runs under blank cells too.
+      if (!cell.invisible) {
+        const fg = isBlockCursor ? defaultBg : colors.fg;
+        // Faint text (SGR 2) is the same colour, drawn partly through.
+        if (cell.dim) ctx.globalAlpha = DIM_ALPHA;
         // Block/shade characters draw as plain rects, box-drawing line
         // characters as plain strokes, instead of glyphs — see
         // `drawBlockElement`'s and `drawBoxDrawingLine`'s own doc comments
         // for why — and skip `cellFont`/`fillText` entirely when handled
         // by any `PROCEDURAL_GLYPH_HANDLERS` entry.
-        if (!PROCEDURAL_GLYPH_HANDLERS.some((handler) => handler(ctx, cell.ch, x, y, cw, ch, fg))) {
-          ctx.font = cellFont(font, cell.bold, fontWeight);
+        if (
+          cell.ch !== " " &&
+          !PROCEDURAL_GLYPH_HANDLERS.some((handler) => handler(ctx, cell.ch, x, y, cw, ch, fg))
+        ) {
+          ctx.font = cellFont(font, cell.bold, fontWeight, cell.italic === true);
           ctx.fillStyle = fg;
-          ctx.fillText(cell.ch, x, y + ascent);
+          ctx.fillText(cell.ch + (cell.combining ?? ""), x, y + ascent);
         }
         if (shouldDrawUnderline(cell)) {
-          ctx.fillRect(x, y + ascent + 1, cw, 1);
+          ctx.fillStyle = cell.underline_color ? resolveColor(cell.underline_color, fg, { palette }) : fg;
+          drawUnderline(ctx, cell.underline_style ?? "single", x, y, span, ch, ascent);
         }
+        if (cell.strike) {
+          ctx.fillStyle = fg;
+          ctx.fillRect(x, y + Math.round(ch / 2), span, 1);
+        }
+        ctx.globalAlpha = 1;
       }
 
       if (isCursor && cursorStyle !== "block") {
@@ -869,10 +1002,10 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
             // Inset by half a device pixel so the 1px stroke lands crisply
             // on the pixel grid rather than straddling (and blurring
             // across) two rows/columns.
-            ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+            ctx.strokeRect(x + 0.5, y + 0.5, span - 1, ch - 1);
             break;
           case "underline":
-            ctx.fillRect(x, y + ch - CURSOR_LINE_WIDTH, cw, CURSOR_LINE_WIDTH);
+            ctx.fillRect(x, y + ch - CURSOR_LINE_WIDTH, span, CURSOR_LINE_WIDTH);
             break;
           case "bar":
             ctx.fillRect(x, y, CURSOR_LINE_WIDTH, ch);
