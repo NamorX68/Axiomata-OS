@@ -291,10 +291,13 @@ from the code itself:
 - **A card on Glut is `axiomata-cli harness card` in its pane** (`docs/plans/glut-cards.md`): everything the run is
   told is the spec `glut-card.json` in the session's channel (`glut_card`, written by `agent_entry::wire_glut`), found
   by `AXIOMATA_AGENT_ID` and checked against the database (folder, team-server file) — never put rights, a command or
-  the secret on the pane's command line. The CLI holds a lock per session, asks through `permission_asks` *and* the
-  pane (first answer wins, typed-ahead lines dropped), writes `glut-events.jsonl` (meter: `usage::GlutTally`; tiles:
-  `activity::glut_recent`) and passes what is left of the session's limits as the run's `Budget`. A start on another
-  harness forgets the spec (`glut_card::forget`).
+  the secret on the pane's command line. The pane runs Glut's own TUI (`glut-tui` as a library, TUI8b) with the CLI
+  as its `Host` (`harness_card::CardHost`): it holds a lock per session, asks through `permission_asks` *and* the
+  TUI's dialog (first answer wins), writes `glut-events.jsonl` (meter: `usage::GlutTally`; tiles:
+  `activity::glut_recent`), passes what is left of the session's limits as the run's `Budget` and stops a turn at the
+  studio's limit. Its model is fixed (no `/model` in the pane), and the app's theme follows into it. Nothing the host
+  does may print to the terminal while the TUI holds it — say it through `HostLink`'s `Signal::Note`. A start on
+  another harness forgets the spec (`glut_card::forget`).
 - **Glut becomes an application of its own** (owner, 2026-10-21): a new Glut setting starts in the harness — its own
   `~/.axh/settings.json`, an `axh` flag or frontmatter — and Axiomata's setting only passes a value on top
   (`docs/plans/glut-effort.md` E1 is the pattern). Never a Glut option only `axiomata-core` can reach.

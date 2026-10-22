@@ -1513,6 +1513,12 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `axiomata-files` moved to `Axiomata-Foundation`, the shared building blocks of the Axiomata apps (later the terminal
   emulator, when the Studio becomes an app of its own). Both are checked out beside this repository and built from
   there (path dependencies in the root `Cargo.toml`); Glut's own traps and the TUI's plan live in its repository.
+- **Glut's TUI in a card's pane** (2026-10-23, Glut `docs/plans/glut-tui.md` TUI8a/8b/8e): `glut-tui` is a library
+  too (`glut_tui::run` with a `Launch` and a `Host`), and `axiomata-cli harness card` runs it in the pane instead of
+  its line printer — `harness_card::CardHost` brings the spec's rights, the team server, the session's budget and the
+  studio's stop, asks in the TUI's dialog and the app at once, the event log, the conversation and the resume of a
+  lost turn; the app's theme follows into the pane (`dashboard.json`'s `settings.theme`). New path dependency
+  `glut-tui` in the root `Cargo.toml`.
 - **Glut on cards built** (2026-10-21, `docs/plans/glut-cards.md`, D9 of `durable.md` revisited): the engine kind
   `glut` (the former placeholder `mini`) works, reviews and plans cards like Claude Code and Opencode — the studio
   writes the run's spec and the team server into the channel, the pane runs `axiomata-cli harness card`, asks come in

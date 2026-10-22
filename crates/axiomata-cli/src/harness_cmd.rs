@@ -110,11 +110,11 @@ impl Provider {
     }
 }
 
-pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
+pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> Result<()> {
     let flags = match action {
         HarnessAction::Run(flags) => *flags,
         HarnessAction::Gain { days } => return gain(days),
-        HarnessAction::Card => return crate::harness_card::card(core).await,
+        HarnessAction::Card => return crate::harness_card::card(std::sync::Arc::clone(core)).await,
     };
     let RunFlags {
         provider,

@@ -39,6 +39,9 @@ Glut was built to replace.
   as `harness run` does, so the pane shows what Glut does live. Nothing else of the pane machinery changes, and the
   TUI later replaces only the printing. *(Rejected: a background run in the app with its own view — a second live
   view to build now and throw away with the TUI.)*
+  **Done 2026-10-23 (Glut TUI8b):** the pane runs Glut's own TUI, `harness_card::CardHost` its host — the model
+  fixed, the mode locked to the role's, no `!cmd`, `/compact` and `/handoff write` refused at the session's limit and
+  metered in its event log, a closed pane leaves the turn to its journal.
 - **C3 — the team server and the secret:** `axh` and `harness card` gain **`--mcp-config <file>`** (Glut's own flag,
   Claude's shape; feedback "Glut standalone"), and the card's `mcp.json` (0600, in the channel) names only the team
   server, as for Claude Code cards. The secret lives in that server's environment, never in Glut's shell

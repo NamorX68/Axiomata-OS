@@ -10,6 +10,7 @@ chrono.workspace = true
 axiomata-core = { path = "../axiomata-core" }
 axiomata-git = { path = "../axiomata-git" }
 glut.workspace = true
+glut-tui.workspace = true
 axiomata-files.workspace = true
 axiomata-roster = { path = "../axiomata-roster" }
 rusqlite.workspace = true

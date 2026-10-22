@@ -755,7 +755,10 @@ async fn main() -> Result<()> {
              the owner does the rest"
         );
     }
-    let core = AxiomataCore::init().context("failed to initialize the Axiomata-OS core engine")?;
+    // Shared: a card's pane hands it to the TUI's host, which outlives any borrow of it.
+    let core = std::sync::Arc::new(
+        AxiomataCore::init().context("failed to initialize the Axiomata-OS core engine")?,
+    );
 
     match command {
         Command::Status => print_status(&core),
