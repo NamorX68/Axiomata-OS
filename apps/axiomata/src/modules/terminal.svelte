@@ -190,6 +190,8 @@
   const MIN_COLS = 20;
   /** Classic terminal cursor blink period — on/off every half-period. */
   const CURSOR_BLINK_MS = 530;
+  /** How strongly the selection covers the cells it marks. */
+  const SELECTION_ALPHA = 0.38;
 
   /** Mirrors the backend's `TerminalEvent` (`src-tauri/src/terminal.rs`).
    *  Field names are snake_case, not camelCase: this rides over a raw
@@ -368,7 +370,12 @@
     defaultBg = v("--ax-surface-1", defaultBg);
     // The cursor is where the terminal lives: the glow, the orange family even in a theme with another accent (G2).
     cursorColor = v("--ax-glow", cursorColor);
-    selectionColor = v("--ax-accent-muted", selectionColor);
+    // The selection is the accent, strong enough to read on a dark background: the theme's muted accent (16 %) looked
+    // brown there (owner, 2026-10-22). The text is drawn over it, so it stays legible.
+    const accent = cssColorToRgb(v("--ax-accent", ""));
+    selectionColor = accent
+      ? `rgba(${accent[0]}, ${accent[1]}, ${accent[2]}, ${SELECTION_ALPHA})`
+      : v("--ax-accent-muted", selectionColor);
     const colors = paneColors();
     if (sessionId && colors) void ctx.invoke("terminal_set_colors", { id: sessionId, colors }).catch(() => {});
     // CP6 architecture-review finding (HIGH): these four feed `draw()`
