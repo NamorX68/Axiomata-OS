@@ -513,6 +513,8 @@ fn render(event: &Event) -> Option<String> {
         } => format!(
             "⇣ conversation compacted · {before_tokens} → {after_tokens} tokens · {replaced} messages summarised"
         ),
+        // Glut TUI3b (T10): a message the owner sent while the run worked, taken in before this step.
+        Event::Steered { text, .. } => format!("› {}", plain(text)),
         Event::Snapshot { turn, run, .. } => format!(
             "⟲ snapshot before step {turn} · axh undo --run {}",
             plain(run)
