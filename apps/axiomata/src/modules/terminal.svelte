@@ -340,8 +340,10 @@
     const now = performance.now();
     if (document.activeElement !== inputEl || now - lastProgramCopy < PROGRAM_COPY_GAP_MS) return;
     lastProgramCopy = now;
-    void navigator.clipboard
-      .writeText(text)
+    // Through the app's own pasteboard command: WKWebView refuses `navigator.clipboard` without a click of the owner's,
+    // and a program's write comes with none.
+    void ctx
+      .invoke("clipboard_write", { text })
       .then(() => {
         copyNote = `the program copied ${text.length} characters`;
         clearTimeout(copyNoteTimeout);

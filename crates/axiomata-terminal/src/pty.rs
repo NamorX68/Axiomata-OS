@@ -126,6 +126,10 @@ impl PtySession {
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // A program telling terminals apart (Glut's probe, Claude Code) must see this one, not the terminal the app was
+        // started from: `cargo tauri dev` run in Ghostty otherwise hands every pane `TERM_PROGRAM=ghostty`.
+        cmd.env("TERM_PROGRAM", "Axiomata");
+        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
@@ -602,7 +606,7 @@ mod tests {
             let mut reader = session.try_clone_reader().expect("failed to clone reader");
 
             session
-                .write(b"echo $TERM:$COLORTERM\n")
+                .write(b"echo $TERM:$COLORTERM:$TERM_PROGRAM\n")
                 .expect("failed to write to pty");
 
             let (tx, rx) = mpsc::channel();
@@ -615,7 +619,7 @@ mod tests {
                         Ok(n) => {
                             collected.extend_from_slice(&buf[..n]);
                             if String::from_utf8_lossy(&collected)
-                                .contains("xterm-256color:truecolor")
+                                .contains("xterm-256color:truecolor:Axiomata")
                             {
                                 break;
                             }
@@ -628,7 +632,10 @@ mod tests {
             let output = rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("timed out waiting for the shell to echo TERM/COLORTERM");
-            assert!(String::from_utf8_lossy(&output).contains("xterm-256color:truecolor"));
+            assert!(
+                String::from_utf8_lossy(&output).contains("xterm-256color:truecolor:Axiomata"),
+                "the pane names itself, not the terminal the app was started from"
+            );
         });
     }
 
