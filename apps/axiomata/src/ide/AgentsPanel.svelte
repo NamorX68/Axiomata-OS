@@ -11,7 +11,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { AgentSpec, IdeAgent } from "../core/backend";
+  import type { AgentSpec, Harness, IdeAgent } from "../core/backend";
   import { projectRoles, type Role } from "../core/roster";
   import { blankSpec, specOf, specReady } from "./agents";
   import { agentStatus } from "./agentStatus";
@@ -60,7 +60,7 @@
     onManage: () => void;
     onOpen: (agent: IdeAgent) => void;
     /** Opens the project's master pane on an engine: as the owner uses it outside, in the real folder (CP3). */
-    onMaster: (harness: "claude_code" | "opencode") => void;
+    onMaster: (harness: Harness) => void;
     /** May answer when the agent exists, so a second click on a chip waits for the first. */
     onCreate: (spec: AgentSpec) => void | Promise<unknown>;
     onEdit: (id: number, spec: AgentSpec) => void;
@@ -81,7 +81,7 @@
   const engines = $derived($engineCatalog);
 
   /** The engines a project has a master pane for, in the order the tiles show them. */
-  const MASTER_HARNESSES = ["claude_code", "opencode"] as const;
+  const MASTER_HARNESSES = ["claude_code", "opencode", "glut"] as const satisfies readonly Harness[];
   /** The project's master agents by engine: they are the tiles at the top, not cards in the list. */
   const masters = $derived(new Map(agents.filter((a) => a.agent_role === "master").map((a) => [a.harness, a])));
   const listed = $derived(agents.filter((a) => a.agent_role !== "master"));
@@ -528,7 +528,8 @@
      harness's colour is the tile's edge; only a working master glows (the accent rule). */
   .masters {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* Three engines: side by side where the panel is wide enough, otherwise they wrap. */
+    grid-template-columns: repeat(auto-fit, minmax(calc(112px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-3);
     margin-bottom: var(--ax-space-4);
   }

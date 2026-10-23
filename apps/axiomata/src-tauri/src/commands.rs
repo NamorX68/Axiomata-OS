@@ -2801,7 +2801,7 @@ pub fn create_ide_agent_on_engine(
     .map_err(|err| err.to_string())
 }
 
-/// The project's master session on `harness` (`claude_code` or `opencode`), made the first time it is asked for
+/// The project's master session on `harness` (`claude_code`, `opencode` or `glut`), made the first time it is asked for
 /// (`docs/plans/agent-isolation.md`, CP3): the engine as the owner uses it outside, in the real project folder.
 #[tauri::command]
 pub fn ide_master_session(

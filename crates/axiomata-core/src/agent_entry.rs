@@ -838,6 +838,62 @@ fn wire_glut_with(
     }
 }
 
+/// The team server's configuration of a Glut master (`docs/plans/glut-tui.md`, TUI8c): the file [`wire_glut_master`]
+/// writes, which `axiomata-cli harness master` finds by the session's id.
+pub fn glut_master_config(roots: &ChannelRoots, agent_id: i64) -> PathBuf {
+    Channel::for_agent(roots, agent_id)
+        .dir()
+        .join(CLAUDE_CONFIG_FILE)
+}
+
+/// Wires the server into a project's Glut master (TUI8c): issues this start's secret and writes the server's
+/// configuration into the channel ([`glut_master_config`]) — nothing else of the studio's, no spec, no rights, no
+/// instructions: the master is the owner's Glut with the team tools added. Returns the CLI's path the pane starts,
+/// `None` when the server could not be wired in, plus what the owner is shown.
+pub fn wire_glut_master(roots: &ChannelRoots, agent: &Agent) -> (Option<PathBuf>, AgentEntry) {
+    wire_glut_master_with(cli_path(), roots, agent)
+}
+
+/// [`wire_glut_master`] with the CLI's path given, for the tests.
+fn wire_glut_master_with(
+    cli: Option<PathBuf>,
+    roots: &ChannelRoots,
+    agent: &Agent,
+) -> (Option<PathBuf>, AgentEntry) {
+    let Some(cli) = cli else {
+        return (None, AgentEntry::unavailable(no_cli_note()));
+    };
+    let wired = (|| -> Result<(), crate::AxiomataError> {
+        let secret = session_token::issue(roots, agent.id)?;
+        let server = Server::new(
+            cli.clone(),
+            agent.id,
+            &secret,
+            None,
+            None,
+            forwarded_from_process,
+        );
+        Channel::for_agent(roots, agent.id)
+            .write_private(CLAUDE_CONFIG_FILE, &server.claude_config())?;
+        Ok(())
+    })();
+    match wired {
+        Ok(()) => {
+            let entry = AgentEntry::new(
+                EntryStatus::Registered,
+                Some(&cli),
+                &caps_of(agent, None),
+                None,
+            );
+            (Some(cli), entry)
+        }
+        Err(err) => (
+            None,
+            AgentEntry::unavailable(format!("the MCP entry could not be written: {err}")),
+        ),
+    }
+}
+
 /// Wires the server into an Opencode session at its worktree (`directory`) on `instance`, the app's service the
 /// session runs on.
 pub async fn wire_opencode(
@@ -1156,6 +1212,39 @@ mod tests {
         // The team server's file is one Glut reads as it is.
         let servers = glut::mcp::config::named(&spec.mcp_config).unwrap();
         assert_eq!(servers.len(), 1);
+    }
+
+    #[test]
+    fn a_glut_master_gets_the_team_server_and_nothing_else_of_the_studios() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (agent, roots) = agent_in(&dir, "master-glut", crate::ide::model::MASTER_ROLE);
+        let (started, entry) = wire_glut_master_with(Some(cli.clone()), &roots, &agent);
+        assert_eq!(entry.status, EntryStatus::Registered);
+        assert_eq!(started, Some(cli));
+        let path = glut_master_config(&roots, agent.id);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let config: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let env = &config["mcpServers"][SERVER_NAME]["env"];
+        assert!(session_token::verify(
+            &roots,
+            agent.id,
+            env["AXIOMATA_AGENT_TOKEN"].as_str().unwrap()
+        ));
+        assert!(
+            env.get("AXIOMATA_CARD_ID").is_none(),
+            "a master works on no card"
+        );
+        assert!(
+            crate::glut_card::read(&roots, agent.id).is_err(),
+            "no card spec for a master"
+        );
+        assert_eq!(glut::mcp::config::named(&path).unwrap().len(), 1);
+        let (none, entry) = wire_glut_master_with(None, &roots, &agent);
+        assert!(none.is_none() && matches!(entry.status, EntryStatus::Unavailable));
     }
 
     #[test]

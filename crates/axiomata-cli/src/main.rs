@@ -6,6 +6,7 @@
 mod files_cmd;
 mod harness_card;
 mod harness_cmd;
+mod harness_master;
 mod inbox_cmd;
 mod models_cmd;
 
@@ -394,7 +395,7 @@ enum AgentAction {
     Prepare { id: i64 },
     /// Forget an Opencode agent's session, so its next start opens a fresh one.
     NewSession { id: i64 },
-    /// The project's master session on a harness (`claude_code` or `opencode`), made the first time: the engine as
+    /// The project's master session on a harness (`claude_code`, `opencode` or `glut`), made the first time: the engine as
     /// the owner uses it outside, in the real project folder, with only the team tools added. Prints its id; `prepare`
     /// starts it.
     Master { project: i64, harness: String },
@@ -1775,7 +1776,7 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
             AgentAction::Prepare { id } => agent_prepare(core, id).await,
             AgentAction::Master { project, harness } => {
                 let harness = ide::Harness::parse(&harness).ok_or_else(|| {
-                    anyhow::anyhow!("no harness called {harness:?} (claude_code, opencode)")
+                    anyhow::anyhow!("no harness called {harness:?} (claude_code, opencode, glut)")
                 })?;
                 let master = {
                     let db = core.db_lock();

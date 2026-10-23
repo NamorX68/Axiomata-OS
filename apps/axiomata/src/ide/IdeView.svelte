@@ -59,7 +59,7 @@
     type Layout,
     type PaneTab,
   } from "./layout";
-  import type { AgentSpec, IdeAgent } from "../core/backend";
+  import type { AgentSpec, Harness, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
   import { masterSession } from "./agents";
   import TasksPanel from "./TasksPanel.svelte";
@@ -624,7 +624,7 @@
    * Opens the project's master pane on `harness` (`docs/plans/agent-isolation.md`, CP3): the engine as the owner uses
    * it outside, in the real project folder. Made the first time; afterwards the same session, brought forward if open.
    */
-  async function openMaster(harness: "claude_code" | "opencode"): Promise<void> {
+  async function openMaster(harness: Harness): Promise<void> {
     const project = current;
     if (!project) return;
     try {

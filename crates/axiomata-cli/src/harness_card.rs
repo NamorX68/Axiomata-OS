@@ -501,8 +501,8 @@ fn app_theme(dashboard: &Path) -> Option<String> {
     (!theme.is_empty()).then(|| theme.to_owned())
 }
 
-/// The session's lock, held while the pane runs.
-fn hold_session(channel: &Channel) -> Result<std::fs::File> {
+/// The session's lock, held while the pane runs: one pane per session (a card's, a master's).
+pub(crate) fn hold_session(channel: &Channel) -> Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt as _;
     let path = channel.dir().join(glut_card::LOCK_FILE);
     let file = std::fs::OpenOptions::new()
@@ -528,6 +528,10 @@ fn check_spec(core: &AxiomataCore, spec: &CardSpec, channel: &Channel) -> Result
     .context("no such session")?;
     if agent.harness != axiomata_core::ide::model::Harness::Glut {
         bail!("this session is not one of Glut's");
+    }
+    // A master is the owner's own Glut (`harness master`): a spec left in its channel is no card of its.
+    if agent.is_master() {
+        bail!("this session is a master, which runs as `harness master`");
     }
     let own = match &agent.worktree_path {
         Some(worktree) => worktree.clone(),

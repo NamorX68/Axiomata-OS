@@ -325,24 +325,17 @@ fn known_role(roles: &[Role], name: &str) -> Result<()> {
 }
 
 /// The master session of `project_id` on `harness` (`docs/plans/agent-isolation.md`, D4, CP3), made the first time it
-/// is asked for: Claude Code or Opencode with its own default command — not an engine of the catalog, whose flags
+/// is asked for: Claude Code, Opencode or Glut with its own default command — not an engine of the catalog, whose flags
 /// would be the studio's — in the real project folder, playing [`MASTER_ROLE`](crate::ide::model::MASTER_ROLE).
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] for a harness that has no master (Glut, until it has a terminal UI of its own); the agent store's refusals; a failing
-/// database write. Nothing is created then.
+/// The agent store's refusals; a failing database write. Nothing is created then.
 pub fn master_session(db: &Connection, project_id: i64, harness: AgentHarness) -> Result<Agent> {
     let name = match harness {
         AgentHarness::ClaudeCode => "master-claude-code",
         AgentHarness::Opencode => "master-opencode",
-        AgentHarness::Glut => {
-            return Err(RosterError::Invalid {
-                field: "harness",
-                reason: "only Claude Code and Opencode have a master session; Glut's comes with its terminal UI".into(),
-            }
-            .into());
-        }
+        AgentHarness::Glut => "master-glut",
     };
     if let Some(master) = agent_store::list_agents(db, project_id)?
         .into_iter()
@@ -664,7 +657,8 @@ mod tests {
             claude.id,
             "asked again: the same"
         );
-        assert!(master_session(&db, project, AgentHarness::Glut).is_err());
+        let glut = master_session(&db, project, AgentHarness::Glut).unwrap();
+        assert!(glut.is_master() && glut.id != claude.id && glut.id != opencode.id);
         assert!(known_role(&[], crate::ide::model::MASTER_ROLE).is_err());
         let edited = update_agent_on_engine(
             &db,

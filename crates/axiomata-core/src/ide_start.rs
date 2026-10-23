@@ -224,6 +224,25 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             }
             Ok(Started { ready, mcp })
         }
+        Harness::Glut if ready.agent.is_master() => {
+            // The master (TUI8c): the owner's own Glut — their `~/.axh`, their servers, their sessions — in the real
+            // folder, with the team server added; no card spec, so nothing of a card's is left to read.
+            crate::glut_card::forget(&roots, ready.agent.id);
+            let (cli, mcp) = agent_entry::wire_glut_master(&roots, &ready.agent);
+            let Some(cli) = cli else {
+                return Err(crate::roster::refusal(
+                    "Glut master",
+                    mcp.note
+                        .clone()
+                        .unwrap_or_else(|| "its team server could not be written".into()),
+                ));
+            };
+            ready.launch_command = format!(
+                "{} harness master",
+                agent_entry::shell_quote(&cli.display().to_string())
+            );
+            Ok(Started { ready, mcp })
+        }
         Harness::Glut => {
             // Everything the run is told goes into the channel (`glut_card`); the pane types only the CLI's command,
             // which finds it there by the session's id.

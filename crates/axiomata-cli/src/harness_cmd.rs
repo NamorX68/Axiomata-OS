@@ -35,6 +35,10 @@ pub enum HarnessAction {
     /// A Studio session on Glut, in its pane (`docs/plans/glut-cards.md`): started by the studio, which names the
     /// session in the environment and wrote what it is started with into its channel.
     Card,
+    /// A project's Glut master, in its pane (`docs/plans/glut-tui.md` in Glut's repository, TUI8c): the owner's own
+    /// Glut in the project folder with the team server added; started by the studio, which names the session in the
+    /// environment.
+    Master,
     /// What Glut lean saved (`docs/plans/glut-lean.md`, N9): compacted outputs, unchanged re-reads and relocated
     /// results per kind — every Glut run's, from `~/.axh/lean.jsonl`; the same table as `axh gain`.
     Gain {
@@ -115,6 +119,7 @@ pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> 
         HarnessAction::Run(flags) => *flags,
         HarnessAction::Gain { days } => return gain(days),
         HarnessAction::Card => return crate::harness_card::card(std::sync::Arc::clone(core)).await,
+        HarnessAction::Master => return crate::harness_master::master(core).await,
     };
     let RunFlags {
         provider,

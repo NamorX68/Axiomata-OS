@@ -297,7 +297,9 @@ from the code itself:
   `activity::glut_recent`), passes what is left of the session's limits as the run's `Budget` and stops a turn at the
   studio's limit. Its model is fixed (no `/model` in the pane), and the app's theme follows into it. Nothing the host
   does may print to the terminal while the TUI holds it — say it through `HostLink`'s `Signal::Note`. A start on
-  another harness forgets the spec (`glut_card::forget`).
+  another harness forgets the spec (`glut_card::forget`). A project's **Glut master** is `axiomata-cli harness master`
+  (TUI8c): the owner's own Glut (`glut_tui::standalone`) in the real folder with the channel's team-server file beside
+  the owner's MCP servers — no spec, no host, nothing of a card's.
 - **Glut becomes an application of its own** (owner, 2026-10-21): a new Glut setting starts in the harness — its own
   `~/.axh/settings.json`, an `axh` flag or frontmatter — and Axiomata's setting only passes a value on top
   (`docs/plans/glut-effort.md` E1 is the pattern). Never a Glut option only `axiomata-core` can reach.

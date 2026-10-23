@@ -1513,6 +1513,9 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `axiomata-files` moved to `Axiomata-Foundation`, the shared building blocks of the Axiomata apps (later the terminal
   emulator, when the Studio becomes an app of its own). Both are checked out beside this repository and built from
   there (path dependencies in the root `Cargo.toml`); Glut's own traps and the TUI's plan live in its repository.
+- **A master pane on Glut** (2026-10-23, Glut TUI8c): the Agents panel's third master tile. `axiomata-cli harness
+  master` runs the owner's own Glut (`glut_tui::standalone`, their `~/.axh`) in the project folder, with the team
+  server the studio wrote into the channel beside the owner's MCP servers (`glut --mcp-config`); no spec, no host.
 - **Glut's TUI in a card's pane** (2026-10-23, Glut `docs/plans/glut-tui.md` TUI8a/8b/8e): `glut-tui` is a library
   too (`glut_tui::run` with a `Launch` and a `Host`), and `axiomata-cli harness card` runs it in the pane instead of
   its line printer — `harness_card::CardHost` brings the spec's rights, the team server, the session's budget and the

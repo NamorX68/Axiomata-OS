@@ -74,6 +74,7 @@ Glut was built to replace.
   channel, the 7-day sweep of D8 applies.
 - **C9 — not in this round:** the **master pane** on Glut (it is "the engine as the owner uses it outside" — that is
   the TUI's job), an Anthropic client for Glut, images.
+  *The master pane is done 2026-10-23 (Glut TUI8c, `axiomata-cli harness master`).*
 
 ## Checkpoints
 
