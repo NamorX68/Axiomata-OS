@@ -93,8 +93,8 @@ let configState: {
     claude_env: {},
     chat_provider: "anthropic",
     skill_provider: "anthropic",
-    chat_harness: "opencode",
-    skill_harness: "opencode",
+    chat_harness: "claude_code",
+    skill_harness: "claude_code",
     chat_effort: null,
     skill_effort: null,
     providers: {

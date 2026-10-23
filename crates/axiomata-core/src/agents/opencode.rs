@@ -977,6 +977,32 @@ pub async fn send_prompt(
         .map_err(into_axiomata)
 }
 
+/// Stops the services of the app's own instances that still run (`docs/plans/opencode-exit.md`, O4): they were left
+/// running when the app quit, and nothing of the app's runs on them any more. Best effort and quiet — `opencode service
+/// stop` on an instance whose service is not running does nothing, a stop that fails is logged; the folders under
+/// `~/.axiomata/opencode` stay. Not looked for first: a service left from an older Opencode fails the client's version
+/// check, and must stop all the same.
+pub async fn stop_app_services() {
+    if refuse_in_tests().is_err() {
+        return;
+    }
+    let Ok(binary) = resolve_opencode_binary() else {
+        return;
+    };
+    for instance in [Instance::Write, Instance::Read, Instance::Master] {
+        let env = opencode_instance::service_env(instance);
+        match Service::stop(binary, &env).await {
+            Ok(()) => tracing::info!(
+                ?instance,
+                "stopped the app's Opencode service: nothing runs on it any more"
+            ),
+            Err(err) => {
+                tracing::warn!(?instance, %err, "the app's Opencode service would not stop")
+            }
+        }
+    }
+}
+
 /// Starts `instance`'s service when it is not running, with a configuration generated now — before a terminal UI
 /// attaches to it: one that found no service would start its own with the owner's folders.
 ///

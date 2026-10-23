@@ -83,6 +83,11 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (34, include_str!("migrations/0013_cached_input_tokens.sql")),
     // A run's row from its start, `running` → `interrupted` when its process is gone (durable.md, CP3).
     (35, include_str!("migrations/0014_durable_runs.sql")),
+    // Opencode leaves: its Studio sessions start on Glut, except the master (opencode-exit.md, O3).
+    (
+        36,
+        include_str!("migrations/0015_opencode_sessions_to_glut.sql"),
+    ),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -344,6 +349,61 @@ mod tests {
             assert_eq!(probe_value, "ok");
         }
 
+        let _ = fs::remove_file(&temp_db);
+    }
+
+    #[test]
+    fn migration_36_moves_the_opencode_sessions_to_glut_but_the_master_and_an_own_command() {
+        let temp_db = unique_temp_dir("axiomata-test-db-36").with_extension("db");
+        let conn = open_and_migrate_at(&temp_db).unwrap();
+        let repo = unique_temp_dir("axiomata-test-db-36-repo");
+        fs::create_dir_all(&repo).unwrap();
+        let project = crate::ide::store::create_project(
+            &conn,
+            axiomata_ide::NewProject {
+                name: "P".into(),
+                repo_root: repo,
+            },
+        )
+        .unwrap();
+        let made = |name: &str, command: &str| {
+            let agent = crate::ide::agent_store::create_agent(
+                &conn,
+                crate::ide::model::NewAgent {
+                    project_id: project.id,
+                    fields: crate::ide::model::AgentFields {
+                        name: name.into(),
+                        harness: crate::ide::model::Harness::Opencode,
+                        command: command.into(),
+                        model: None,
+                        env: String::new(),
+                    },
+                },
+            )
+            .unwrap();
+            crate::ide::agent_store::set_opencode_session(&conn, agent.id, Some("ses_1")).unwrap();
+            agent.id
+        };
+        let worker = made("worker", "");
+        let master = made("master-opencode", "");
+        crate::ide::agent_store::set_role(&conn, master, crate::ide::model::MASTER_ROLE).unwrap();
+        let own = made("own", "opencode --port 4096");
+        let sql = MIGRATIONS
+            .iter()
+            .find(|(version, _)| *version == 36)
+            .expect("migration 36")
+            .1;
+        conn.execute_batch(sql).unwrap();
+        let row = |id: i64| {
+            crate::ide::agent_store::get_agent(&conn, id)
+                .unwrap()
+                .unwrap()
+        };
+        assert_eq!(row(worker).harness, crate::ide::model::Harness::Glut);
+        assert_eq!(row(worker).opencode_session, None);
+        assert_eq!(row(master).harness, crate::ide::model::Harness::Opencode);
+        assert_eq!(row(own).harness, crate::ide::model::Harness::Opencode);
+        drop(conn);
         let _ = fs::remove_file(&temp_db);
     }
 

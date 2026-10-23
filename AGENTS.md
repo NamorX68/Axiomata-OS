@@ -124,6 +124,12 @@ from the code itself:
 - **Skills live in one place only**, `~/.axiomata/skills/<name>/SKILL.md` — there is no
   workspace-local skill location (dropped deliberately; `docs/architecture.md` §4 explains
   why).
+- **Opencode is leaving** (`docs/plans/opencode-exit.md`, OX1 done 2026-10-23): no role, skill, routine or card runs
+  on it any more — a stored `opencode` harness or backend resolves to today's (`HarnessId::default_for`: Claude Code for
+  Anthropic, Glut otherwise), its engines load as Glut engines with the same id and model (`ollama/…` / `openrouter/…`
+  pick the provider, `glut_card::endpoint`), a new Opencode engine is refused, and the app stops its own instances at
+  start. Only the Agents panel's **plain Opencode tile** remains: the owner's own `opencode`, no team tools. The trap
+  below describes the code OX2 removes.
 - **Opencode 2 is a service, and Axiomata is its API client** (`docs/plans/opencode2.md`,
   crate `axiomata-opencode`; docs: https://opencode.ai/v2/docs, *not* `/docs`, that is v1).
   Skills, chat and card sessions run on the **app's own** services, never the owner's

@@ -65,6 +65,26 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
     let _start = start_lock().lock().await;
     let (mut ready, role, launch) = {
         let conn = core.db_lock();
+        // Opencode left (`docs/plans/opencode-exit.md`, O3): a generated session on it that migration 36 did not see
+        // starts as Glut, never on the app's own Opencode service.
+        if let Some(agent) = agent_store::get_agent(&conn, id)?
+            && agent.harness == Harness::Opencode
+            && !agent.is_master()
+            && agent.command.trim().is_empty()
+        {
+            agent_store::update_agent(
+                &conn,
+                id,
+                crate::ide::model::AgentFields {
+                    name: agent.name,
+                    harness: Harness::Glut,
+                    command: agent.command,
+                    model: agent.model,
+                    env: agent.env,
+                },
+            )?;
+            agent_store::set_opencode_session(&conn, id, None)?;
+        }
         let ready = provision::prepare(&conn, &paths::ide_locations(), id)?;
         // A request a hook of the previous run left open is nobody's any more: the app must not offer it.
         crate::permission_ask::close_open(&conn, id, "system:restart")?;
@@ -122,25 +142,15 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             Ok(Started { ready, mcp })
         }
         Harness::Opencode if ready.agent.is_master() => {
-            // The master (D4, D6): Opencode's own terminal UI on the master instance, which runs the owner's
-            // configuration — no session made for it, no rules added, the owner opens or continues one as outside.
-            // Only the team tools are registered at the project folder (D5).
-            opencode::ensure_running(opencode::Instance::Master).await?;
-            ready.launch_command = format!(
-                "{}{}",
-                opencode::tui_env_prefix(opencode::Instance::Master),
-                ready.launch_command
-            );
-            let mcp = agent_entry::wire_opencode(
-                &roots,
-                &ready.agent,
-                &ready.cwd,
-                None,
-                None,
-                opencode::Instance::Master,
-            )
-            .await;
-            Ok(Started { ready, mcp })
+            // The plain Opencode tile (`docs/plans/opencode-exit.md`, O1): the owner's own `opencode` in the project
+            // folder — their configuration, their service, their free models. No service of the app's, so no team
+            // tools: a configuration handed to `opencode` does not reach the service it attaches to (measured).
+            Ok(Started {
+                ready,
+                mcp: AgentEntry::not_applicable(
+                    "the Opencode tile is Opencode as you run it yourself: it has no team tools",
+                ),
+            })
         }
         Harness::Opencode => {
             let tools = agent_entry::role_tools(role.as_ref());
@@ -449,37 +459,22 @@ pub enum Reach {
 pub enum Registration {
     /// At its worktree, on whichever automation instance its session ran.
     Worktree(std::path::PathBuf),
-    /// A master's: at the project folder, on the master instance (CP3).
-    Master(std::path::PathBuf),
 }
 
 impl Registration {
     /// `agent`'s registration, `None` for another harness or an agent that has none. Read before the row is deleted.
-    ///
-    /// # Errors
-    ///
-    /// A failing database read of the agent's project.
-    pub fn of(
-        db: &rusqlite::Connection,
-        agent: &crate::ide::model::Agent,
-    ) -> Result<Option<Self>, AxiomataError> {
-        if agent.harness != Harness::Opencode {
-            return Ok(None);
-        }
-        if agent.is_master() {
-            return Ok(crate::ide::store::get_project(db, agent.project_id)?
-                .map(|project| Registration::Master(project.repo_root)));
-        }
-        Ok(agent.worktree_path.clone().map(Registration::Worktree))
+    /// The plain Opencode tile registers nothing (`docs/plans/opencode-exit.md`, O1): taking it back would start the
+    /// master service again.
+    pub fn of(agent: &crate::ide::model::Agent) -> Option<Self> {
+        (agent.harness == Harness::Opencode && !agent.is_master())
+            .then(|| agent.worktree_path.clone().map(Registration::Worktree))
+            .flatten()
     }
 
     /// Takes the registration off the service — best effort, see [`opencode::forget_mcp`].
     pub async fn forget(&self) {
         match self {
             Registration::Worktree(directory) => opencode::forget_mcp(directory).await,
-            Registration::Master(directory) => {
-                opencode::forget_mcp_on(opencode::Instance::Master, directory).await
-            }
         }
     }
 }
@@ -553,31 +548,22 @@ pub async fn reach(
         let is_repo = project
             .as_ref()
             .is_some_and(|project| crate::ide::worktree::is_repo(&project.repo_root));
-        // An Opencode master's server is at the project folder on the master instance, whatever session the owner
-        // opened there (CP3).
-        let master_folder = (agent.is_master()
-            && agent.harness == Harness::Opencode
-            && agent.command.trim().is_empty())
-        .then(|| project.map(|project| project.repo_root))
-        .flatten();
-        let directory = match master_folder {
-            Some(folder) => folder,
-            None => {
-                let Some(directory) = registration_directory(
-                    agent.harness,
-                    &agent.command,
-                    agent.worktree_path.as_deref(),
-                    is_repo,
-                ) else {
-                    return Ok(Reach::NotApplicable);
-                };
-                // A session the service never saw has nothing to keep registered; its start makes the first one.
-                if agent.opencode_session.is_none() {
-                    return Ok(Reach::NotApplicable);
-                }
-                directory
-            }
+        // The plain Opencode tile has no server to keep (opencode-exit.md, O1).
+        if agent.is_master() {
+            return Ok(Reach::NotApplicable);
+        }
+        let Some(directory) = registration_directory(
+            agent.harness,
+            &agent.command,
+            agent.worktree_path.as_deref(),
+            is_repo,
+        ) else {
+            return Ok(Reach::NotApplicable);
         };
+        // A session the service never saw has nothing to keep registered; its start makes the first one.
+        if agent.opencode_session.is_none() {
+            return Ok(Reach::NotApplicable);
+        }
         let config = core.config_read().clone();
         let role = roster::roles_for_project(&conn, &config, agent.project_id)
             .into_iter()
@@ -595,14 +581,10 @@ pub async fn reach(
     }
     // Registered where the session is, which may not be where its launch would put a new one (its role changed since).
     let session = agent.opencode_session.as_deref().unwrap_or_default();
-    let found = if agent.is_master() {
-        Some(opencode::Instance::Master)
-    } else {
-        opencode::running_services()
-            .await
-            .instance_of(session)
-            .await
-    };
+    let found = opencode::running_services()
+        .await
+        .instance_of(session)
+        .await;
     let Some(instance) = found else {
         return Ok(Reach::Unreachable {
             reason: Some(

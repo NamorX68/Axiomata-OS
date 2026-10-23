@@ -1095,7 +1095,28 @@ pub(crate) fn endpoint(
     model: Option<String>,
     effort: Option<&str>,
 ) -> Result<ModelEndpoint, AxiomataError> {
-    let id = config.agents.provider_for(role);
+    endpoint_on(
+        config,
+        role,
+        config.agents.provider_for(role),
+        model,
+        effort,
+    )
+}
+
+/// [`endpoint`] on provider `id` instead of the role's — a card engine's model names its own (`glut_card::endpoint`);
+/// the role still picks the effort and the wording of a gap.
+///
+/// # Errors
+///
+/// As [`endpoint`].
+pub(crate) fn endpoint_on(
+    config: &Config,
+    role: ProviderRole,
+    id: ProviderId,
+    model: Option<String>,
+    effort: Option<&str>,
+) -> Result<ModelEndpoint, AxiomataError> {
     let gap = |reason: String| AxiomataError::InvalidAgentModel { reason };
     let settings = config.agents.providers.get(&id).ok_or_else(|| {
         gap(format!(

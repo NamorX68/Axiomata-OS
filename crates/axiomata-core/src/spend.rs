@@ -255,7 +255,14 @@ pub fn metered_cost_usd(
     output_tokens: Option<u64>,
 ) -> Option<f64> {
     let model = model.map(str::trim).filter(|m| !m.is_empty())?;
-    let price = config.agents.costs.get(model)?;
+    // A Glut engine that was Opencode's names its model with the provider in front (`openrouter/…`); the prices are
+    // kept under the model's own id, as the provider's catalog names it.
+    let price = config.agents.costs.get(model).or_else(|| {
+        ["openrouter/", "ollama/"]
+            .iter()
+            .find_map(|prefix| model.strip_prefix(prefix))
+            .and_then(|bare| config.agents.costs.get(bare))
+    })?;
     let (input_tokens, output_tokens) = (input_tokens?, output_tokens?);
     // The cached tokens are part of the input; a backend that does not say has none.
     let cached = cached_input_tokens.unwrap_or(0).min(input_tokens);
@@ -395,6 +402,25 @@ mod tests {
             rusqlite::params![provider, cost, at.to_rfc3339()],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_model_named_with_its_provider_in_front_takes_the_models_own_price() {
+        let mut config = Config::default();
+        config.agents.costs.insert(
+            "z/flash".to_owned(),
+            crate::config::ModelCost {
+                input_per_m: 1.0,
+                output_per_m: 2.0,
+                cached_input_per_m: None,
+            },
+        );
+        let cost =
+            |model| metered_cost_usd(&config, Some(model), Some(1_000_000), None, Some(1_000_000));
+        assert_eq!(cost("z/flash"), Some(3.0));
+        assert_eq!(cost("openrouter/z/flash"), Some(3.0));
+        assert_eq!(cost("ollama/z/flash"), Some(3.0));
+        assert_eq!(cost("other/z/flash"), None);
     }
 
     #[test]

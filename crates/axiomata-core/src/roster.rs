@@ -159,7 +159,12 @@ pub fn derive_engines(
 ///
 /// A failing config read or save, or a failing database write.
 pub fn sync_agents(db: &Connection, config: &mut Config) -> Result<usize> {
-    let agents = agent_store::unassigned_agents(db)?;
+    // The plain Opencode tile can have no engine: an Opencode engine is refused (opencode-exit.md, O1), and it runs
+    // its harness's own command anyway — asking again on every sync would only warn every time.
+    let agents: Vec<_> = agent_store::unassigned_agents(db)?
+        .into_iter()
+        .filter(|agent| !(agent.is_master() && agent.harness == Harness::Opencode))
+        .collect();
     if agents.is_empty() {
         return Ok(0);
     }
@@ -723,18 +728,11 @@ mod tests {
             &conn,
             project,
             "c",
-            Harness::Opencode,
+            Harness::Glut,
             Some("openrouter/deepseek/v4"),
             "",
         );
-        add(
-            &conn,
-            project,
-            "d",
-            Harness::Opencode,
-            None,
-            "opencode --foo",
-        );
+        add(&conn, project, "d", Harness::Glut, None, "opencode --foo");
 
         let agents = agent_store::unassigned_agents(&conn).unwrap();
         let mut engines = BTreeMap::new();
@@ -744,7 +742,7 @@ mod tests {
         assert_eq!(assigned[0].1, assigned[1].1, "same profile, same engine");
         assert_ne!(assigned[0].1, assigned[2].1);
         assert_eq!(assigned[0].1, "claude-code-claude-opus-5-5");
-        assert_eq!(assigned[2].1, "opencode-openrouter-deepseek-v4");
+        assert_eq!(assigned[2].1, "glut-openrouter-deepseek-v4");
         assert_eq!(engines[&assigned[0].1].billing, Billing::Subscription);
         assert_eq!(engines[&assigned[2].1].billing, Billing::Metered);
         assert!(engines[&assigned[3].1].label.ends_with("own command"));
@@ -756,12 +754,12 @@ mod tests {
     #[test]
     fn deriving_twice_changes_nothing_and_a_clashing_id_gets_a_suffix() {
         let (conn, project, _dir) = fixture();
-        let a = add(&conn, project, "a", Harness::Opencode, None, "");
-        let b = add(&conn, project, "b", Harness::Opencode, None, "opencode --x");
+        let a = add(&conn, project, "a", Harness::Glut, None, "");
+        let b = add(&conn, project, "b", Harness::Glut, None, "glut --x");
         let mut engines = BTreeMap::new();
         let first = derive_engines(&[a.clone(), b.clone()], &mut engines);
-        assert_eq!(first[0].1, "opencode");
-        assert_eq!(first[1].1, "opencode-2");
+        assert_eq!(first[0].1, "glut");
+        assert_eq!(first[1].1, "glut-2");
         let again = derive_engines(&[a, b], &mut engines);
         assert_eq!(again, first);
         assert_eq!(engines.len(), 2);
@@ -771,7 +769,7 @@ mod tests {
     fn a_very_long_model_name_still_makes_a_valid_id() {
         let (conn, project, _dir) = fixture();
         let model = "provider/".to_string() + &"very-long-model-name-".repeat(6);
-        let agent = add(&conn, project, "a", Harness::Opencode, Some(&model), "");
+        let agent = add(&conn, project, "a", Harness::Glut, Some(&model), "");
         let mut engines = BTreeMap::new();
         derive_engines(&[agent], &mut engines);
         let engine = engines.values().next().unwrap();
@@ -782,9 +780,9 @@ mod tests {
     #[test]
     fn an_engine_in_use_by_a_session_cannot_be_deleted() {
         let (conn, project, _dir) = fixture();
-        let agent = add(&conn, project, "a", Harness::Opencode, None, "");
-        agent_store::set_engine(&conn, agent.id, Some("opencode")).unwrap();
-        let user = engine_user(&conn, &[], "opencode").unwrap();
+        let agent = add(&conn, project, "a", Harness::Glut, None, "");
+        agent_store::set_engine(&conn, agent.id, Some("glut")).unwrap();
+        let user = engine_user(&conn, &[], "glut").unwrap();
         assert!(user.unwrap().contains("session"));
         assert!(engine_user(&conn, &[], "unused").unwrap().is_none());
     }
@@ -828,7 +826,7 @@ mod tests {
         Engine {
             id: id.into(),
             label: id.into(),
-            harness: Harness::Opencode,
+            harness: Harness::Glut,
             command: String::new(),
             model: None,
             env: String::new(),
@@ -881,7 +879,7 @@ mod tests {
             let mut live = Config::default();
             save_engine(&mut live, engine("used")).unwrap();
             save_engine(&mut live, engine("free")).unwrap();
-            let agent = add(&conn, project, "a", Harness::Opencode, None, "");
+            let agent = add(&conn, project, "a", Harness::Glut, None, "");
             agent_store::set_engine(&conn, agent.id, Some("used")).unwrap();
 
             assert!(matches!(
@@ -943,7 +941,7 @@ mod tests {
             save_role(&config, role).unwrap();
             assert_eq!(list_roles().unwrap().roles.len(), 1);
 
-            let agent = add(&conn, project, "a", Harness::Opencode, None, "");
+            let agent = add(&conn, project, "a", Harness::Glut, None, "");
             agent_store::set_role(&conn, agent.id, "reviewer").unwrap();
             assert!(matches!(
                 delete_role(&conn, "reviewer"),
@@ -996,7 +994,7 @@ mod tests {
                     project_id: project,
                     fields: AgentFields {
                         name: "loose".into(),
-                        harness: Harness::Opencode,
+                        harness: Harness::Glut,
                         command: String::new(),
                         model: None,
                         env: "export FOO=1\n# a note".into(),
@@ -1061,7 +1059,7 @@ mod tests {
     fn editing_a_profile_gives_the_agent_the_engine_of_the_new_profile() {
         with_temp_home(|_| {
             let (conn, project, _dir) = fixture();
-            let agent = add(&conn, project, "a", Harness::Opencode, Some("x/one"), "");
+            let agent = add(&conn, project, "a", Harness::Glut, Some("x/one"), "");
             let live = RwLock::new(Config::default());
             sync_live(&conn, &live).unwrap();
             let first = agent_store::get_agent(&conn, agent.id)
@@ -1075,7 +1073,7 @@ mod tests {
                 agent.id,
                 AgentFields {
                     name: "a".into(),
-                    harness: Harness::Opencode,
+                    harness: Harness::Glut,
                     command: String::new(),
                     model: Some("x/two".into()),
                     env: String::new(),
@@ -1241,7 +1239,7 @@ mod tests {
         let mut config = Config::default();
         for e in [
             engine_on("opus", Harness::ClaudeCode, Some("opus")),
-            engine_on("flash", Harness::Opencode, Some("openrouter/x/flash")),
+            engine_on("flash", Harness::Glut, Some("openrouter/x/flash")),
         ] {
             config.agents.engines.insert(e.id.clone(), e);
         }
@@ -1332,7 +1330,7 @@ mod tests {
                 moved.harness,
                 moved.agent_role.as_str()
             ),
-            ("renamed", Some("flash"), Harness::Opencode, "reviewer")
+            ("renamed", Some("flash"), Harness::Glut, "reviewer")
         );
         assert_eq!(moved.model.as_deref(), Some("openrouter/x/flash"));
         assert!(

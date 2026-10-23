@@ -54,6 +54,14 @@ impl Engine {
     /// [`RosterError::Invalid`] naming the first bad field.
     pub fn validate(&self) -> Result<()> {
         check_slug("id", &self.id)?;
+        // Opencode left the catalog (Axiomata-OS `docs/plans/opencode-exit.md`): only the Agents panel's plain master
+        // tile runs it, and that is no engine.
+        if self.harness == Harness::Opencode {
+            return Err(RosterError::invalid(
+                "harness",
+                "Opencode is no engine any more; it runs only as the Agents panel's Opencode tile",
+            ));
+        }
         if self.label.trim().is_empty() {
             return Err(RosterError::invalid("label", "must not be empty"));
         }
@@ -140,6 +148,19 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    #[test]
+    fn an_opencode_engine_is_read_but_refused() {
+        let engine: Engine =
+            serde_json::from_str(r#"{"id":"oc","label":"Opencode","harness":"opencode"}"#).unwrap();
+        assert!(matches!(
+            engine.validate(),
+            Err(RosterError::Invalid {
+                field: "harness",
+                ..
+            })
+        ));
     }
 
     #[test]

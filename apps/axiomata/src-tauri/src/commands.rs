@@ -500,6 +500,8 @@ mod tests {
         };
         c.agents.chat_provider = ProviderId::OpenRouter;
         c.agents.skill_provider = ProviderId::OpenRouter;
+        c.agents.chat_harness = axiomata_core::config::HarnessId::Axh;
+        c.agents.skill_harness = axiomata_core::config::HarnessId::Axh;
         c.agents.providers.insert(
             ProviderId::OpenRouter,
             ProviderSettings {
@@ -541,8 +543,8 @@ mod tests {
                 skill_timeout_secs: current.agents.skill_timeout_secs,
                 chat_provider: ProviderId::OpenRouter,
                 skill_provider: ProviderId::OpenRouter,
-                chat_harness: HarnessId::Opencode,
-                skill_harness: HarnessId::Opencode,
+                chat_harness: HarnessId::Axh,
+                skill_harness: HarnessId::Axh,
                 chat_effort: None,
                 skill_effort: None,
                 daily_usd_cap: current.agents.daily_usd_cap,
@@ -623,6 +625,8 @@ mod tests {
         };
         current.agents.chat_provider = ProviderId::OpenRouter;
         current.agents.skill_provider = ProviderId::OpenRouter;
+        current.agents.chat_harness = axiomata_core::config::HarnessId::Axh;
+        current.agents.skill_harness = axiomata_core::config::HarnessId::Axh;
         current
             .agents
             .providers
@@ -638,8 +642,8 @@ mod tests {
                 skill_timeout_secs: 300,
                 chat_provider: ProviderId::OpenRouter,
                 skill_provider: ProviderId::OpenRouter,
-                chat_harness: HarnessId::Opencode,
-                skill_harness: HarnessId::Opencode,
+                chat_harness: HarnessId::Axh,
+                skill_harness: HarnessId::Axh,
                 chat_effort: None,
                 skill_effort: None,
                 daily_usd_cap: Some(2.0),
@@ -677,8 +681,8 @@ mod tests {
                 skill_timeout_secs: 300,
                 chat_provider: ProviderId::Anthropic,
                 skill_provider: ProviderId::Anthropic,
-                chat_harness: HarnessId::Opencode,
-                skill_harness: HarnessId::Opencode,
+                chat_harness: HarnessId::ClaudeCode,
+                skill_harness: HarnessId::ClaudeCode,
                 chat_effort: None,
                 skill_effort: None,
                 daily_usd_cap: Some(2.0),
@@ -744,6 +748,13 @@ mod tests {
         let merged = merge_view_update(&current, update);
         assert_eq!(merged.agents.chat_harness, HarnessId::ClaudeCode);
         assert_eq!(merged.agents.skill_harness, HarnessId::Opencode);
+        // Taken as given, and refused at the save: Opencode serves no role any more (opencode-exit.md).
+        assert!(
+            merged
+                .validate_for_save()
+                .unwrap_err()
+                .starts_with("Skill harness opencode cannot serve")
+        );
         assert_eq!(
             ConfigView::from_config(&merged).agents.chat_harness,
             HarnessId::ClaudeCode
@@ -1001,6 +1012,8 @@ mod tests {
         };
         new_config.agents.chat_provider = ProviderId::Ollama;
         new_config.agents.skill_provider = ProviderId::Ollama;
+        new_config.agents.chat_harness = axiomata_core::config::HarnessId::Axh;
+        new_config.agents.skill_harness = axiomata_core::config::HarnessId::Axh;
         // Ollama is non-Anthropic, so `validate_for_save` now requires
         // concrete models on both role providers (its seeded defaults leave
         // them blank for the owner to fill in).
@@ -2963,8 +2976,7 @@ pub async fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bo
         let db = state.db_lock();
         let registration =
             match ide::agent_store::get_agent(&db, id).map_err(|err| err.to_string())? {
-                Some(agent) => axiomata_core::ide_start::Registration::of(&db, &agent)
-                    .map_err(|err| err.to_string())?,
+                Some(agent) => axiomata_core::ide_start::Registration::of(&agent),
                 None => None,
             };
         let deleted = ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?;

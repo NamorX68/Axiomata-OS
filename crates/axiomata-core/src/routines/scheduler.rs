@@ -820,12 +820,10 @@ mod tests {
         // rest of the app, not a value snapshot frozen at `spawn_with_interval`
         // time — a live Settings-dialog edit must reach the very next tick.
         //
-        // The observable is deliberately something that fails at OS-level
-        // process spawn, *before* `execve` ever runs: an `opencode` routine
-        // whose `cwd` (`config.workspace_root`) is invalid. That happens
-        // inside the child, pre-exec, so the real `opencode` binary on this
-        // machine's PATH is never actually invoked — no live agent call, no
-        // network. Two different *kinds* of invalid path yield two
+        // The observable is deliberately something that fails before any
+        // model is asked: a Glut routine whose folder (`config.workspace_root`)
+        // is invalid — no live agent call, no network. Two different *kinds*
+        // of invalid path yield two
         // distinguishable `io::Error`s (`ENOENT` vs. `ENOTDIR`), so the
         // recorded failure detail proves which of the two config values was
         // active when the routine actually fired.
@@ -836,6 +834,15 @@ mod tests {
 
         let mut config = fx.config.clone();
         config.workspace_root = missing_dir;
+        // Glut on the local provider: its run takes the workspace as its folder before anything is sent.
+        config.agents.skill_provider = crate::config::ProviderId::Ollama;
+        if let Some(local) = config
+            .agents
+            .providers
+            .get_mut(&crate::config::ProviderId::Ollama)
+        {
+            local.skill_model = "probe-model".to_owned();
+        }
         let shared_config = Arc::new(RwLock::new(config));
 
         let routine = store::add(
@@ -844,7 +851,7 @@ mod tests {
                 name: "live-config-probe".to_owned(),
                 cron_expr: "*/1 * * * * *".to_owned(),
                 target: RoutineTarget::Prompt("irrelevant — spawn fails first".to_owned()),
-                backend: Some("opencode".to_owned()),
+                backend: Some("axh".to_owned()),
                 enabled: true,
             },
         )

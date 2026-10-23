@@ -395,6 +395,9 @@ pub fn run() {
             plan_watch::start(app.handle());
             waiting_watch::start(app.handle());
             model_watch::start(app.handle());
+            // Opencode leaves (docs/plans/opencode-exit.md, O4): the app's own services, left running at an earlier
+            // quit, are stopped once; nothing of the app's starts them again.
+            tauri::async_runtime::spawn(axiomata_core::agents::opencode::stop_app_services());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

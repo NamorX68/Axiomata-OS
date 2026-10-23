@@ -161,7 +161,8 @@ pub enum ProviderRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessId {
-    /// Opencode 2, on the app's own instances — every provider.
+    /// Opencode 2 — leaving (`docs/plans/opencode-exit.md`): read from an older config and resolved at load to the
+    /// role's harness of today ([`HarnessId::default_for`]); no longer offered.
     #[default]
     Opencode,
     /// Claude Code as `claude -p` on the app's own login folder — Anthropic only (D2).
@@ -172,7 +173,17 @@ pub enum HarnessId {
 
 impl HarnessId {
     /// Every harness offered in the Settings UI, in display order.
-    pub const ALL: [HarnessId; 3] = [HarnessId::Opencode, HarnessId::ClaudeCode, HarnessId::Axh];
+    pub const ALL: [HarnessId; 2] = [HarnessId::ClaudeCode, HarnessId::Axh];
+
+    /// The harness a role takes when none is named, or the retired Opencode: Claude Code for Anthropic, which Glut
+    /// does not serve, Glut for every other provider.
+    pub fn default_for(provider: ProviderId) -> Self {
+        if provider == ProviderId::Anthropic {
+            HarnessId::ClaudeCode
+        } else {
+            HarnessId::Axh
+        }
+    }
 
     /// The stored token, matching the serde name and the `crate::agents::BACKEND_*` ids.
     pub fn as_str(self) -> &'static str {
@@ -186,7 +197,8 @@ impl HarnessId {
     /// Whether this harness can drive turns of `provider` — the matrix of `docs/plans/harness-choice.md`.
     pub fn serves(self, provider: ProviderId) -> bool {
         match self {
-            HarnessId::Opencode => true,
+            // Left (opencode-exit.md): a role saved on it would run on it until the next start.
+            HarnessId::Opencode => false,
             HarnessId::ClaudeCode => provider == ProviderId::Anthropic,
             HarnessId::Axh => provider != ProviderId::Anthropic,
         }
@@ -595,6 +607,39 @@ impl AgentDefaults {
         }
     }
 
+    /// Resolves Opencode, which leaves (`docs/plans/opencode-exit.md`, O2/O3): a role on it takes its harness of
+    /// today, and an engine on it becomes a Glut engine with the same model — Glut reads Opencode's `openrouter/…`
+    /// and `ollama/…` spelling and picks the provider by it. The engines' ids stay, so the roles naming them do too.
+    /// Idempotent; the file keeps the old words until something saves it.
+    fn migrate_retired_opencode(&mut self) {
+        if self.chat_harness == HarnessId::Opencode {
+            self.chat_harness = HarnessId::default_for(self.chat_provider);
+        }
+        if self.skill_harness == HarnessId::Opencode {
+            self.skill_harness = HarnessId::default_for(self.skill_provider);
+        }
+        for engine in self.engines.values_mut() {
+            if engine.harness != axiomata_roster::Harness::Opencode {
+                continue;
+            }
+            engine.harness = axiomata_roster::Harness::Glut;
+            engine.label = match engine
+                .model
+                .as_deref()
+                .filter(|model| !model.trim().is_empty())
+            {
+                Some(model) => format!(
+                    "Glut · {}",
+                    model
+                        .strip_prefix("openrouter/")
+                        .or_else(|| model.strip_prefix("ollama/"))
+                        .unwrap_or(model)
+                ),
+                None => "Glut".to_owned(),
+            };
+        }
+    }
+
     /// The harness driving `role` — the counterpart of [`Self::provider_for`].
     pub fn harness_for(&self, role: ProviderRole) -> HarnessId {
         match role {
@@ -635,8 +680,8 @@ impl Default for AgentDefaults {
             legacy_active_provider: None,
             chat_provider: ProviderId::default(),
             skill_provider: ProviderId::default(),
-            chat_harness: HarnessId::default(),
-            skill_harness: HarnessId::default(),
+            chat_harness: HarnessId::default_for(ProviderId::default()),
+            skill_harness: HarnessId::default_for(ProviderId::default()),
             web: WebSettings::default(),
             glut: GlutSettings::default(),
             daily_usd_cap: default_daily_usd_cap(),
@@ -873,6 +918,7 @@ impl Config {
             })?;
         config.agents.migrate_legacy_model_if_needed();
         config.agents.migrate_legacy_provider_if_needed();
+        config.agents.migrate_retired_opencode();
         config.agents.reseed_blank_providers();
         Ok(config)
     }
@@ -1479,6 +1525,9 @@ mod tests {
         let mut config = Config::default();
         config.agents.chat_provider = id;
         config.agents.skill_provider = id;
+        // A provider chosen in the Settings comes with the harness that serves it.
+        config.agents.chat_harness = HarnessId::default_for(id);
+        config.agents.skill_harness = HarnessId::default_for(id);
         config.agents.providers.insert(id, settings);
         config
     }
@@ -1536,6 +1585,7 @@ mod tests {
         let mut config = Config::default();
         config.agents.chat_provider = ProviderId::Anthropic;
         config.agents.skill_provider = ProviderId::Ollama;
+        config.agents.skill_harness = HarnessId::Axh;
         config.agents.providers.insert(
             ProviderId::Ollama,
             ProviderSettings {
@@ -1549,11 +1599,11 @@ mod tests {
     }
 
     /// The harness/provider matrix of `docs/plans/harness-choice.md`: Claude Code serves Anthropic only, Glut every
-    /// provider but Anthropic, Opencode all of them.
+    /// provider but Anthropic, Opencode none any more (it left, `docs/plans/opencode-exit.md`).
     #[test]
     fn harness_serves_only_the_providers_of_the_matrix() {
         for provider in ProviderId::ALL {
-            assert!(HarnessId::Opencode.serves(provider));
+            assert!(!HarnessId::Opencode.serves(provider));
             assert_eq!(
                 HarnessId::ClaudeCode.serves(provider),
                 provider == ProviderId::Anthropic
@@ -1590,10 +1640,10 @@ mod tests {
         assert_eq!(config.validate_for_save(), Ok(()));
     }
 
-    /// The two harness fields round-trip under their snake_case tokens, and a config saved before them reads as
-    /// Opencode for both roles — today's behaviour.
+    /// The two harness fields round-trip under their snake_case tokens; a config saved before them, or naming the
+    /// retired Opencode, takes each role's harness of today at load (`docs/plans/opencode-exit.md`, O3).
     #[test]
-    fn harness_fields_round_trip_and_an_old_config_runs_on_opencode() {
+    fn harness_fields_round_trip_and_an_old_config_leaves_opencode() {
         let mut config = Config::default();
         config.agents.chat_harness = HarnessId::ClaudeCode;
         config.agents.skill_harness = HarnessId::Axh;
@@ -1607,16 +1657,59 @@ mod tests {
         );
         assert_eq!(back.agents.harness_for(ProviderRole::Skill), HarnessId::Axh);
 
-        let old: Config =
-            toml::from_str("owner = \"x\"\n[agents]\nchat_provider = \"anthropic\"\n").unwrap();
-        assert_eq!(old.agents.chat_harness, HarnessId::Opencode);
-        assert_eq!(old.agents.skill_harness, HarnessId::Opencode);
+        let mut old: Config = toml::from_str(
+            "owner = \"x\"\n[agents]\nchat_provider = \"anthropic\"\nskill_provider = \"open_router\"\n\
+             skill_harness = \"opencode\"\n",
+        )
+        .unwrap();
+        old.agents.migrate_retired_opencode();
+        assert_eq!(
+            old.agents.chat_harness,
+            HarnessId::ClaudeCode,
+            "Anthropic: Claude Code"
+        );
+        assert_eq!(
+            old.agents.skill_harness,
+            HarnessId::Axh,
+            "any other provider: Glut"
+        );
+        assert_eq!(
+            Config::default().agents.chat_harness,
+            HarnessId::default_for(ProviderId::default())
+        );
         for harness in HarnessId::ALL {
             assert_eq!(
                 toml::to_string(&HarnessWrap { h: harness }).unwrap(),
                 format!("h = \"{}\"\n", harness.as_str())
             );
         }
+    }
+
+    /// An engine on Opencode becomes a Glut engine with the same id and model; the others are left as they are.
+    #[test]
+    fn an_opencode_engine_becomes_a_glut_engine_with_its_model() {
+        let mut config: Config = toml::from_str(
+            "owner = \"x\"\n\
+             [agents.engines.oc-flash]\nid = \"oc-flash\"\nlabel = \"Opencode · openrouter/z/flash\"\n\
+             harness = \"opencode\"\nmodel = \"openrouter/z/flash\"\n\
+             [agents.engines.oc-local]\nid = \"oc-local\"\nlabel = \"Opencode · ollama/q:27b\"\n\
+             harness = \"opencode\"\nmodel = \"ollama/q:27b\"\n\
+             [agents.engines.oc]\nid = \"oc\"\nlabel = \"Opencode\"\nharness = \"opencode\"\n\
+             [agents.engines.cc]\nid = \"cc\"\nlabel = \"Claude Code\"\nharness = \"claude_code\"\n",
+        )
+        .unwrap();
+        config.agents.migrate_retired_opencode();
+        config.agents.migrate_retired_opencode();
+        let engine = |id: &str| config.agents.engines[id].clone();
+        assert_eq!(engine("oc-flash").harness, axiomata_roster::Harness::Glut);
+        assert_eq!(
+            engine("oc-flash").model.as_deref(),
+            Some("openrouter/z/flash")
+        );
+        assert_eq!(engine("oc-flash").label, "Glut · z/flash");
+        assert_eq!(engine("oc-local").label, "Glut · q:27b");
+        assert_eq!(engine("oc").label, "Glut");
+        assert_eq!(engine("cc").harness, axiomata_roster::Harness::ClaudeCode);
     }
 
     /// `[agents.web]` round-trips; a config without it gets the limits that keep searches free (W3, W7).
@@ -1655,6 +1748,7 @@ mod tests {
         let mut config = Config::default();
         config.agents.chat_provider = ProviderId::Anthropic;
         config.agents.skill_provider = ProviderId::Ollama;
+        config.agents.skill_harness = HarnessId::Axh;
         config.agents.providers.insert(
             ProviderId::Ollama,
             ProviderSettings {
@@ -1811,6 +1905,8 @@ mod tests {
         };
         config.agents.chat_provider = ProviderId::OpenRouter;
         config.agents.skill_provider = ProviderId::OpenRouter;
+        config.agents.chat_harness = HarnessId::Axh;
+        config.agents.skill_harness = HarnessId::Axh;
         config
             .agents
             .providers

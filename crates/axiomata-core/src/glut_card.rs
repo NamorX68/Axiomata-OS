@@ -162,21 +162,22 @@ pub fn endpoint(
     config: &crate::config::Config,
     model: Option<String>,
 ) -> Result<glut::ModelEndpoint, AxiomataError> {
+    use crate::config::ProviderId;
     let role = crate::config::ProviderRole::Chat;
-    let provider = config.agents.provider_for(role);
-    // An engine's model written as Opencode spells it (`openrouter/<model>`) means the same model to Glut, which
-    // speaks to the provider directly.
-    let opencode_prefix = match provider {
-        crate::config::ProviderId::OpenRouter => Some("openrouter/"),
-        crate::config::ProviderId::Ollama => Some("ollama/"),
-        _ => None,
+    // An engine's model written as Opencode spells it (`openrouter/<model>`, `ollama/<model>`) names its provider and
+    // means the same model to Glut, which speaks to that provider directly — the engines that were Opencode's keep
+    // their models (`docs/plans/opencode-exit.md`, O2). A bare model goes to the chat provider.
+    let (provider, model) = match model.as_deref().map(str::trim) {
+        Some(named) if named.starts_with("openrouter/") => (
+            ProviderId::OpenRouter,
+            named.strip_prefix("openrouter/").map(str::to_owned),
+        ),
+        Some(named) if named.starts_with("ollama/") => (
+            ProviderId::Ollama,
+            named.strip_prefix("ollama/").map(str::to_owned),
+        ),
+        _ => (config.agents.provider_for(role), model),
     };
-    let model = model.map(|model| {
-        match opencode_prefix.and_then(|prefix| model.trim().strip_prefix(prefix)) {
-            Some(bare) => bare.to_owned(),
-            None => model,
-        }
-    });
     let model = model.filter(|model| !model.trim().is_empty()).or_else(|| {
         config
             .agents
@@ -184,7 +185,7 @@ pub fn endpoint(
             .get(&provider)
             .map(|settings| settings.chat_model.clone())
     });
-    crate::agents::axh::endpoint(config, role, model, None)
+    crate::agents::axh::endpoint_on(config, role, provider, model, None)
 }
 
 fn refusal(path: &Path, why: &str) -> AxiomataError {
@@ -292,5 +293,18 @@ mod tests {
             endpoint(&config, Some(" ".into())).unwrap().model,
             "chat/default"
         );
+        // An `ollama/…` model goes to Ollama, whatever the chat provider is.
+        config.agents.providers.insert(
+            crate::config::ProviderId::Ollama,
+            crate::config::ProviderSettings {
+                base_url: Some("http://localhost:11434".into()),
+                api_key: None,
+                chat_model: "llama".into(),
+                skill_model: "llama".into(),
+            },
+        );
+        let local = endpoint(&config, Some("ollama/qwen3.8:27b-mlx".into())).unwrap();
+        assert_eq!(local.model, "qwen3.8:27b-mlx");
+        assert_eq!(local.base_url, "http://localhost:11434");
     }
 }

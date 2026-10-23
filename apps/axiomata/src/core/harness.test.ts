@@ -16,9 +16,9 @@ import {
 const ORDER: ProviderId[] = ["anthropic", "open_router", "ollama"];
 
 describe("harness matrix", () => {
-  it("lets Opencode serve every provider, Claude Code only Anthropic and Glut all but Anthropic", () => {
+  it("lets Opencode serve no provider any more, Claude Code only Anthropic and Glut all but Anthropic", () => {
     for (const p of ORDER) {
-      expect(serves("opencode", p)).toBe(true);
+      expect(serves("opencode", p)).toBe(false);
       expect(serves("claude_code", p)).toBe(p === "anthropic");
       expect(serves("axh", p)).toBe(p !== "anthropic");
     }
@@ -28,7 +28,7 @@ describe("harness matrix", () => {
     const all = ORDER.map((id) => ({ id }));
     expect(providersFor("claude_code", all).map((p) => p.id)).toEqual(["anthropic"]);
     expect(providersFor("axh", all).map((p) => p.id)).toEqual(["open_router", "ollama"]);
-    expect(providersFor("opencode", all)).toHaveLength(3);
+    expect(providersFor("opencode", all)).toHaveLength(0);
   });
 
   it("keeps a role's provider when the new harness serves it and moves it to the first served one otherwise", () => {
@@ -44,8 +44,8 @@ describe("harness matrix", () => {
     expect(usesClaudeCode("axh", "opencode")).toBe(false);
   });
 
-  it("lists the three harnesses with Glut as the own one", () => {
-    expect(HARNESSES.map((h) => h.id)).toEqual(["opencode", "claude_code", "axh"]);
+  it("lists Claude Code and Glut, no longer Opencode, with Glut as the own one", () => {
+    expect(HARNESSES.map((h) => h.id)).toEqual(["claude_code", "axh"]);
     expect(HARNESSES.find((h) => h.id === "axh")?.label).toBe("Glut");
   });
 });
@@ -86,7 +86,7 @@ describe("backend names in the dashboard", () => {
     expect(backendLabel("ollama")).toBe("ollama");
   });
 
-  it("offers the three harnesses and ollama as backends", () => {
-    expect(BACKEND_CHOICES.map((c) => c.id)).toEqual(["opencode", "claude_code", "axh", "ollama"]);
+  it("offers the two harnesses and ollama as backends", () => {
+    expect(BACKEND_CHOICES.map((c) => c.id)).toEqual(["claude_code", "axh", "ollama"]);
   });
 });

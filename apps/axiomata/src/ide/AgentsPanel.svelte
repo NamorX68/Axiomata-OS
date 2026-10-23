@@ -203,7 +203,9 @@
           <button
             class="master {card?.status.tone ?? ''}"
             type="button"
-            title="{harnessLabel(harness)} as you use it outside — your settings and rules, in the project folder, with the team tools"
+            title={harness === "opencode"
+              ? "Opencode as you run it yourself — your settings, your models, in the project folder; no team tools"
+              : `${harnessLabel(harness)} as you use it outside — your settings and rules, in the project folder, with the team tools`}
             onclick={() => onMaster(harness)}
           >
             <HexAvatar

@@ -19,9 +19,11 @@ import {
 } from "../core/backend";
 import type { ReachAnswer } from "./reach";
 
-/** The harnesses, in the order a picker should offer them. */
+/**
+ * The harnesses a new engine can run on, in the order a picker should offer them. Opencode is only the Agents panel's
+ * plain master tile now (`docs/plans/opencode-exit.md`, O1).
+ */
 export const HARNESSES: { id: Harness; label: string; hint: string }[] = [
-  { id: "opencode", label: "Opencode", hint: "The harness skills and routines already run on" },
   { id: "claude_code", label: "Claude Code", hint: "Anthropic's CLI" },
   { id: "glut", label: "Glut", hint: "Axiomata's own harness: sandbox, network gate, refusal limits" },
 ];

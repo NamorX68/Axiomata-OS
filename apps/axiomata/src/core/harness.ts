@@ -13,9 +13,11 @@ export interface HarnessMeta {
   blurb: string;
 }
 
-/** Every harness the Settings dialog offers, in display order. */
+/**
+ * Every harness the Settings dialog offers, in display order. Opencode is no longer one of them
+ * (`docs/plans/opencode-exit.md`): a config that still names it reads as the provider's harness of today.
+ */
 export const HARNESSES: readonly HarnessMeta[] = [
-  { id: "opencode", label: "Opencode", blurb: "Every provider — the app's own Opencode instances" },
   { id: "claude_code", label: "Claude Code", blurb: "Anthropic only, on the app's own login" },
   { id: "axh", label: "Glut", blurb: "Axiomata's own harness — OpenRouter or Ollama" },
 ] as const;
@@ -24,7 +26,8 @@ export const HARNESSES: readonly HarnessMeta[] = [
 export function serves(harness: HarnessId, provider: ProviderId): boolean {
   switch (harness) {
     case "opencode":
-      return true;
+      // Left (docs/plans/opencode-exit.md): no role runs on it.
+      return false;
     case "claude_code":
       return provider === "anthropic";
     case "axh":

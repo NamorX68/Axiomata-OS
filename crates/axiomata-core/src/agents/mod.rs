@@ -220,7 +220,6 @@ impl AgentBackend {
         config: &Config,
     ) -> Result<Self, AxiomataError> {
         match backend {
-            BACKEND_OPENCODE => Ok(Self::Opencode),
             BACKEND_AXH => Ok(Self::Axh),
             BACKEND_CLAUDE_CODE => Ok(Self::ClaudeCode),
             BACKEND_OLLAMA => {
@@ -234,8 +233,16 @@ impl AgentBackend {
             // never overwrites an existing copy, so pre-upgrade installs keep
             // the old ids on disk; they name no harness of today, so they run
             // on the configured one, as a skill without the field does.
-            "claude-code" | "ollama-agent" => {
-                let harness = config.agents.skill_harness.as_str();
+            // Opencode left too (`docs/plans/opencode-exit.md`, O3): a skill or routine that names it runs on the
+            // configured harness as well.
+            BACKEND_OPENCODE | "claude-code" | "ollama-agent" => {
+                // The configured one is never Opencode after the config's load; a config made in code could still say
+                // so, and must not send this back here.
+                let harness = match config.agents.skill_harness {
+                    HarnessId::Opencode => HarnessId::default_for(config.agents.skill_provider),
+                    configured => configured,
+                }
+                .as_str();
                 tracing::warn!(
                     backend,
                     harness,
@@ -989,10 +996,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_maps_opencode_identifier() {
-        let backend = AgentBackend::resolve(BACKEND_OPENCODE, None, &Config::default()).unwrap();
-        assert_eq!(backend, AgentBackend::Opencode);
-        assert_eq!(backend.id(), "opencode");
+    fn resolve_maps_opencode_onto_the_skill_harness_now_that_it_left() {
+        // `docs/plans/opencode-exit.md`, O3: a skill or routine that still names Opencode runs on today's harness.
+        let mut config = Config::default();
+        config.agents.skill_harness = HarnessId::Axh;
+        assert_eq!(
+            AgentBackend::resolve(BACKEND_OPENCODE, None, &config).unwrap(),
+            AgentBackend::Axh
+        );
+        // A config made in code that still says Opencode takes the provider's harness, never loops back.
+        config.agents.skill_harness = HarnessId::Opencode;
+        config.agents.skill_provider = ProviderId::Anthropic;
+        assert_eq!(
+            AgentBackend::resolve(BACKEND_OPENCODE, None, &config).unwrap(),
+            AgentBackend::ClaudeCode
+        );
     }
 
     #[test]
@@ -1278,7 +1296,11 @@ mod tests {
         let mut config = Config::default();
         for retired in ["claude-code", "ollama-agent"] {
             let backend = AgentBackend::resolve(retired, None, &config).unwrap();
-            assert_eq!(backend, AgentBackend::Opencode, "{retired} -> Opencode");
+            assert_eq!(
+                backend,
+                AgentBackend::ClaudeCode,
+                "{retired} -> the default harness"
+            );
         }
         config.agents.skill_harness = crate::config::HarnessId::Axh;
         assert_eq!(

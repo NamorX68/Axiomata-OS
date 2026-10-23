@@ -290,13 +290,13 @@ enum EngineAction {
         /// What the UI shows, e.g. "Claude Code · Opus".
         #[arg(long)]
         label: String,
-        /// claude_code | opencode | glut.
-        #[arg(long, default_value = "opencode")]
+        /// claude_code | glut.
+        #[arg(long, default_value = "glut")]
         harness: String,
         /// Command line to run. Empty uses the harness's own default.
         #[arg(long, default_value = "")]
         command: String,
-        /// Model to pass on (for Opencode the full `provider/model`). Omitted lets the harness pick.
+        /// Model to pass on (for Glut `openrouter/…` or `ollama/…` picks the provider). Omitted lets the harness pick.
         #[arg(long)]
         model: Option<String>,
         /// Extra environment, `KEY=value` per line.
@@ -356,8 +356,8 @@ enum AgentAction {
     New {
         project: i64,
         name: String,
-        /// claude_code | opencode | glut.
-        #[arg(long, default_value = "opencode")]
+        /// claude_code | opencode | glut (Opencode only for a session of the owner's own command).
+        #[arg(long, default_value = "glut")]
         harness: String,
         /// Command line to run. Empty uses the harness's own default.
         #[arg(long, default_value = "")]
@@ -2076,8 +2076,20 @@ fn project_root(core: &AxiomataCore, project: i64) -> Result<PathBuf> {
 /// Parses a harness name, listing the valid ones when it is not one of them.
 fn parse_harness(raw: &str) -> Result<ide::Harness> {
     ide::Harness::parse(raw).ok_or_else(|| {
-        anyhow::anyhow!("unknown harness {raw:?} — expected claude_code, opencode or mini")
+        anyhow::anyhow!("unknown harness {raw:?} — expected claude_code, glut or opencode")
     })
+}
+
+/// A session's fields with Opencode only where it still runs (`docs/plans/opencode-exit.md`, O1): a session of the
+/// owner's own command, started as written. A generated Opencode session would start the app's own service again.
+fn session_fields(fields: ide::AgentFields) -> Result<ide::AgentFields> {
+    if fields.harness == ide::Harness::Opencode && fields.command.trim().is_empty() {
+        anyhow::bail!(
+            "Opencode runs only as the Opencode tile (`ide agents master <project> --harness opencode`) or with a \
+             command of your own (--command); use glut or claude_code for a session"
+        );
+    }
+    Ok(fields)
 }
 
 /// Gives a new or changed agent its engine (a2a.md, CP-A1). A failure only leaves it unassigned until the next
@@ -2130,13 +2142,13 @@ fn agent_new(
         &db,
         ide::NewAgent {
             project_id,
-            fields: ide::AgentFields {
+            fields: session_fields(ide::AgentFields {
                 name: name.to_string(),
                 harness: parse_harness(harness)?,
                 command: command.to_string(),
                 model,
                 env: env.to_string(),
-            },
+            })?,
         },
     )?;
     assign_engines(core, &db);
@@ -2169,7 +2181,7 @@ fn agent_edit(
     let Some(existing) = ide::agent_store::get_agent(&db, id)? else {
         anyhow::bail!("no agent #{id}");
     };
-    let fields = ide::AgentFields {
+    let fields = session_fields(ide::AgentFields {
         name: name.unwrap_or(existing.name),
         harness: match harness {
             Some(raw) => parse_harness(&raw)?,
@@ -2178,7 +2190,7 @@ fn agent_edit(
         command: command.unwrap_or(existing.command),
         model: model.or(existing.model),
         env: env.unwrap_or(existing.env),
-    };
+    })?;
     match ide::agent_store::update_agent(&db, id, fields)? {
         Some(agent) => {
             assign_engines(core, &db);
@@ -2438,7 +2450,7 @@ async fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
         let Some(agent) = ide::agent_store::get_agent(&db, id)? else {
             anyhow::bail!("no agent #{id}");
         };
-        let registration = axiomata_core::ide_start::Registration::of(&db, &agent)?;
+        let registration = axiomata_core::ide_start::Registration::of(&agent);
         if !ide::agent_store::delete_agent(&db, id)? {
             anyhow::bail!("no agent #{id}");
         }

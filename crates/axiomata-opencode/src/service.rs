@@ -201,6 +201,20 @@ impl Service {
             .map(drop)
     }
 
+    /// Stops the service `child_env` names (`opencode service stop`): the app's own, once it no longer runs anything
+    /// on Opencode (`docs/plans/opencode-exit.md`, O4).
+    ///
+    /// Errors:
+    ///     [`OpencodeError::Unavailable`] when `opencode service stop` fails.
+    pub async fn stop(
+        opencode: &Path,
+        child_env: &[(String, String)],
+    ) -> Result<(), OpencodeError> {
+        run_command(opencode, &["service", "stop"], child_env)
+            .await
+            .map(drop)
+    }
+
     /// The version the service reported.
     pub fn version(&self) -> &str {
         &self.version

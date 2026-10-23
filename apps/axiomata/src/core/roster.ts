@@ -146,7 +146,7 @@ export function splitLines(text: string): string[] {
 }
 
 export function blankEngine(): Engine {
-  return { id: "", label: "", harness: "opencode", command: "", model: null, env: "", billing: "metered" };
+  return { id: "", label: "", harness: "glut", command: "", model: null, env: "", billing: "metered" };
 }
 
 export type FormResult<T> = { ok: true; value: T } | { ok: false; field: string; message: string };
