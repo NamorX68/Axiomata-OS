@@ -1665,6 +1665,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       ideAgents = [...ideAgents, created];
       return created as T;
     }
+    case "ide_watch_line":
+      return `axiomata-cli harness watch --agent ${Number(args.id)}` as T;
     case "ide_master_session": {
       const projectId = Number(args.projectId);
       const harness = args.harness as Harness;

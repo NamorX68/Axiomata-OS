@@ -894,6 +894,23 @@ fn wire_glut_master_with(
     }
 }
 
+/// The command line of a pane that follows Glut session `agent` read-only (Glut TUI8d): `axiomata-cli harness watch`
+/// on the session's id — the CLI finds its log. `None` for another harness, which keeps no such log, or without the
+/// CLI.
+pub fn glut_watch_line(agent: &Agent) -> Option<String> {
+    glut_watch_line_with(cli_path(), agent)
+}
+
+/// [`glut_watch_line`] with the CLI's path given, for the tests.
+fn glut_watch_line_with(cli: Option<PathBuf>, agent: &Agent) -> Option<String> {
+    (agent.harness == crate::ide::model::Harness::Glut).then_some(())?;
+    Some(format!(
+        "{} harness watch --agent {}",
+        shell_quote(&cli?.display().to_string()),
+        agent.id
+    ))
+}
+
 /// Wires the server into an Opencode session at its worktree (`directory`) on `instance`, the app's service the
 /// session runs on.
 pub async fn wire_opencode(
@@ -1245,6 +1262,25 @@ mod tests {
         assert_eq!(glut::mcp::config::named(&path).unwrap().len(), 1);
         let (none, entry) = wire_glut_master_with(None, &roots, &agent);
         assert!(none.is_none() && matches!(entry.status, EntryStatus::Unavailable));
+    }
+
+    #[test]
+    fn a_glut_session_is_watched_through_the_cli_and_no_other_harness_is() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (mut agent, _) = agent_in(&dir, "Dev", "allrounder");
+        agent.harness = crate::ide::model::Harness::Glut;
+        assert_eq!(
+            glut_watch_line_with(Some(cli.clone()), &agent).unwrap(),
+            format!(
+                "{} harness watch --agent {}",
+                shell_quote(&cli.display().to_string()),
+                agent.id
+            )
+        );
+        assert!(glut_watch_line_with(None, &agent).is_none());
+        agent.harness = crate::ide::model::Harness::ClaudeCode;
+        assert!(glut_watch_line_with(Some(cli), &agent).is_none());
     }
 
     #[test]

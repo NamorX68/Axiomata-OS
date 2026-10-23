@@ -7,6 +7,7 @@ mod files_cmd;
 mod harness_card;
 mod harness_cmd;
 mod harness_master;
+mod harness_watch;
 mod inbox_cmd;
 mod models_cmd;
 

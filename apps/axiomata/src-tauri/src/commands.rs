@@ -2815,6 +2815,19 @@ pub fn ide_master_session(
     axiomata_core::roster::master_session(&db, project_id, harness).map_err(|err| err.to_string())
 }
 
+/// The command line of a pane that follows Glut session `id` read-only (Glut TUI8d), resolved here so the webview
+/// never names a command: it only opens the pane with what this returns.
+#[tauri::command]
+pub fn ide_watch_line(state: State<'_, CoreState>, id: i64) -> Result<String, String> {
+    let db = state.db_lock();
+    let agent = ide::agent_store::get_agent(&db, id)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("no session {id}"))?;
+    axiomata_core::agent_entry::glut_watch_line(&agent).ok_or_else(|| {
+        "only a Glut session can be watched, and the app's CLI is needed for it".to_owned()
+    })
+}
+
 /// Renames an agent and moves it to another engine and role. `None` if there is no such agent.
 #[tauri::command]
 pub fn update_ide_agent_on_engine(

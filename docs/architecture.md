@@ -1513,6 +1513,10 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `axiomata-files` moved to `Axiomata-Foundation`, the shared building blocks of the Axiomata apps (later the terminal
   emulator, when the Studio becomes an app of its own). Both are checked out beside this repository and built from
   there (path dependencies in the root `Cargo.toml`); Glut's own traps and the TUI's plan live in its repository.
+- **Watching a Glut session** (2026-10-23, Glut TUI8d): Glut's TUI writes every session's event log itself — a card's
+  channel `glut-events.jsonl` (`Launch::log`), the owner's beside their session in `~/.axh/sessions` — and `glut watch`
+  follows one read-only. A Glut tile in Flow has **Watch**: `axiomata-cli harness watch --agent N` in a pane of its own,
+  its line from Rust (`ide_watch_line`).
 - **A master pane on Glut** (2026-10-23, Glut TUI8c): the Agents panel's third master tile. `axiomata-cli harness
   master` runs the owner's own Glut (`glut_tui::standalone`, their `~/.axh`) in the project folder, with the team
   server the studio wrote into the channel beside the owner's MCP servers (`glut --mcp-config`); no spec, no host.

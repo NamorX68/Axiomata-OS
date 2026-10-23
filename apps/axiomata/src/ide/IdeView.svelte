@@ -61,7 +61,7 @@
   } from "./layout";
   import type { AgentSpec, Harness, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
-  import { masterSession } from "./agents";
+  import { masterSession, watchLine } from "./agents";
   import TasksPanel from "./TasksPanel.svelte";
   import DebugPanel from "./DebugPanel.svelte";
   import { onDebugReveal, onDebugTerminal } from "./debug";
@@ -487,13 +487,30 @@
    * typed into a task-style pane called “Debug”, reused by the next session. The line is never stored.
    */
   function openDebugTerminal(title: string, line: string): void {
-    const existing = allTabs(layout).find((t) => taskIdOf(t) === DEBUG_TERMINAL);
+    openLineTerminal(DEBUG_TERMINAL, title || "Debug", line);
+  }
+
+  /**
+   * A Glut session followed read-only (`glut watch`, TUI8d) in a task-style pane of its own, one per session: its line
+   * comes from Rust (`ide_watch_line`) and is never stored, like the debugger's.
+   */
+  async function openWatch(agentId: number, name: string): Promise<void> {
+    try {
+      openLineTerminal(`watch:${agentId}`, `Watch ${name}`, await watchLine(agentId));
+    } catch (err) {
+      toast(`The session cannot be watched: ${err instanceof Error ? err.message : String(err)}`, "danger");
+    }
+  }
+
+  /** Runs `line` in the task-style pane `taskId` — the one already open, or a new one beside the other task panes. */
+  function openLineTerminal(taskId: string, title: string, line: string): void {
+    const existing = allTabs(layout).find((t) => taskIdOf(t) === taskId);
     if (existing) {
       startTaskRun(existing.id, line);
       layout = activateTab(layout, existing.id);
       return;
     }
-    const tab = taskTab(title || "Debug", DEBUG_TERMINAL);
+    const tab = taskTab(title, taskId);
     startTaskRun(tab.id, line);
     const other = allTabs(layout).find((t) => t.kind === TASK_PANE);
     const group = other ? findTab(layout, other.id)?.group.id : undefined;
@@ -507,6 +524,12 @@
     const id = tab ? taskIdOf(tab) : null;
     if (id === DEBUG_TERMINAL) {
       toast("Start the debug session again from the Debug view.", "info");
+      return;
+    }
+    // A watch starts again on its session: its line is asked of Rust anew, as at the first click.
+    const watched = id?.match(/^watch:(\d+)$/);
+    if (tab && watched) {
+      void openWatch(Number(watched[1]), tab.title.replace(/^Watch /, ""));
       return;
     }
     if (tab && id) void runTask({ id, label: tab.title });
@@ -723,6 +746,11 @@
       layout = agentTabsOf(layout, ids).reduce((acc, tab) => closeTab(acc, tab.id), layout);
       projectSession.closeParkedAgentTabs(ids);
     });
+    // A Flow tile's "Watch": the session followed read-only beside its own pane.
+    const unsubscribeWatch = on("studio:watch", (detail) => {
+      const d = (detail ?? {}) as { agentId?: number; name?: string };
+      if (typeof d.agentId === "number") void openWatch(d.agentId, d.name ?? "session");
+    });
     // "Anordnung zurücksetzen" in the Flow's bar: the three panels go back where they started.
     const unsubscribeReset = on("studio:reset-flow", () => {
       if (get(sessionState).mode !== "flow") return;
@@ -785,6 +813,7 @@
       unsubscribeAgent();
       unsubscribeClose();
       unsubscribeReset();
+      unsubscribeWatch();
       void unlistenRenamed.then((off) => off());
       window.removeEventListener("blur", drag.abandon);
       window.removeEventListener("pagehide", flushOnLeaving);

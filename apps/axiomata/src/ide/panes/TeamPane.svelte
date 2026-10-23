@@ -114,6 +114,11 @@
     emit("shell:agent", { projectId: project.id, agentId });
   }
 
+  /** Follows a Glut session read-only in a pane of its own (`glut watch`), beside the session's own terminal. */
+  function watch(agentId: number, name: string): void {
+    emit("studio:watch", { agentId, name });
+  }
+
   const now = $derived($statuses.checkedAt || Date.now());
 </script>
 
@@ -147,6 +152,17 @@
                 <span class="chip mail" title="Unread messages in the session's inbox">✉ {unread[tile.agent.id]}</span>
               {/if}
               <span class="spacer"></span>
+              {#if tile.agent.harness === "glut"}
+                <button
+                  class="ax-btn terminal"
+                  type="button"
+                  title="Follow this session read-only in a pane of its own: nothing typed there reaches it"
+                  onclick={() => watch(tile.agent.id, tile.agent.name)}
+                >
+                  <Icon name="eye" size="sm" />
+                  Watch
+                </button>
+              {/if}
               <button
                 class="ax-btn terminal"
                 class:primary={status.tone === "waiting"}

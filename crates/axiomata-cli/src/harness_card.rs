@@ -8,7 +8,6 @@
 //! channel's event log for the meter and the Flow tiles (C6), the conversation into the channel after each turn, and a
 //! turn the pane lost going on from its journal (C8). The app's theme follows into the pane (TUI8e).
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -24,7 +23,7 @@ use glut::permissions::{
     Answer, AnswerFuture, AskRequest, BuiltGate, GateOptions, ask_display, printable,
 };
 use glut::providers::catalog::Protocol;
-use glut::{Budget, Event, Message, Prices, RunConfig};
+use glut::{Budget, Message, Prices, RunConfig};
 use glut_tui::{
     EngineChoice, Host, HostFuture, HostLink, Instructions, Launch, Open, Search, Servers, Signal,
     Turn,
@@ -128,6 +127,8 @@ pub async fn card(core: Arc<AxiomataCore>) -> Result<()> {
         owner_shell: false,
         // A closed pane or a quit app leaves the turn to its journal (C8), as before.
         keep_lost_turns: true,
+        // The channel's event log, which the meter and the Flow tiles read (C6) and `glut watch` follows.
+        log: glut_tui::Log::At(channel.dir().join(glut_card::EVENTS_FILE)),
     };
     let host = Arc::new(CardHost {
         core: Arc::clone(&core),
@@ -142,7 +143,6 @@ pub async fn card(core: Arc<AxiomataCore>) -> Result<()> {
         codemode: config.agents.glut.codemode,
         app_prices: launch_prices(&launch),
         prices: OnceLock::new(),
-        log: Mutex::new(open_log(&channel, &mut early)),
         link: OnceLock::new(),
     });
     let open = Open {
@@ -207,8 +207,6 @@ struct CardHost {
     app_prices: Option<Prices>,
     /// The prices the budget counts with: Glut's own first, then the app's — known once the gate is built.
     prices: OnceLock<Option<Prices>>,
-    /// The channel's event log, `None` when it cannot be written.
-    log: Mutex<Option<std::fs::File>>,
     /// The way to the screen, once it is up.
     link: OnceLock<HostLink>,
 }
@@ -355,20 +353,6 @@ impl Host for CardHost {
             }
             answer
         })
-    }
-
-    fn event(&self, event: &Event) {
-        // The streamed pieces of text and thinking are the pane's alone: the whole text follows as one event, and the
-        // thinking is no part of the log the tiles and the meter read.
-        if streamed(event) {
-            return;
-        }
-        let mut log = self.log.lock().unwrap_or_else(|poison| poison.into_inner());
-        if let Some(file) = log.as_mut()
-            && let Some(line) = logged(event, chrono::Utc::now())
-        {
-            let _ = writeln!(file, "{line}");
-        }
     }
 
     fn state(&self, state: glut_tui::State) {
@@ -593,20 +577,6 @@ fn save_conversation(channel: &Channel, conversation: &[Message]) -> Result<()> 
     Ok(())
 }
 
-/// The channel's event log for the meter and the Flow tiles (C6), opened for appending; why not into `notes`.
-fn open_log(channel: &Channel, notes: &mut Vec<String>) -> Option<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-    let path = channel.dir().join(glut_card::EVENTS_FILE);
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-        .open(&path)
-        .inspect_err(|err| notes.push(format!("the session's events are not kept ({err})")))
-        .ok()
-}
-
 fn from_app(decision: Decision) -> Option<Answer> {
     match decision {
         Decision::Allow => Some(Answer::Allow),
@@ -639,55 +609,31 @@ fn describe(answer: Answer) -> &'static str {
     }
 }
 
-/// A streamed piece of text or thinking — a subagent's too: the pane shows them, the log keeps only whole events.
-fn streamed(event: &Event) -> bool {
-    match event {
-        Event::TextDelta { .. } | Event::ReasoningDelta { .. } => true,
-        Event::Sub { event, .. } => streamed(event),
-        _ => false,
-    }
-}
-
-/// One line of the event log: the event as Glut writes it, with the time it happened in `at` — the Flow tiles show
-/// how long ago a step was, and Glut's events carry no time of their own.
-fn logged(event: &Event, at: chrono::DateTime<chrono::Utc>) -> Option<String> {
-    let mut value = serde_json::to_value(event).ok()?;
-    value
-        .as_object_mut()?
-        .insert("at".into(), serde_json::Value::String(at.to_rfc3339()));
-    serde_json::to_string(&value).ok()
-}
-
 #[cfg(test)]
 mod tests {
+    use glut::Event;
+
     use super::*;
 
     #[test]
-    fn a_logged_event_carries_its_time_and_reads_as_a_tile_step() {
-        let at = chrono::DateTime::parse_from_rfc3339("2026-10-21T13:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        let call = Event::ToolCall {
+    fn glut_s_log_of_a_card_reads_as_tile_steps() {
+        let dir = scratch("log");
+        let path = dir.join(glut_card::EVENTS_FILE);
+        let log =
+            glut_tui::log::EventLog::new(glut_tui::log::Target::At(path.clone()), dir.clone());
+        log.owner("Start on card #1");
+        log.event(&Event::ToolCall {
             turn: 1,
             id: "c1".into(),
             name: "edit_file".into(),
             arguments: r#"{"path":"README.md"}"#.into(),
-        };
-        let line = logged(&call, at).unwrap();
-        let steps = axiomata_core::ide::activity::glut_recent(&line);
+        });
+        // The log's head and the owner's message are no steps of a tile.
+        let steps =
+            axiomata_core::ide::activity::glut_recent(&std::fs::read_to_string(&path).unwrap());
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].detail, "README.md");
-        assert!(
-            steps[0]
-                .at
-                .as_deref()
-                .unwrap()
-                .starts_with("2026-10-21T13:00:00")
-        );
-        assert!(streamed(&Event::TextDelta {
-            turn: 1,
-            text: "a".into()
-        }));
+        assert!(steps[0].at.is_some());
     }
 
     #[test]

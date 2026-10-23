@@ -64,6 +64,14 @@ export function masterSession(projectId: number, harness: Harness): Promise<IdeA
   return invoke<IdeAgent>("ide_master_session", { projectId, harness });
 }
 
+/**
+ * The command line of a pane that follows Glut session `id` read-only (Glut TUI8d): resolved in Rust, so the pane runs
+ * only what the backend says — never a line the webview made up.
+ */
+export function watchLine(id: number): Promise<string> {
+  return invoke<string>("ide_watch_line", { id });
+}
+
 /** Renames an agent and moves it to another engine and role. */
 export function updateAgent(id: number, spec: AgentSpec): Promise<IdeAgent | null> {
   return invoke<IdeAgent | null>("update_ide_agent_on_engine", { id, spec });

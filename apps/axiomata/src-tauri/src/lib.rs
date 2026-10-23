@@ -335,6 +335,7 @@ pub fn run() {
             commands::list_ide_agents,
             commands::create_ide_agent_on_engine,
             commands::ide_master_session,
+            commands::ide_watch_line,
             commands::update_ide_agent_on_engine,
             commands::list_engines,
             commands::save_engine,
