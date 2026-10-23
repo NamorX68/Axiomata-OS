@@ -36,9 +36,6 @@ const TITLE_CHARS: usize = 80;
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        // The Opencode agents' statuses come from the service's event stream; without its watcher they would read as
-        // their file channel says, which never says `waiting`.
-        ide_status::ensure_running(Arc::clone(&app.state::<AxiomataCore>().db));
         let mut last: Option<Vec<WaitingAgent>> = None;
         let mut announcer = Announcer::default();
         loop {

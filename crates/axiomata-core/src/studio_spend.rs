@@ -64,8 +64,8 @@ fn sum(db: &Connection, filter: &str, args: impl rusqlite::Params) -> Result<Spe
 }
 
 /// Writes down what session `agent_id` used since the last look: the difference between what `usage` (and `cost_usd`)
-/// say and what the ledger already holds for the same `source` — [`SOURCE_CLAUDE`], or the Opencode session id, since an
-/// escalation starts a new Opencode session whose figure begins near zero. Nothing is written when nothing grew, and a reading
+/// say and what the ledger already holds for the same `source` — [`SOURCE_CLAUDE`] for every session now; an Opencode
+/// session's own id once, whose figure began near zero after an escalation (its rows stay in the totals). Nothing is written when nothing grew, and a reading
 /// that fell (a window that moved on) writes nothing either — the ledger never takes spending back.
 ///
 /// # Errors

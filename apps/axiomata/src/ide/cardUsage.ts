@@ -50,9 +50,6 @@ const UNMEASURED: Record<Unmeasured, string> = {
   no_session_id: "No Claude Code session was recorded for this session (it ran with its own command).",
   no_record_yet: "The session has not recorded anything yet — it may have just started.",
   read_failed: "The session's record could not be read.",
-  no_opencode_session: "The Opencode session has not been created yet.",
-  service_down: "The Opencode service is not running.",
-  service_failed: "The Opencode service did not answer.",
   not_measured: "This harness is not measured.",
 };
 

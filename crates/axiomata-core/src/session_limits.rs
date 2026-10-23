@@ -9,8 +9,7 @@
 //!
 //! What a stop is: a file in the session's channel ([`Channel::set_limit_reached`]) that Claude Code's `PreToolUse` hook
 //! turns into a refusal of every further tool call, so the step it is in ends cleanly and nothing is left half written
-//! (Glut's pane looks for the same file and ends the turn under way);
-//! an Opencode session, which has no such hook, is interrupted through the service. The card **keeps its claim and its
+//! (Glut's pane looks for the same file and ends the turn under way). The card **keeps its claim and its
 //! worktree** — the owner decides, in the history of the card, whether to raise the limit (the role's) and go on, or to
 //! release the card. A stop that the limit no longer justifies (it was raised) lifts itself at the next look.
 //!
@@ -31,7 +30,6 @@ use serde::Serialize;
 
 use crate::AxiomataCore;
 use crate::AxiomataError;
-use crate::agents::opencode;
 use crate::board::{EventKind, flow};
 use crate::config::Config;
 use crate::ide::agent_store;
@@ -72,12 +70,6 @@ pub enum Unmeasured {
     NoRecordYet,
     /// A record exists and could not be read.
     ReadFailed,
-    /// The Opencode session was not made yet.
-    NoOpencodeSession,
-    /// The Opencode service is not running.
-    ServiceDown,
-    /// The Opencode service did not answer, or refused.
-    ServiceFailed,
     /// This harness is not measured.
     NotMeasured,
 }
@@ -205,17 +197,7 @@ pub struct Meter {
     transcripts: HashMap<PathBuf, ClaudeTally>,
     /// How far each Glut session's event log was read (`docs/plans/glut-cards.md`, C6).
     glut_logs: HashMap<PathBuf, GlutTally>,
-    /// The most an Opencode session was read to have used: the service is asked for a bounded window of its messages,
-    /// so a long session would otherwise read as using *less* once old messages fall out of it.
-    opencode_floor: HashMap<String, Usage>,
-    /// The app's Opencode services as found by this look. Found once per look; which one holds a session is asked per
-    /// session ([`opencode::RunningServices::holding`]).
-    services: Option<opencode::RunningServices>,
 }
-
-/// The longest one Opencode request of a look may take. The service is local; one that does not answer must not hold
-/// back the stop of the sessions behind it.
-const OPENCODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl Default for Meter {
     fn default() -> Self {
@@ -230,17 +212,7 @@ impl Meter {
             projects,
             transcripts: HashMap::new(),
             glut_logs: HashMap::new(),
-            opencode_floor: HashMap::new(),
-            services: None,
         }
-    }
-
-    /// The service `session` runs on, `None` when no running instance knows it.
-    async fn service_of(&mut self, session: &str) -> Option<axiomata_opencode::Service> {
-        if self.services.is_none() {
-            self.services = Some(opencode::running_services().await);
-        }
-        self.services.as_ref()?.holding(session).await.cloned()
     }
 
     /// What `watched` has used, `None` when the harness's record could not be read.
@@ -286,37 +258,8 @@ impl Meter {
                     Unmeasured::NoRecordYet
                 })
             }
-            Harness::Opencode => {
-                let session = watched
-                    .agent
-                    .opencode_session
-                    .as_deref()
-                    .ok_or(Unmeasured::NoOpencodeSession)?;
-                let service = self
-                    .service_of(session)
-                    .await
-                    .ok_or(Unmeasured::ServiceDown)?;
-                match tokio::time::timeout(
-                    OPENCODE_TIMEOUT,
-                    opencode::session_usage(&service, session),
-                )
-                .await
-                {
-                    Ok(Ok(usage)) => {
-                        let floor = self.opencode_floor.entry(session.to_owned()).or_default();
-                        *floor = floor.at_least(usage);
-                        Ok(*floor)
-                    }
-                    Ok(Err(err)) => {
-                        tracing::debug!(%err, "could not read an Opencode session's messages");
-                        Err(Unmeasured::ServiceFailed)
-                    }
-                    Err(_) => {
-                        tracing::debug!("the Opencode service did not answer in time");
-                        Err(Unmeasured::ServiceFailed)
-                    }
-                }
-            }
+            // The plain Opencode tile is no card session the studio watches (opencode-exit.md, O1).
+            Harness::Opencode => Err(Unmeasured::NotMeasured),
             Harness::Glut => {
                 let path = watched.channel.dir().join(crate::glut_card::EVENTS_FILE);
                 if !path.exists() {
@@ -381,35 +324,11 @@ impl Meter {
         }
     }
 
-    /// Opencode has no hook to refuse a tool call, so its session is interrupted; Claude Code's stop is the hook.
-    async fn interrupt(&mut self, entry: &Watched) {
-        if entry.agent.harness != Harness::Opencode {
-            return;
-        }
-        let Some(session) = entry.agent.opencode_session.as_deref() else {
-            return;
-        };
-        let Some(service) = self.service_of(session).await else {
-            return;
-        };
-        match tokio::time::timeout(
-            OPENCODE_TIMEOUT,
-            opencode::interrupt_session(&service, session),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => tracing::warn!(%err, "could not interrupt a session at its limit"),
-            Err(_) => tracing::warn!("the Opencode service did not answer an interrupt in time"),
-        }
-    }
-
     /// One look at every card session the studio still wants: stops the ones that used up a limit, lifts the stop of
     /// the ones that no longer do, and returns the stops made just now.
     ///
-    /// Stopping writes the marker, adds a `limit_stop` line to the card's history and, for Opencode, interrupts the
-    /// session — and keeps interrupting it at every look while the stop stands, because the owner may type into the
-    /// pane again; going on is done by raising the limit, not by talking past it.
+    /// Stopping writes the marker and adds a `limit_stop` line to the card's history; going on is done by raising the
+    /// limit, not by talking past it.
     pub async fn check(&mut self, core: &AxiomataCore) -> Vec<Breach> {
         let watched = match gather(core, None) {
             Ok(watched) => watched,
@@ -419,7 +338,6 @@ impl Meter {
             }
         };
         let config = core.config_read().clone();
-        self.services = None;
         let mut seen = Vec::new();
         let mut breaches = Vec::new();
         // Every reading goes into the ledger first, so the day's total below includes this look.
@@ -429,15 +347,8 @@ impl Meter {
             let read = self.read(entry, &config, &mut seen).await;
             if read.measured {
                 let db = core.db_lock();
-                // Claude Code's figure is one ever-growing sum; an Opencode session is its own, and an escalation makes a new one.
-                let source = match entry.agent.harness {
-                    Harness::Opencode => entry
-                        .agent
-                        .opencode_session
-                        .as_deref()
-                        .unwrap_or(studio_spend::SOURCE_CLAUDE),
-                    _ => studio_spend::SOURCE_CLAUDE,
-                };
+                // A session's figure is one ever-growing sum, whatever its harness.
+                let source = studio_spend::SOURCE_CLAUDE;
                 if let Err(err) = studio_spend::record_look(
                     &db,
                     entry.agent.id,
@@ -479,9 +390,8 @@ impl Meter {
                         stop(&db, &config, entry, &reason, by_day)
                     };
                     breaches.extend(breach);
-                    self.interrupt(entry).await;
                 }
-                Step::KeepStopped => self.interrupt(entry).await,
+                Step::KeepStopped => {}
                 Step::Lift => {
                     if let Err(err) = entry.channel.clear_limit_reached() {
                         tracing::warn!(%err, "could not lift a session's limit stop");
@@ -959,7 +869,11 @@ mod tests {
         let opencode = self::world(Harness::Opencode);
         let mut meter = Meter::with_projects(opencode.dir.join("projects"));
         let unnamed = futures_block(meter.read(&opencode.watched, &config, &mut Vec::new()));
-        assert_eq!(unnamed.unmeasured, Some(Unmeasured::NoOpencodeSession));
+        assert_eq!(
+            unnamed.unmeasured,
+            Some(Unmeasured::NotMeasured),
+            "the plain Opencode tile is not metered"
+        );
     }
 
     #[test]
@@ -1065,8 +979,7 @@ mod tests {
         );
     }
 
-    /// Runs a future to its end on a throwaway runtime; the tests above are not async because the code under test
-    /// reaches the Opencode service only for an Opencode session.
+    /// Runs a future to its end on a throwaway runtime; the tests above are not async.
     fn futures_block<F: std::future::Future>(future: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()

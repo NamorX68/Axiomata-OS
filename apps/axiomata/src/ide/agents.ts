@@ -11,13 +11,11 @@
 import {
   invokeBackend as invoke,
   type AgentSpec,
-  type AgentState,
   type AgentStatus,
   type Harness,
   type IdeAgent,
   type ProvisionedAgent,
 } from "../core/backend";
-import type { ReachAnswer } from "./reach";
 
 /**
  * The harnesses a new engine can run on, in the order a picker should offer them. Opencode is only the Agents panel's
@@ -92,23 +90,6 @@ export function deleteAgent(id: number): Promise<boolean> {
  */
 export function prepareAgent(id: number): Promise<ProvisionedAgent> {
   return invoke<ProvisionedAgent>("prepare_ide_agent", { id });
-}
-
-/**
- * Forgets an Opencode agent's session, so its next start opens a fresh one
- * ("New session", opencode2.md Q9). The old session stays in Opencode's list.
- */
-export function newAgentSession(id: number): Promise<boolean> {
-  return invoke<boolean>("ide_agent_new_session", { id });
-}
-
-/**
- * Whether the session's team tools (its MCP server) can be reached. With `healWhile` set to the status the pane
- * shows, a running session whose server the service dropped while the pane sat idle gets it registered again
- * (card #72); `null` only looks.
- */
-export function sessionReach(id: number, healWhile: AgentState | null): Promise<ReachAnswer> {
-  return invoke<ReachAnswer>("ide_session_reach", { id, healWhile });
 }
 
 /**

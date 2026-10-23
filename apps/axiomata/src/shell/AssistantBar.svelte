@@ -71,7 +71,7 @@
     });
   });
 
-  // Read when first needed, not at start: on Opencode it connects to the service, which would start it with the app.
+  // Read when first needed, not at start: the list is only wanted once the owner types `/`.
   function refresh(): void {
     refreshedAt = Date.now();
     void refreshEngineCommands();

@@ -688,7 +688,7 @@ pub async fn start_review_session(
     let request = request.clone();
     let roots = crate::paths::ide_locations().channels;
     let cli_available = crate::agent_entry::cli_path().is_some();
-    let (session, retired_locations) = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         review_blocking(
             &db,
             &config,
@@ -699,15 +699,11 @@ pub async fn start_review_session(
         )
     })
     .await
-    .map_err(|err| refuse_review(&format!("the review task failed: {err}")))??;
-    for location in &retired_locations {
-        crate::agents::opencode::forget_mcp(location).await;
-    }
-    Ok(session)
+    .map_err(|err| refuse_review(&format!("the review task failed: {err}")))?
 }
 
 /// [`start_review_session`] without the runtime and with the machine's `axiomata-cli` answered by the caller, so tests
-/// need neither. Returns the session and the Opencode locations whose server registration is to go.
+/// need neither.
 fn review_blocking(
     db: &Mutex<Connection>,
     config: &Config,
@@ -715,12 +711,12 @@ fn review_blocking(
     roles_of: &dyn Fn(&Connection, i64) -> Vec<Role>,
     request: &ReviewRequest,
     cli_available: bool,
-) -> Result<(ReviewSession, Vec<std::path::PathBuf>)> {
+) -> Result<ReviewSession> {
     let plan = plan_review(&lock(db), config, roles_of, request, cli_available)?;
     let snapshot = snapshot_for_review(&plan, request.allow_agent_config)?;
     let (session, retired) = finish_review(&lock(db), config, &plan, &snapshot)?;
-    let locations = remove_sessions(db, roots, &retired);
-    Ok((session, locations))
+    remove_sessions(db, roots, &retired);
+    Ok(session)
 }
 
 /// Phase one, under the lock: everything that can be refused, asked before anything is committed.
@@ -881,14 +877,6 @@ pub enum CardTakeOver {
     Conflict { files: Vec<String> },
 }
 
-/// What a take-over leaves for the async caller: the outcome, and the Opencode locations whose server registration
-/// has to go.
-#[derive(Debug)]
-struct Taken {
-    outcome: CardTakeOver,
-    opencode_locations: Vec<std::path::PathBuf>,
-}
-
 /// What a take-over needs, read under the lock.
 struct TakeOverPlan {
     card: crate::board::Card,
@@ -934,15 +922,11 @@ pub async fn take_over_card(
     let db = Arc::clone(&core.db);
     let roots = crate::paths::ide_locations().channels;
     let message = message.map(str::to_owned);
-    let taken = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         take_over_blocking(&db, &roots, card_id, message.as_deref())
     })
     .await
-    .map_err(|err| refusal("take-over", format!("the take-over task failed: {err}")))??;
-    for location in &taken.opencode_locations {
-        crate::agents::opencode::forget_mcp(location).await;
-    }
-    Ok(taken.outcome)
+    .map_err(|err| refusal("take-over", format!("the take-over task failed: {err}")))?
 }
 
 fn take_over_blocking(
@@ -950,15 +934,10 @@ fn take_over_blocking(
     roots: &axiomata_ide::lifecycle::ChannelRoots,
     card_id: i64,
     message: Option<&str>,
-) -> Result<Taken> {
+) -> Result<CardTakeOver> {
     let plan = plan_take_over(&lock(db), card_id, message)?;
     let (commit, already_on_base) = match squash(&plan, roots)? {
-        Squashed::Conflict { files } => {
-            return Ok(Taken {
-                outcome: CardTakeOver::Conflict { files },
-                opencode_locations: Vec::new(),
-            });
-        }
+        Squashed::Conflict { files } => return Ok(CardTakeOver::Conflict { files }),
         Squashed::Committed { commit } => (commit, false),
         Squashed::AlreadyThere { commit } => (commit, true),
     };
@@ -971,15 +950,12 @@ fn take_over_blocking(
     }
     let mut removals = begin_removal(&lock(db), &plan.sessions);
     remove_trees(&mut removals, &mut cleanup);
-    let opencode_locations = finish_removal(&lock(db), roots, &removals, &mut cleanup);
-    Ok(Taken {
-        outcome: CardTakeOver::Done {
-            commit,
-            project_id: plan.card_project,
-            already_on_base,
-            cleanup,
-        },
-        opencode_locations,
+    finish_removal(&lock(db), roots, &removals, &mut cleanup);
+    Ok(CardTakeOver::Done {
+        commit,
+        project_id: plan.card_project,
+        already_on_base,
+        cleanup,
     })
 }
 
@@ -1203,14 +1179,13 @@ fn remove_trees(removals: &mut [Removal], notes: &mut Vec<String>) {
 }
 
 /// Step three, under the lock: the sessions are forgotten with their secrets and channels. A session whose worktree
-/// stays keeps its row. Returns the Opencode locations whose server registration is to go.
+/// stays keeps its row.
 fn finish_removal(
     db: &Connection,
     roots: &axiomata_ide::lifecycle::ChannelRoots,
     removals: &[Removal],
     notes: &mut Vec<String>,
-) -> Vec<std::path::PathBuf> {
-    let mut opencode_locations = Vec::new();
+) {
     for removal in removals {
         let session = &removal.session;
         if let Err(err) = axiomata_ide::session_token::revoke(roots, session.id) {
@@ -1218,11 +1193,6 @@ fn finish_removal(
         }
         if removal.tree_stays {
             continue;
-        }
-        if session.harness == axiomata_roster::Harness::Opencode
-            && let Some(path) = &session.worktree_path
-        {
-            opencode_locations.push(path.clone());
         }
         if let Some(tree) = &removal.tree
             && let Err(err) = tree.forget(db, true)
@@ -1244,27 +1214,25 @@ fn finish_removal(
             Err(err) => notes.push(format!("the session {} stays: {err}", session.name)),
         }
     }
-    opencode_locations
 }
 
-/// Ends sessions in the three steps above, taking the lock only for the first and the last. Returns the Opencode
-/// locations whose registration is to go. Problems are logged: a retired reviewer that lingers is no reason to refuse.
+/// Ends sessions in the three steps above, taking the lock only for the first and the last. Problems are logged: a
+/// retired reviewer that lingers is no reason to refuse.
 pub(crate) fn remove_sessions(
     db: &Mutex<Connection>,
     roots: &axiomata_ide::lifecycle::ChannelRoots,
     sessions: &[Agent],
-) -> Vec<std::path::PathBuf> {
+) {
     if sessions.is_empty() {
-        return Vec::new();
+        return;
     }
     let mut notes = Vec::new();
     let mut removals = begin_removal(&lock(db), sessions);
     remove_trees(&mut removals, &mut notes);
-    let locations = finish_removal(&lock(db), roots, &removals, &mut notes);
+    finish_removal(&lock(db), roots, &removals, &mut notes);
     for note in notes {
         tracing::warn!(%note, "retiring a session");
     }
-    locations
 }
 
 // ------------------------------------------------------------------ the line ---
@@ -1347,15 +1315,9 @@ pub async fn integrate_card_with(
     let roots = crate::paths::ide_locations().channels;
     let locations = crate::paths::ide_locations();
     let worktrees = locations.worktrees.clone();
-    let done = tokio::task::spawn_blocking(move || {
-        integrate_blocking(&db, &roots, &worktrees, card_id, owner)
-    })
-    .await
-    .map_err(|err| refusal("integration", format!("the integration task failed: {err}")))??;
-    for location in &done.1 {
-        crate::agents::opencode::forget_mcp(location).await;
-    }
-    Ok(done.0)
+    tokio::task::spawn_blocking(move || integrate_blocking(&db, &roots, &worktrees, card_id, owner))
+        .await
+        .map_err(|err| refusal("integration", format!("the integration task failed: {err}")))?
 }
 
 fn integrate_blocking(
@@ -1364,12 +1326,12 @@ fn integrate_blocking(
     worktrees: &std::path::Path,
     card_id: i64,
     owner: bool,
-) -> Result<(CardIntegration, Vec<std::path::PathBuf>)> {
+) -> Result<CardIntegration> {
     let plan = plan_integration(&lock(db), card_id)?;
     // A card the studio gave up on stays with the owner: looked at again every few seconds it would be put back, redone and
     // paid for again and again.
     if plan.gave_up && !owner {
-        return Ok((CardIntegration::LeftForOwner { card_id }, Vec::new()));
+        return Ok(CardIntegration::LeftForOwner { card_id });
     }
     // The worker is idle once it has reported and been reviewed; one that is still in a turn is left alone until it is.
     let state = axiomata_ide::lifecycle::Channel::for_agent(roots, plan.worker.id)
@@ -1379,7 +1341,7 @@ fn integrate_blocking(
         state,
         axiomata_ide::lifecycle::AgentState::Working | axiomata_ide::lifecycle::AgentState::Waiting
     ) {
-        return Ok((CardIntegration::Busy { card_id }, Vec::new()));
+        return Ok(CardIntegration::Busy { card_id });
     }
     let (line, _) = checked_line(
         db,
@@ -1448,15 +1410,13 @@ fn integrate_blocking(
     // Its sessions are of no use any more either way: done, or to be made anew on the line as it is now (a card the
     // studio gave up on keeps them — they are what the owner looks at).
     let keep = matches!(&result, CardIntegration::Conflict { gave_up: true, .. });
-    let locations = if keep {
-        Vec::new()
-    } else {
-        remove_sessions(db, roots, &plan.sessions)
-    };
+    if !keep {
+        remove_sessions(db, roots, &plan.sessions);
+    }
     for note in notes {
         tracing::warn!(%note, "integrating a card");
     }
-    Ok((result, locations))
+    Ok(result)
 }
 
 /// Phase one, under the lock: everything that can be refused.
@@ -1638,10 +1598,7 @@ pub async fn redo_card(core: &AxiomataCore, card_id: i64) -> Result<Vec<i64>> {
         sessions
     };
     let roots = crate::paths::ide_locations().channels;
-    let locations = remove_sessions(&core.db, &roots, &sessions);
-    for location in &locations {
-        crate::agents::opencode::forget_mcp(location).await;
-    }
+    remove_sessions(&core.db, &roots, &sessions);
     Ok(sessions.iter().map(|agent| agent.id).collect())
 }
 
@@ -1688,8 +1645,7 @@ fn stronger_role<'a>(config: &Config, roles: &'a [Role], current: &Role) -> Opti
 
 /// Hands a card that was sent back [`ESCALATE_AFTER_RETURNS`] times to a stronger role of the same kind — one try, ever
 /// (A26): the worker's session changes role and engine **in place**, so its worktree, its branch and its claim stay, and
-/// the pane's next start runs the new engine on the work that is there already. The session of an Opencode worker that is
-/// still in a turn is interrupted, since the service would otherwise go on with the old model.
+/// the pane's next start runs the new engine on the work that is there already.
 ///
 /// With no stronger role the card stays as it is and the owner decides; that is recorded too, so the same look is not made
 /// again.
@@ -1698,47 +1654,20 @@ fn stronger_role<'a>(config: &Config, roles: &'a [Role], current: &Role) -> Opti
 ///
 /// A refusal for a card without a worker session of the studio's making, or whose role is gone.
 pub async fn escalate_card(core: &AxiomataCore, card_id: i64) -> Result<CardEscalation> {
-    let (outcome, old_opencode) = {
-        let config = core.config_read().clone();
-        let db = core.db_lock();
-        escalate_in(&db, &config, &roster::roles_for_project, card_id)?
-    };
-    // Interrupting the old Opencode session may take a service that does not answer up to ten seconds: it is done off the
-    // plan's tick, which has other plans' cards to start and integrate.
-    if let Some(session) = old_opencode {
-        tokio::spawn(async move {
-            let services = crate::agents::opencode::running_services().await;
-            let Some(service) = services.holding(&session).await else {
-                return;
-            };
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                crate::agents::opencode::interrupt_session(service, &session),
-            )
-            .await
-            {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "could not interrupt the session of an escalated card");
-                }
-                Err(_) => {
-                    tracing::warn!("the Opencode service did not answer an interrupt in time")
-                }
-            }
-        });
-    }
-    Ok(outcome)
+    let config = core.config_read().clone();
+    let db = core.db_lock();
+    escalate_in(&db, &config, &roster::roles_for_project, card_id)
 }
 
-/// [`escalate_card`] without the Opencode interrupt; `roles_of` says which roles a project has (the files on disk in
+/// [`escalate_card`] with the roles given; `roles_of` says which roles a project has (the files on disk in
 /// production), so tests need no home folder.
 fn escalate_in(
     db: &Connection,
     config: &Config,
     roles_of: &dyn Fn(&Connection, &Config, i64) -> Vec<Role>,
     card_id: i64,
-) -> Result<(CardEscalation, Option<String>)> {
-    let not_needed = Ok((CardEscalation::NotNeeded { card_id }, None));
+) -> Result<CardEscalation> {
+    let not_needed = Ok(CardEscalation::NotNeeded { card_id });
     let card = board_store::get_card(db, card_id)?
         .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
     let in_work = matches!(
@@ -1787,13 +1716,10 @@ fn escalate_in(
             crate::board::EventKind::Escalated,
             &text,
         )?;
-        return Ok((
-            CardEscalation::NoStrongerRole {
-                card_id,
-                role: current.name.clone(),
-            },
-            None,
-        ));
+        return Ok(CardEscalation::NoStrongerRole {
+            card_id,
+            role: current.name.clone(),
+        });
     };
     let (engine_id, _) = choose_engine(config, next, None)?;
     let old_engine = worker.engine_id.clone().unwrap_or_default();
@@ -1828,21 +1754,15 @@ fn escalate_in(
         &text,
     )?;
     crate::board_mirror::after_card_change(db, config, card_id);
-    let old_opencode = (worker.harness == axiomata_roster::Harness::Opencode)
-        .then(|| worker.opencode_session.clone())
-        .flatten();
-    Ok((
-        CardEscalation::Done {
-            card_id,
-            plan_id: card.plan_id,
-            project_id: worker.project_id,
-            agent_id: worker.id,
-            from_role: current.name.clone(),
-            role: next.name.clone(),
-            engine_id: engine_id.to_owned(),
-        },
-        old_opencode,
-    ))
+    Ok(CardEscalation::Done {
+        card_id,
+        plan_id: card.plan_id,
+        project_id: worker.project_id,
+        agent_id: worker.id,
+        from_role: current.name.clone(),
+        role: next.name.clone(),
+        engine_id: engine_id.to_owned(),
+    })
 }
 
 /// The line is where the studio last left it. A line that was not made by this call and has no recorded tip is refused
@@ -2099,26 +2019,18 @@ fn finish_integration(
     })
 }
 
-/// Forgets a session made for a card that never ran — its start failed — with its worktree, secret and channel, and its
-/// Opencode registration. The card is the caller's to give back ([`release_card_session`]).
+/// Forgets a session made for a card that never ran — its start failed — with its worktree, secret and channel. The
+/// card is the caller's to give back ([`release_card_session`]).
 pub async fn discard_session(core: &AxiomataCore, agent_id: i64) -> Result<()> {
     let roots = crate::paths::ide_locations().channels;
-    let location = {
-        let db = core.db_lock();
-        let Some(agent) = agent_store::get_agent(&db, agent_id)? else {
-            return Ok(());
-        };
-        let _ = crate::ide::provision::discard_worktree(&db, agent_id, true);
-        let _ = axiomata_ide::session_token::revoke(&roots, agent_id);
-        agent_store::delete_agent(&db, agent_id)?;
-        let _ = crate::ide::provision::forget_channel(&roots, agent_id);
-        agent
-            .worktree_path
-            .filter(|_| agent.harness == axiomata_roster::Harness::Opencode)
-    };
-    if let Some(location) = location {
-        crate::agents::opencode::forget_mcp(&location).await;
+    let db = core.db_lock();
+    if agent_store::get_agent(&db, agent_id)?.is_none() {
+        return Ok(());
     }
+    let _ = crate::ide::provision::discard_worktree(&db, agent_id, true);
+    let _ = axiomata_ide::session_token::revoke(&roots, agent_id);
+    agent_store::delete_agent(&db, agent_id)?;
+    let _ = crate::ide::provision::forget_channel(&roots, agent_id);
     Ok(())
 }
 
@@ -2162,17 +2074,14 @@ pub async fn forget_sessions_of_cards(core: &AxiomataCore, card_ids: &[i64]) -> 
     let ended = tokio::task::spawn_blocking(move || {
         let sessions = sessions_of_cards(&lock(&db), &wanted);
         let ids: Vec<i64> = sessions.iter().map(|session| session.id).collect();
-        let locations = remove_sessions(&db, &roots, &sessions);
-        (ids, locations)
+        remove_sessions(&db, &roots, &sessions);
+        ids
     })
     .await;
-    let Ok((ids, locations)) = ended else {
+    let Ok(ids) = ended else {
         tracing::warn!("ending the sessions of cards {card_ids:?} failed");
         return Vec::new();
     };
-    for location in &locations {
-        crate::agents::opencode::forget_mcp(location).await;
-    }
     ids
 }
 
@@ -2431,7 +2340,6 @@ mod tests {
             };
             self.shared(|db| {
                 review_blocking(db, &config, &roots, &|_, _| roles.clone(), &request, true)
-                    .map(|(session, _)| session)
             })
         }
 
@@ -3195,7 +3103,7 @@ mod tests {
             (card, worker, review)
         }
 
-        fn take_over(&mut self, card: i64, message: Option<&str>) -> Result<Taken> {
+        fn take_over(&mut self, card: i64, message: Option<&str>) -> Result<CardTakeOver> {
             let roots = self.locations().channels;
             self.shared(|db| take_over_blocking(db, &roots, card, message))
         }
@@ -3223,9 +3131,9 @@ mod tests {
             already_on_base,
             cleanup,
             ..
-        } = taken.outcome
+        } = taken
         else {
-            panic!("expected the work to be taken over: {:?}", taken.outcome);
+            panic!("expected the work to be taken over: {:?}", taken);
         };
         assert!(!already_on_base, "the take-over made its own commit");
         assert!(cleanup.is_empty(), "{cleanup:?}");
@@ -3281,9 +3189,9 @@ mod tests {
             already_on_base,
             cleanup,
             ..
-        } = taken.outcome
+        } = taken
         else {
-            panic!("expected the card to be taken over: {:?}", taken.outcome);
+            panic!("expected the card to be taken over: {:?}", taken);
         };
         assert!(already_on_base, "nothing was committed");
         assert!(cleanup.is_empty(), "{cleanup:?}");
@@ -3340,9 +3248,9 @@ mod tests {
             already_on_base,
             cleanup,
             ..
-        } = taken.outcome
+        } = taken
         else {
-            panic!("expected the card to be taken over: {:?}", taken.outcome);
+            panic!("expected the card to be taken over: {:?}", taken);
         };
         assert!(already_on_base, "nothing was committed");
         assert!(cleanup.is_empty(), "{cleanup:?}");
@@ -3437,11 +3345,10 @@ mod tests {
 
         let taken = w.take_over(card, None).unwrap();
         assert!(
-            matches!(&taken.outcome, CardTakeOver::Conflict { files } if files == &["change.txt".to_owned()]),
+            matches!(&taken, CardTakeOver::Conflict { files } if files == &["change.txt".to_owned()]),
             "{:?}",
-            taken.outcome
+            taken
         );
-        assert!(taken.opencode_locations.is_empty());
         assert_eq!(
             git(&w.repo, &["rev-parse", "main"]),
             main_before,
@@ -3583,7 +3490,7 @@ mod tests {
         }
         std::fs::write(channel.dir().join("state"), format!("idle {now}\n")).unwrap();
         assert!(matches!(
-            w.take_over(card, None).unwrap().outcome,
+            w.take_over(card, None).unwrap(),
             CardTakeOver::Done { .. }
         ));
     }
@@ -3644,11 +3551,7 @@ mod tests {
         .unwrap();
 
         let taken = w.take_over(card, None).unwrap();
-        assert!(
-            matches!(taken.outcome, CardTakeOver::Done { .. }),
-            "{:?}",
-            taken.outcome
-        );
+        assert!(matches!(taken, CardTakeOver::Done { .. }), "{:?}", taken);
         assert_eq!(git(&w.repo, &["show", "main:more.txt"]), "more");
         assert_eq!(w.sessions(), 0);
     }
@@ -3755,9 +3658,7 @@ mod tests {
         fn integrate(&mut self, card: i64) -> Result<CardIntegration> {
             let roots = self.locations().channels;
             let worktrees = self.locations().worktrees;
-            self.shared(|db| {
-                integrate_blocking(db, &roots, &worktrees, card, false).map(|(outcome, _)| outcome)
-            })
+            self.shared(|db| integrate_blocking(db, &roots, &worktrees, card, false))
         }
     }
 
@@ -3919,8 +3820,7 @@ mod tests {
         let worktrees = w.locations().worktrees;
         let left = w
             .shared(|db| integrate_blocking(db, &roots, &worktrees, cards[1], false))
-            .unwrap()
-            .0;
+            .unwrap();
         assert_eq!(left, CardIntegration::LeftForOwner { card_id: cards[1] });
         assert_eq!(
             flow::list_events(&w.db, cards[1], 50).unwrap().len(),
@@ -4232,7 +4132,7 @@ mod tests {
         .unwrap();
     }
 
-    fn escalate(w: &World, card: i64) -> Result<(CardEscalation, Option<String>)> {
+    fn escalate(w: &World, card: i64) -> Result<CardEscalation> {
         let roles = w.roles.clone();
         escalate_in(&w.db, &w.config, &move |_, _, _| roles.clone(), card)
     }
@@ -4253,13 +4153,13 @@ mod tests {
 
         sent_back(&w, card, 1);
         assert_eq!(
-            escalate(&w, card).unwrap().0,
+            escalate(&w, card).unwrap(),
             CardEscalation::NotNeeded { card_id: card },
             "one return is the same role's second try"
         );
 
         sent_back(&w, card, 2);
-        let (outcome, _) = escalate(&w, card).unwrap();
+        let outcome = escalate(&w, card).unwrap();
         assert!(
             matches!(
                 &outcome,
@@ -4288,7 +4188,7 @@ mod tests {
         );
 
         assert_eq!(
-            escalate(&w, card).unwrap().0,
+            escalate(&w, card).unwrap(),
             CardEscalation::NotNeeded { card_id: card },
             "one try, ever"
         );
@@ -4300,7 +4200,7 @@ mod tests {
         let card = w.card(w.open, Some("builder"));
         let started = w.start(card, None).unwrap();
         sent_back(&w, card, 2);
-        let (outcome, _) = escalate(&w, card).unwrap();
+        let outcome = escalate(&w, card).unwrap();
         assert_eq!(
             outcome,
             CardEscalation::NoStrongerRole {
@@ -4313,7 +4213,7 @@ mod tests {
             .unwrap();
         assert_eq!(agent.agent_role, "builder", "nothing changed");
         assert_eq!(
-            escalate(&w, card).unwrap().0,
+            escalate(&w, card).unwrap(),
             CardEscalation::NotNeeded { card_id: card },
             "the 'no' is remembered too"
         );
@@ -4329,7 +4229,7 @@ mod tests {
         w.start(card, None).unwrap();
         sent_back(&w, card, 2);
         assert!(matches!(
-            escalate(&w, card).unwrap().0,
+            escalate(&w, card).unwrap(),
             CardEscalation::NoStrongerRole { .. }
         ));
     }

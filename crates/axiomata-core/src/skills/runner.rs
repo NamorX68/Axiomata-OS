@@ -25,7 +25,7 @@ use chrono::Utc;
 use glut::skills::context::context_blocks;
 use rusqlite::Connection;
 
-use crate::agents::{AgentBackend, AgentRequest, AgentRunResult, opencode};
+use crate::agents::{AgentBackend, AgentRequest, AgentRunResult};
 use crate::config::{Config, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 use crate::skills::model::{RunRecord, RunSource, RunStatus};
@@ -43,8 +43,7 @@ use crate::skills::registry;
 /// Args:
 ///     name: Skill name to run.
 ///     config: Supplies the working directory (`workspace_root`), the Ollama
-///         default model, the run timeout, and the opencode `--model` id
-///         (`opencode::model_id`).
+///         default model, the run timeout and the skill provider's model.
 ///
 /// Errors:
 ///     [`AxiomataError::SkillNotFound`] / [`AxiomataError::InvalidSkill`] if the
@@ -239,8 +238,8 @@ fn misconfigured_skill_record(
     )
 }
 
-/// Runs the raw string `prompt` on `backend_id` (`"opencode"`, `"claude_code"`,
-/// `"axh"` or `"ollama"`, as the routine store validates them), attributing the resulting [`RunRecord`] to `name`. The counterpart to
+/// Runs the raw string `prompt` on `backend_id` (`"claude_code"`, `"axh"` or
+/// `"ollama"`, or a retired id that follows the skill harness), attributing the resulting [`RunRecord`] to `name`. The counterpart to
 /// [`execute_skill`] for callers that have a prompt but no `SKILL.md` — the
 /// routine scheduler's `prompt` target. An unresolvable `backend_id` yields a
 /// `Failed` record, not an `Err`; [`AxiomataError::AlreadyRunning`] (`name`
@@ -286,25 +285,20 @@ pub async fn execute_prompt(
 }
 
 /// Resolves the model id a run on `backend` needs, exactly as the request
-/// will hand it to the backend: for opencode the **full `provider/<model>`
-/// id** from [`opencode::model_id`] (the `--model` flag needs the provider
-/// prefix), for Ollama `None` (its model lives in the enum variant), for the
-/// own harness (`axh`) the **bare** model as the API names it — frontmatter
+/// will hand it to the backend: for Ollama `None` (its model lives in the enum
+/// variant), for the own harness (`axh`) the **bare** model as the API names it — frontmatter
 /// `model:` else the skill provider's `skill_model`, no prefix of ours
 /// (`docs/plans/harness-hs6b.md`, D2; a prefixed id would 404 visibly on
 /// `{base_url}/v1/chat/completions`).
 ///
 /// The single resolution point for both [`execute_skill`] and
-/// [`execute_prompt`], so the two can never diverge again — they did once:
-/// `execute_prompt` passed a bare model id, which the harness mis-reads as an
-/// opencode provider name and fails (or silently routes to the wrong one).
+/// [`execute_prompt`], so the two can never diverge again.
 fn resolve_run_model(
     backend: &AgentBackend,
     frontmatter_model: Option<&str>,
     config: &Config,
 ) -> Result<Option<String>, AxiomataError> {
     match backend {
-        AgentBackend::Opencode => opencode::model_id(frontmatter_model, config).map(Some),
         AgentBackend::Ollama { .. } => Ok(None),
         // Claude Code serves Anthropic only (harness-choice D2): the frontmatter's model, else Anthropic's skill
         // model, whichever provider the skill role names; `claude_code::run` checks the id.
@@ -444,19 +438,8 @@ async fn run_on_backend(
     Ok(match backend.run(request, config).await {
         Ok(result) => {
             let mut result = result;
-            // The opencode backend's `model` is the `provider/<model>` id the
-            // `--model` flag needs; `config.agents.costs` is keyed by the
-            // *bare* model id, so strip the provider prefix for both the
-            // metered cost and the persisted `runs.model` (the `provider`
-            // column already carries the provider, so the full id is
-            // reconstructable from the two).
-            let stored_model = match backend {
-                AgentBackend::Opencode => model
-                    .as_deref()
-                    .and_then(|m| m.split_once('/').map(|(_, rest)| rest))
-                    .map(str::to_owned),
-                _ => model,
-            };
+            // Every harness hands the model on bare, as `config.agents.costs` and `runs.model` key it.
+            let stored_model = model;
             // Replace the backend's cost estimate with a token-count ×
             // per-model-price figure when the owner has priced this model
             // (see `spend::metered_cost_usd`) — the CLI's own estimate for a
@@ -494,15 +477,14 @@ async fn run_on_backend(
 }
 
 /// The `provider` string to stamp on a run's record: the **skill** provider
-/// for an opencode run (every runner path here is an unattended skill /
-/// routine run — the interactive chat path lives in [`crate::agents`]), the
-/// skill provider again for `axh` — it posts to that provider's base URL and
+/// for `axh` (every runner path here is an unattended skill / routine run —
+/// the interactive chat path lives in [`crate::agents`]) — it posts to that provider's base URL and
 /// bills through that provider's key, so the daily cap must see the same
 /// label (HS6b, D8) — and `None` for the local Ollama backend (which has no
 /// provider and never bills).
 fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
     match backend {
-        AgentBackend::Opencode | AgentBackend::Axh => Some(
+        AgentBackend::Axh => Some(
             config
                 .agents
                 .provider_for(ProviderRole::Skill)
@@ -922,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_run_model_gives_opencode_the_provider_prefixed_id_and_ollama_none() {
+    fn resolve_run_model_gives_ollama_none() {
         let mut config = Config::default();
         config.agents.skill_provider = crate::config::ProviderId::OpenRouter;
         config
@@ -931,11 +913,6 @@ mod tests {
             .get_mut(&crate::config::ProviderId::OpenRouter)
             .unwrap()
             .skill_model = "z-ai/glm-5.3-flash".to_string();
-
-        // Opencode needs the full `provider/<model>` id the `--model` flag
-        // takes; a bare id would be mis-read as a provider name.
-        let opencode = resolve_run_model(&AgentBackend::Opencode, None, &config).unwrap();
-        assert_eq!(opencode, Some("openrouter/z-ai/glm-5.3-flash".to_string()));
 
         // Ollama's model lives in the backend enum variant — nothing to carry.
         let ollama = resolve_run_model(
@@ -990,18 +967,14 @@ mod tests {
     }
 
     /// `axh` bills through the skill provider's key (D8), so its run carries
-    /// the same provider label as an opencode run — the daily cap and
-    /// `runs.provider` see the provider it actually spent on.
+    /// that provider's label — the daily cap and `runs.provider` see the
+    /// provider it actually spent on.
     #[test]
-    fn provider_label_bills_axh_through_the_skill_provider_like_opencode() {
+    fn provider_label_bills_axh_through_the_skill_provider() {
         let mut config = Config::default();
         config.agents.skill_provider = ProviderId::OpenRouter;
         assert_eq!(
             provider_label(&AgentBackend::Axh, &config).as_deref(),
-            Some("open_router")
-        );
-        assert_eq!(
-            provider_label(&AgentBackend::Opencode, &config).as_deref(),
             Some("open_router")
         );
         // Claude Code bills Anthropic whatever the skill role names (harness-choice D2).

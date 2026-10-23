@@ -302,9 +302,7 @@ fn finish(
 }
 
 /// Ends the planner sessions of a plan that has had its say (approved, closed or deleted): the sessions are forgotten
-/// with their worktrees, secrets and channels, and their Opencode registrations go. Problems are logged — a planner
-/// that
-/// lingers is no reason to refuse the owner's yes. Returns how many sessions were ended.
+/// with their worktrees, secrets and channels. Problems are logged — a planner that lingers is no reason to refuse the owner's yes. Returns how many sessions were ended.
 pub async fn forget_plan_sessions(core: &AxiomataCore, plan_id: i64) -> usize {
     let db = Arc::clone(&core.db);
     let roots = crate::paths::ide_locations().channels;
@@ -314,17 +312,14 @@ pub async fn forget_plan_sessions(core: &AxiomataCore, plan_id: i64) -> usize {
             .into_iter()
             .filter(|agent| agent.plan_id == Some(plan_id))
             .collect();
-        let locations = remove_sessions(&db, &roots, &planners);
-        (planners.len(), locations)
+        remove_sessions(&db, &roots, &planners);
+        planners.len()
     })
     .await;
-    let Ok((count, locations)) = ended else {
+    let Ok(count) = ended else {
         tracing::warn!("ending the planner sessions of a plan failed");
         return 0;
     };
-    for location in &locations {
-        crate::agents::opencode::forget_mcp(location).await;
-    }
     count
 }
 

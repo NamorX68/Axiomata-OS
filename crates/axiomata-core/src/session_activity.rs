@@ -1,13 +1,11 @@
 //! What the studio's sessions are doing right now, for the Flow's team pane (`docs/plans/a2a.md`, CP-A9).
 //!
-//! [`read`] looks at each session's own record — the newest Claude Code transcript of the session, the newest page of
-//! its Opencode messages, or Glut's event log in its channel — and returns the last few steps ([`axiomata_ide::activity`]). It writes nothing and holds no
-//! lock while it reads: the sessions are looked up first, then the files and the service are asked.
+//! [`read`] looks at each session's own record — the newest Claude Code transcript of the session or Glut's event log in
+//! its channel — and returns the last few steps ([`axiomata_ide::activity`]). It writes nothing and holds no lock while
+//! it reads: the sessions are looked up first, then the files are read.
 //!
-//! A session that cannot be read (no transcript yet, the service is down) is listed with `readable: false`, not left out:
+//! A session that cannot be read (no transcript yet) is listed with `readable: false`, not left out:
 //! the tile says "nothing to show yet" instead of vanishing. Nothing here decides anything.
-
-use std::time::Duration;
 
 use axiomata_ide::activity::{self, Activity};
 use axiomata_ide::lifecycle::Channel;
@@ -15,16 +13,10 @@ use axiomata_ide::model::{Agent, Harness};
 use serde::Serialize;
 
 use crate::AxiomataCore;
-use crate::agents::opencode;
 use crate::ide::agent_store;
 use crate::paths;
 use crate::session_limits::find_transcript;
 
-/// How long the Opencode service may take to answer one look. The look comes every few seconds for every visible tile; a
-/// service that hangs must not hold the pane back.
-const SERVICE_TIMEOUT: Duration = Duration::from_secs(4);
-/// How many of a session's newest messages one look asks for: a message holds a few steps, and the tile keeps eight.
-const RECENT_MESSAGES: u32 = 20;
 /// The most sessions one look reads: a project does not run more at once, and the call is bounded all the same.
 const MAX_SESSIONS: usize = 32;
 
@@ -60,10 +52,6 @@ pub async fn read(core: &AxiomataCore, agent_ids: &[i64]) -> Vec<SessionActivity
         .collect();
     let roots = paths::ide_locations().channels;
     let projects = paths::claude_projects_dir();
-    let mut services: Option<opencode::RunningServices> = None;
-    // A service that did not answer in time is not asked again in this look: each further session would wait as long,
-    // and the look would outlast the next one.
-    let mut gave_up = false;
     let mut out = Vec::new();
     for agent in agents {
         let steps = match agent.harness {
@@ -82,36 +70,8 @@ pub async fn read(core: &AxiomataCore, agent_ids: &[i64]) -> Vec<SessionActivity
                 .ok()
                 .flatten()
             }
-            Harness::Opencode => match agent.opencode_session.as_deref() {
-                None => None,
-                Some(_) if gave_up => None,
-                Some(session) => {
-                    if services.is_none() {
-                        services = Some(opencode::running_services().await);
-                    }
-                    let holding = match &services {
-                        Some(found) => found.holding(session).await.cloned(),
-                        None => None,
-                    };
-                    match holding {
-                        None => None,
-                        Some(running) => {
-                            let asked = tokio::time::timeout(
-                                SERVICE_TIMEOUT,
-                                running.recent_messages(session, RECENT_MESSAGES),
-                            )
-                            .await;
-                            if asked.is_err() {
-                                gave_up = true;
-                            }
-                            asked
-                                .ok()
-                                .and_then(Result::ok)
-                                .map(|messages| activity::opencode_recent(&messages))
-                        }
-                    }
-                }
-            },
+            // The plain Opencode tile keeps no record the app can read (opencode-exit.md, O1).
+            Harness::Opencode => None,
             Harness::Glut => {
                 let path = Channel::for_agent(&roots, agent.id)
                     .dir()

@@ -41,9 +41,8 @@ globset = "0.4"
 # routine firing state has to survive restarts, so Axiomata owns the poll
 # loop and persists `next_fire_at` itself (see `routines::scheduler`).
 cron = "0.17"
-# HTTP client. `axiomata-opencode` talks plain HTTP to Opencode 2's local
-# service; `axiomata-harness` adds `rustls-tls` for remote model APIs (HTTPS to
-# OpenRouter) in its own manifest. No other features — bodies are read chunk by
+# HTTP client; a crate that talks to a remote model API adds `rustls-tls` (HTTPS
+# to OpenRouter) in its own manifest. No other features — bodies are read chunk by
 # chunk (`Response::chunk`), JSON goes through `serde_json`.
 reqwest = { version = "0.12", default-features = false }
 # Glut 2's code mode (docs/plans/glut-2.md, G2): QuickJS, compiled in. `futures` turns an async Rust function into a

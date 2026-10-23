@@ -82,12 +82,8 @@ fn default_auto_approve_tools() -> bool {
     true
 }
 
-/// Which upstream the opencode harness points `--model` at
-/// (`provider/<model>` — see [`crate::agents::opencode::model_id`]). The
-/// provider does not change *which* executable runs (it is always
-/// `opencode run`); opencode resolves the provider's auth/keys from its own
-/// credential store, so Axiomata carries no `ANTHROPIC_*` env plumbing. Not
-/// to be confused with `AgentBackend::Ollama` (`agents/ollama.rs`), an
+/// Which upstream a role's harness talks to: Glut with the provider's base URL and key, Claude Code with Anthropic
+/// through the app's own login ([`HarnessId::serves`]). Not to be confused with `AgentBackend::Ollama` (`agents/ollama.rs`), an
 /// entirely separate raw/tool-free completion backend selectable per skill —
 /// see `docs/plans/settings-provider-overhaul.md`'s scoping note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
@@ -161,13 +157,13 @@ pub enum ProviderRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessId {
-    /// Opencode 2 — leaving (`docs/plans/opencode-exit.md`): read from an older config and resolved at load to the
-    /// role's harness of today ([`HarnessId::default_for`]); no longer offered.
-    #[default]
-    Opencode,
     /// Claude Code as `claude -p` on the app's own login folder — Anthropic only (D2).
     ClaudeCode,
-    /// The own harness, Glut (`glut`) — providers with an OpenAI-compatible endpoint (D6).
+    /// The own harness, Glut (`glut`) — providers with an OpenAI-compatible endpoint (D6). Also what an older config's
+    /// `opencode` and a missing field read as: Opencode left (`docs/plans/opencode-exit.md`), and the load moves a role
+    /// whose provider Glut does not serve (Anthropic) to Claude Code ([`HarnessId::default_for`]).
+    #[default]
+    #[serde(alias = "opencode")]
     Axh,
 }
 
@@ -175,8 +171,8 @@ impl HarnessId {
     /// Every harness offered in the Settings UI, in display order.
     pub const ALL: [HarnessId; 2] = [HarnessId::ClaudeCode, HarnessId::Axh];
 
-    /// The harness a role takes when none is named, or the retired Opencode: Claude Code for Anthropic, which Glut
-    /// does not serve, Glut for every other provider.
+    /// The harness a role takes when none it can use is named: Claude Code for Anthropic, which Glut does not serve,
+    /// Glut for every other provider.
     pub fn default_for(provider: ProviderId) -> Self {
         if provider == ProviderId::Anthropic {
             HarnessId::ClaudeCode
@@ -188,7 +184,6 @@ impl HarnessId {
     /// The stored token, matching the serde name and the `crate::agents::BACKEND_*` ids.
     pub fn as_str(self) -> &'static str {
         match self {
-            HarnessId::Opencode => "opencode",
             HarnessId::ClaudeCode => "claude_code",
             HarnessId::Axh => "axh",
         }
@@ -197,8 +192,6 @@ impl HarnessId {
     /// Whether this harness can drive turns of `provider` — the matrix of `docs/plans/harness-choice.md`.
     pub fn serves(self, provider: ProviderId) -> bool {
         match self {
-            // Left (opencode-exit.md): a role saved on it would run on it until the next start.
-            HarnessId::Opencode => false,
             HarnessId::ClaudeCode => provider == ProviderId::Anthropic,
             HarnessId::Axh => provider != ProviderId::Anthropic,
         }
@@ -231,14 +224,12 @@ pub struct ProviderSettings {
     #[serde(default)]
     pub api_key: Option<String>,
 
-    /// Model used for interactive chat turns — becomes the opencode
-    /// `--model` id as `provider/<model>` (`opencode::chat_model_id`).
+    /// Model used for interactive chat turns, bare as the provider's API names it.
     #[serde(default)]
     pub chat_model: String,
 
     /// Model used for skill/routine runs, unless a skill's own `SKILL.md`
-    /// frontmatter pins one — becomes the opencode `--model` id as
-    /// `provider/<model>` (`opencode::model_id`).
+    /// frontmatter pins one — bare as the provider's API names it.
     #[serde(default)]
     pub skill_model: String,
 }
@@ -607,15 +598,19 @@ impl AgentDefaults {
         }
     }
 
-    /// Resolves Opencode, which leaves (`docs/plans/opencode-exit.md`, O2/O3): a role on it takes its harness of
-    /// today, and an engine on it becomes a Glut engine with the same model — Glut reads Opencode's `openrouter/…`
+    /// Gives every role a harness that serves its provider, and the engines of Opencode, which left
+    /// (`docs/plans/opencode-exit.md`, O2/O3), to Glut. A config's `opencode` and a missing harness read as Glut (the
+    /// serde alias), which cannot serve Anthropic: such a role — and any other pair saved by hand that no save would
+    /// have let through (`validate_for_save`) — takes the provider's own harness ([`HarnessId::default_for`]). An engine
+    /// on Opencode becomes a Glut engine with the same model — Glut reads Opencode's `openrouter/…`
     /// and `ollama/…` spelling and picks the provider by it. The engines' ids stay, so the roles naming them do too.
     /// Idempotent; the file keeps the old words until something saves it.
-    fn migrate_retired_opencode(&mut self) {
-        if self.chat_harness == HarnessId::Opencode {
+    fn settle_harnesses(&mut self) {
+        // `opencode` and a missing field read as Glut, which cannot serve Anthropic: such a role takes Claude Code.
+        if !self.chat_harness.serves(self.chat_provider) {
             self.chat_harness = HarnessId::default_for(self.chat_provider);
         }
-        if self.skill_harness == HarnessId::Opencode {
+        if !self.skill_harness.serves(self.skill_provider) {
             self.skill_harness = HarnessId::default_for(self.skill_provider);
         }
         for engine in self.engines.values_mut() {
@@ -758,7 +753,7 @@ impl Config {
 
         // Providers, one per role (chat, skills). Each role's provider must
         // exist in the map. Anthropic may leave everything blank — billed via
-        // opencode's own subscription login, no concrete model needed. Every
+        // Claude Code's own login, no concrete model needed. Every
         // other provider needs a concrete model id: a blank/malformed model or
         // missing token would fail the run (or, worse, route a fallback model
         // through the wrong endpoint and bill it) — so each is checked against
@@ -792,7 +787,7 @@ impl Config {
             if model.is_empty() {
                 return Err(format!(
                     "{role:?} provider {id:?} has an empty {label} — \
-                     opencode needs a concrete `provider/<model>` id, and a blank \
+                     the harness needs a concrete model id, and a blank \
                      model would silently bill a fallback through this endpoint"
                 ));
             }
@@ -918,7 +913,7 @@ impl Config {
             })?;
         config.agents.migrate_legacy_model_if_needed();
         config.agents.migrate_legacy_provider_if_needed();
-        config.agents.migrate_retired_opencode();
+        config.agents.settle_harnesses();
         config.agents.reseed_blank_providers();
         Ok(config)
     }
@@ -1599,11 +1594,10 @@ mod tests {
     }
 
     /// The harness/provider matrix of `docs/plans/harness-choice.md`: Claude Code serves Anthropic only, Glut every
-    /// provider but Anthropic, Opencode none any more (it left, `docs/plans/opencode-exit.md`).
+    /// provider but Anthropic.
     #[test]
     fn harness_serves_only_the_providers_of_the_matrix() {
         for provider in ProviderId::ALL {
-            assert!(!HarnessId::Opencode.serves(provider));
             assert_eq!(
                 HarnessId::ClaudeCode.serves(provider),
                 provider == ProviderId::Anthropic
@@ -1662,7 +1656,7 @@ mod tests {
              skill_harness = \"opencode\"\n",
         )
         .unwrap();
-        old.agents.migrate_retired_opencode();
+        old.agents.settle_harnesses();
         assert_eq!(
             old.agents.chat_harness,
             HarnessId::ClaudeCode,
@@ -1698,8 +1692,8 @@ mod tests {
              [agents.engines.cc]\nid = \"cc\"\nlabel = \"Claude Code\"\nharness = \"claude_code\"\n",
         )
         .unwrap();
-        config.agents.migrate_retired_opencode();
-        config.agents.migrate_retired_opencode();
+        config.agents.settle_harnesses();
+        config.agents.settle_harnesses();
         let engine = |id: &str| config.agents.engines[id].clone();
         assert_eq!(engine("oc-flash").harness, axiomata_roster::Harness::Glut);
         assert_eq!(

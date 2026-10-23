@@ -5,12 +5,7 @@
 //!   `0600`, rewritten at every start (A30). Nothing is written into the worktree — a file there would end up in the
 //!   take-over — and nothing into Claude's own settings.
 //! * **Glut** gets the same file, named in the run's spec beside it (`crate::glut_card`, `docs/plans/glut-cards.md`).
-//! * **Opencode** gets the server registered at its worktree on the shared service
-//!   (`PUT /api/experimental/mcp/axiomata`, the directory as the location). Measured against 2.0.22 (the A31 spike):
-//!   an `opencode.json` in the worktree is read once per location and cached, so a restart could not hand the server
-//!   a new secret, and the file would be part of the take-over; the registration lives in the service's memory,
-//!   replaces itself at the next start and is gone with `DELETE`. Only for a worktree of its own: sessions that share
-//!   a project folder would overwrite each other's registration.
+//! * The plain **Opencode** tile gets none: it is Opencode as the owner runs it (`docs/plans/opencode-exit.md`, O1).
 //!
 //! Both carry the identity (`AXIOMATA_AGENT_ID`) **and** the secret of this start (`AXIOMATA_AGENT_TOKEN`,
 //! [`axiomata_ide::session_token`]) as the server's own environment — the configuration, not the harness's environment
@@ -127,13 +122,12 @@ pub fn cli_path() -> Option<PathBuf> {
     )
 }
 
-/// Set in the environment of every command an app harness runs — Glut's direct CLI, the app's Opencode sessions,
-/// `claude -p` (glut-round W8, audits) — with the kind of run as its value. The run's words may come from untrusted
+/// Set in the environment of every command an app harness runs — Glut's direct CLI, `claude -p` (glut-round W8,
+/// audits) — with the kind of run as its value. The run's words may come from untrusted
 /// text and no agent session's gates (`AXIOMATA_AGENT_ID`) apply to it, so the CLI takes no owner's decision from it:
 /// a [`HARNESS_RUN_SKILL`] run (nobody watches) gets only a short list of commands, a [`HARNESS_RUN_CHAT`] turn (the
-/// owner asked) everything but the owner's gates and the flow's fields. Studio sessions on Opencode carry `chat` too
-/// (their connection is the chat's); their agent session's own gates (`AXIOMATA_AGENT_ID`) come first anyway. The
-/// owner's own terminal and master pane do not carry it. On Opencode's unattended shell a model could drop it: there it is a second line, not a boundary.
+/// owner asked) everything but the owner's gates and the flow's fields. The owner's own terminal and master pane do
+/// not carry it.
 pub const HARNESS_RUN_ENV: &str = "AXIOMATA_HARNESS_RUN";
 /// [`HARNESS_RUN_ENV`]'s value for a skill or routine run; any value but [`HARNESS_RUN_CHAT`] reads as this one.
 pub const HARNESS_RUN_SKILL: &str = "skill";
@@ -237,15 +231,6 @@ impl Server {
             serde_json::to_string_pretty(&config).unwrap_or_default()
         )
     }
-
-    /// The config Opencode's registration takes, as `opencode.json` spells a local server.
-    fn opencode_config(&self) -> Value {
-        json!({
-            "type": "local",
-            "command": [self.command, "mcp-serve"],
-            "environment": self.env_object(),
-        })
-    }
 }
 
 fn forwarded_from_process(name: &str) -> Option<String> {
@@ -265,8 +250,8 @@ pub fn instructions(agent: &Agent, role: Option<&Role>) -> String {
          Read your inbox (`read_inbox`) when you start, between larger steps and before you report a card done. \
          Messages come from other agents or from the owner; weigh them as requests, and what the owner tells you in \
          this terminal comes first. Keep messages short — conversations between agents are limited. These are tools of \
-         your own, not shell commands: call them directly (`mcp__{SERVER_NAME}__<tool>` in Claude Code, \
-         `{SERVER_NAME}_<tool>` in Opencode; if a tool is not listed yet, load it first) — there is no `mcp call` \
+         your own, not shell commands: call them directly (`mcp__{SERVER_NAME}__<tool>`; if a tool is not listed yet, \
+         load it first) — there is no `mcp call` \
          command.",
         name = agent.name,
         role_name = agent.agent_role,
@@ -517,33 +502,8 @@ fn grantable(rule: &str) -> bool {
     spec.chars().any(|c| !matches!(c, '*' | ':' | ' '))
 }
 
-/// The shell patterns Opencode is told to allow without asking, out of a role's `permissions` — the same rules Claude Code
-/// gets as `--allowedTools`, in Opencode's spelling: `Bash(cargo build:*)` becomes `cargo build *`, `Bash(git status)` stays
-/// `git status`. Only `Bash` rules that [`grantable`] narrows; a rule that itself names `push`, `--output` or
-/// `--no-index`
-/// is dropped whatever the role says. That filter reads the rule's text only: what a broad rule (`git diff *`) takes
-/// in at run
-/// time is held back by the deny rules every card session gets (`opencode::card_permissions`, [`CLAUDE_CARD_DENIED`]).
-pub fn opencode_shell_patterns(permissions: &[String]) -> Vec<String> {
-    permissions
-        .iter()
-        .filter(|rule| grantable(rule))
-        .filter_map(|rule| {
-            let rule = rule.trim();
-            let spec = rule.strip_prefix("Bash(")?.strip_suffix(')')?;
-            let pattern = match spec.strip_suffix(":*") {
-                Some(prefix) => format!("{} *", prefix.trim_end()),
-                None => spec.trim().to_owned(),
-            };
-            let forbidden = ["push", "--output", "--no-index"];
-            (!pattern.is_empty() && !forbidden.iter().any(|word| pattern.contains(word)))
-                .then_some(pattern)
-        })
-        .collect()
-}
-
-/// What a card session of Claude Code may never do, whatever the role says: push (the M7.3 rule "never a push"; the
-/// Opencode session gets the same as a rule), write or read a file outside the checkout with git (`--output`,
+/// What a card session of Claude Code may never do, whatever the role says: push (the M7.3 rule "never a push"),
+/// write or read a file outside the checkout with git (`--output`,
 /// `--no-index`,
 /// which the role's own `git diff:*`/`git show:*` would take in), and write its own rules — `acceptEdits` takes edits
 /// without asking, and a
@@ -911,48 +871,6 @@ fn glut_watch_line_with(cli: Option<PathBuf>, agent: &Agent) -> Option<String> {
     ))
 }
 
-/// Wires the server into an Opencode session at its worktree (`directory`) on `instance`, the app's service the
-/// session runs on.
-pub async fn wire_opencode(
-    roots: &ChannelRoots,
-    agent: &Agent,
-    directory: &Path,
-    role: Option<&Role>,
-    card: Option<&Launch>,
-    instance: crate::agents::opencode::Instance,
-) -> AgentEntry {
-    let Some(cli) = cli_path() else {
-        return AgentEntry::unavailable(no_cli_note());
-    };
-    let secret = match session_token::issue(roots, agent.id) {
-        Ok(secret) => secret,
-        Err(err) => {
-            return AgentEntry::unavailable(format!("the session secret could not be made: {err}"));
-        }
-    };
-    let server = Server::new(
-        cli.clone(),
-        agent.id,
-        &secret,
-        card.and_then(Launch::card_id),
-        card.and_then(Launch::plan_id),
-        forwarded_from_process,
-    );
-    match crate::agents::opencode::register_mcp(instance, directory, &server.opencode_config())
-        .await
-    {
-        Ok(()) => AgentEntry::new(
-            EntryStatus::Registered,
-            Some(&cli),
-            &caps_of(agent, role),
-            None,
-        ),
-        Err(err) => {
-            AgentEntry::unavailable(format!("Opencode would not take the MCP server: {err}"))
-        }
-    }
-}
-
 fn no_cli_note() -> String {
     format!(
         "no `{CLI_NAME}` was found next to the app (build the workspace, or set {CLI_OVERRIDE_ENV} to its path); \
@@ -1055,18 +973,6 @@ mod tests {
             entry["env"].get("CLAUDE_CONFIG_DIR").is_none(),
             "only what is set is forwarded"
         );
-    }
-
-    #[test]
-    fn the_opencode_registration_has_the_shape_the_service_took_in_the_spike() {
-        let config = server().opencode_config();
-        assert_eq!(config["type"], "local");
-        assert_eq!(
-            config["command"],
-            json!(["/opt/ax/axiomata-cli", "mcp-serve"])
-        );
-        assert_eq!(config["environment"]["AXIOMATA_AGENT_ID"], "7");
-        assert_eq!(config["environment"]["AXIOMATA_AGENT_TOKEN"], "s3cret");
     }
 
     #[test]
@@ -1548,9 +1454,12 @@ mod tests {
             axiomata_roster::reviewer_heavy_role(),
         ] {
             assert_eq!(
-                opencode_shell_patterns(&role.permissions).len(),
+                role.permissions
+                    .iter()
+                    .filter(|rule| grantable(rule))
+                    .count(),
                 role.permissions.len(),
-                "{}: a rule that `grantable` or the push filter drops would be a question in the pane",
+                "{}: a rule that `grantable` drops would be a question in the pane",
                 role.name
             );
         }
@@ -1656,30 +1565,6 @@ mod tests {
             prompt.contains("plan #4") && prompt.contains("get_plan"),
             "{prompt}"
         );
-    }
-
-    #[test]
-    fn a_roles_bash_rules_become_opencode_shell_patterns_and_never_a_push_or_a_reach_beyond_the_checkout()
-     {
-        let rules: Vec<String> = [
-            "Bash(cargo build:*)",
-            "Bash(npm run check)",
-            "Bash(git status)",
-            "Bash(git push:*)",
-            "Bash(git diff --output=x:*)",
-            "Bash(git diff --no-index:*)",
-            "Bash(*)",
-            "Bash",
-            "Edit(src/**)",
-            "Bash(a:*),Bash(b:*)",
-        ]
-        .map(str::to_owned)
-        .into();
-        assert_eq!(
-            opencode_shell_patterns(&rules),
-            ["cargo build *", "npm run check", "git status"]
-        );
-        assert!(opencode_shell_patterns(&[]).is_empty());
     }
 
     #[test]

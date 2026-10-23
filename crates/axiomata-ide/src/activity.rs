@@ -2,8 +2,8 @@
 //!
 //! The Flow's team pane shows each session as a tile with a live line — "edits `src/foo.rs`" — and its last few steps.
 //! Neither harness has an API for "what are you doing"; both write a record of every step as they go: Claude Code a JSONL
-//! transcript, Opencode its session's messages. This module only **parses** those into [`Activity`] entries, newest last.
-//! It is pure: finding the files, asking the service and keeping the cost of a look bounded are the caller's
+//! transcript, Glut its event log. This module only **parses** those into [`Activity`] entries, newest last.
+//! It is pure: finding the files and keeping the cost of a look bounded are the caller's
 //! ([`tail_of`] is the one helper that touches a file, and it reads a bounded tail).
 //!
 //! What comes out is text a model and its tools wrote: shown to the owner on their own machine, never used for a decision
@@ -89,14 +89,6 @@ fn tool_name(raw: &str) -> String {
     raw.strip_prefix("mcp__axiomata__")
         .unwrap_or(raw)
         .to_owned()
-}
-
-/// A time as the service wrote it — an RFC 3339 string, or epoch milliseconds — in RFC 3339, which is what the Studio reads.
-fn rfc3339_of(time: &Value) -> Option<String> {
-    if let Some(text) = time.as_str() {
-        return Some(text.to_owned());
-    }
-    chrono::DateTime::from_timestamp_millis(time.as_i64()?).map(|at| at.to_rfc3339())
 }
 
 fn keep_last(mut steps: Vec<Activity>) -> Vec<Activity> {
@@ -193,59 +185,6 @@ pub fn glut_recent(text: &str) -> Vec<Activity> {
     keep_last(steps)
 }
 
-/// The last steps in an Opencode session's messages, **newest message first** as the service lists them; the result is
-/// oldest first. A tool part names its tool as `name` or `tool` and keeps its input at `input` or `state.input`, depending
-/// on the service's version.
-pub fn opencode_recent(newest_first: &[Value]) -> Vec<Activity> {
-    let mut steps = Vec::new();
-    for message in newest_first.iter().rev() {
-        if message.get("type").and_then(Value::as_str) != Some("assistant") {
-            continue;
-        }
-        let at = message
-            .pointer("/time/created")
-            .or_else(|| message.get("created"))
-            .and_then(rfc3339_of);
-        for part in message
-            .get("content")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            match part.get("type").and_then(Value::as_str) {
-                Some("tool") => {
-                    let raw = part
-                        .get("name")
-                        .or_else(|| part.get("tool"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("tool");
-                    steps.push(Activity {
-                        kind: ActivityKind::Tool,
-                        name: tool_name(raw),
-                        detail: target_of(
-                            part.get("input").or_else(|| part.pointer("/state/input")),
-                        ),
-                        at: at.clone(),
-                    });
-                }
-                Some("text") => {
-                    let said = one_line(part.get("text").and_then(Value::as_str).unwrap_or(""));
-                    if !said.is_empty() {
-                        steps.push(Activity {
-                            kind: ActivityKind::Say,
-                            name: String::new(),
-                            detail: said,
-                            at: at.clone(),
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    keep_last(steps)
-}
-
 /// The last [`TAIL_BYTES`] of the plain file at `path`, from the start of a line: a bounded read, however large the file
 /// is. A link is not followed.
 ///
@@ -336,44 +275,6 @@ mod tests {
         ));
         assert_eq!(steps[0].detail.chars().count(), MAX_CHARS + 1);
         assert!(steps[0].detail.ends_with('…'));
-    }
-
-    #[test]
-    fn opencode_messages_come_newest_first_and_leave_oldest_first_in_either_spelling() {
-        let newest_first = vec![
-            json!({"type": "assistant", "content": [
-                {"type": "tool", "tool": "bash", "state": {"input": {"command": "cargo test"}}}]}),
-            json!({"type": "user", "content": [{"type": "text", "text": "go"}]}),
-            json!({"type": "assistant", "content": [
-                {"type": "text", "text": "Reading."},
-                {"type": "tool", "name": "read", "input": {"filePath": "src/b.rs"}}]}),
-        ];
-        let steps = opencode_recent(&newest_first);
-        let seen: Vec<(&str, &str)> = steps
-            .iter()
-            .map(|s| (s.name.as_str(), s.detail.as_str()))
-            .collect();
-        assert_eq!(
-            seen,
-            [
-                ("", "Reading."),
-                ("read", "src/b.rs"),
-                ("bash", "cargo test")
-            ]
-        );
-    }
-
-    #[test]
-    fn opencode_times_in_epoch_milliseconds_become_rfc_3339() {
-        let messages = vec![
-            json!({"type": "assistant", "time": {"created": 1_728_212_345_000_i64}, "content": [
-                {"type": "tool", "name": "bash", "input": {"command": "ls"}}]}),
-            json!({"type": "assistant", "created": "2026-10-06T10:00:00Z", "content": [
-                {"type": "text", "text": "hi"}]}),
-        ];
-        let steps = opencode_recent(&messages);
-        assert_eq!(steps[0].at.as_deref(), Some("2026-10-06T10:00:00Z"));
-        assert_eq!(steps[1].at.as_deref(), Some("2024-10-06T10:59:05+00:00"));
     }
 
     #[test]

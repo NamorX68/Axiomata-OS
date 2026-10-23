@@ -394,8 +394,6 @@ enum AgentAction {
     /// agent its session on the Opencode service — and print where and how it
     /// would run. Idempotent — this is what the app does on every start.
     Prepare { id: i64 },
-    /// Forget an Opencode agent's session, so its next start opens a fresh one.
-    NewSession { id: i64 },
     /// The project's master session on a harness (`claude_code`, `opencode` or `glut`), made the first time: the engine as
     /// the owner uses it outside, in the real project folder, with only the team tools added. Prints its id; `prepare`
     /// starts it.
@@ -1786,14 +1784,6 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 println!("agent #{} {} (master)", master.id, master.name);
                 Ok(())
             }
-            AgentAction::NewSession { id } => {
-                if axiomata_core::ide_start::new_session(&core.db, id)? {
-                    println!("agent #{id} starts a fresh Opencode session next time");
-                    Ok(())
-                } else {
-                    anyhow::bail!("no agent #{id}")
-                }
-            }
             AgentAction::Status { project } => agent_status(core, project).await,
             AgentAction::DiscardWorktree { id, force } => {
                 agent_discard_worktree(core, id, force).await
@@ -2248,10 +2238,8 @@ async fn agent_status(core: &AxiomataCore, project_id: i64) -> Result<()> {
         .iter()
         .map(|agent| (agent.id, agent.name.clone()))
         .collect();
-    let mut statuses =
+    let statuses =
         ide::provision::agent_statuses(&agents, &axiomata_core::paths::ide_locations().channels);
-    // Opencode agents report through the Opencode service, not the channel.
-    axiomata_core::ide_status::overlay_once(&mut statuses, &agents).await;
     if statuses.is_empty() {
         println!("project #{project_id} has no agents");
     }
@@ -2421,9 +2409,6 @@ fn agent_take_over(core: &AxiomataCore, id: i64, message: &str, no_ff: bool) -> 
 }
 
 async fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
-    let worktree = ide::agent_store::get_agent(&core.db_lock(), id)?
-        .filter(|agent| agent.harness == ide::model::Harness::Opencode)
-        .and_then(|agent| agent.worktree_path);
     let removed = {
         let db = core.db_lock();
         if !force && ide::provision::worktree_has_changes(&db, id)? {
@@ -2434,9 +2419,6 @@ async fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Re
         ide::provision::discard_worktree(&db, id, force)?
     };
     if removed {
-        if let Some(worktree) = worktree {
-            axiomata_core::agents::opencode::forget_mcp(&worktree).await;
-        }
         println!("removed the worktree of agent #{id}");
     } else {
         println!("agent #{id} has no worktree");
@@ -2445,20 +2427,16 @@ async fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Re
 }
 
 async fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
-    let (agent, registration) = {
+    let agent = {
         let db = core.db_lock();
         let Some(agent) = ide::agent_store::get_agent(&db, id)? else {
             anyhow::bail!("no agent #{id}");
         };
-        let registration = axiomata_core::ide_start::Registration::of(&agent);
         if !ide::agent_store::delete_agent(&db, id)? {
             anyhow::bail!("no agent #{id}");
         }
-        (agent, registration)
+        agent
     };
-    if let Some(registration) = registration {
-        registration.forget().await;
-    }
     ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
         .context("the agent was removed, but its status folder was not")?;
     println!("removed agent #{} {}", id, agent.name);
@@ -3241,7 +3219,6 @@ mod tests {
                 harness: "opencode".into(),
             },
             AgentAction::Delete { id: 2 },
-            AgentAction::NewSession { id: 2 },
         ] {
             assert!(ide_owner_gate(&agents(gated)).is_some());
         }

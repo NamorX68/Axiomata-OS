@@ -16,9 +16,8 @@ import {
 const ORDER: ProviderId[] = ["anthropic", "open_router", "ollama"];
 
 describe("harness matrix", () => {
-  it("lets Opencode serve no provider any more, Claude Code only Anthropic and Glut all but Anthropic", () => {
+  it("lets Claude Code serve only Anthropic and Glut all but Anthropic", () => {
     for (const p of ORDER) {
-      expect(serves("opencode", p)).toBe(false);
       expect(serves("claude_code", p)).toBe(p === "anthropic");
       expect(serves("axh", p)).toBe(p !== "anthropic");
     }
@@ -28,23 +27,21 @@ describe("harness matrix", () => {
     const all = ORDER.map((id) => ({ id }));
     expect(providersFor("claude_code", all).map((p) => p.id)).toEqual(["anthropic"]);
     expect(providersFor("axh", all).map((p) => p.id)).toEqual(["open_router", "ollama"]);
-    expect(providersFor("opencode", all)).toHaveLength(0);
   });
 
   it("keeps a role's provider when the new harness serves it and moves it to the first served one otherwise", () => {
-    expect(providerAfterHarnessChange("opencode", "ollama", ORDER)).toBe("ollama");
     expect(providerAfterHarnessChange("claude_code", "open_router", ORDER)).toBe("anthropic");
     expect(providerAfterHarnessChange("axh", "anthropic", ORDER)).toBe("open_router");
     expect(providerAfterHarnessChange("axh", "ollama", ORDER)).toBe("ollama");
   });
 
   it("names Claude Code's sign-in as needed when either role runs on it", () => {
-    expect(usesClaudeCode("claude_code", "opencode")).toBe(true);
-    expect(usesClaudeCode("opencode", "claude_code")).toBe(true);
-    expect(usesClaudeCode("axh", "opencode")).toBe(false);
+    expect(usesClaudeCode("claude_code", "axh")).toBe(true);
+    expect(usesClaudeCode("axh", "claude_code")).toBe(true);
+    expect(usesClaudeCode("axh", "axh")).toBe(false);
   });
 
-  it("lists Claude Code and Glut, no longer Opencode, with Glut as the own one", () => {
+  it("lists Claude Code and Glut, with Glut as the own one", () => {
     expect(HARNESSES.map((h) => h.id)).toEqual(["claude_code", "axh"]);
     expect(HARNESSES.find((h) => h.id === "axh")?.label).toBe("Glut");
   });
@@ -60,14 +57,14 @@ describe("the start notice for Claude Code's sign-in", () => {
   });
 
   it("speaks only when a role runs on Claude Code and its sign-in is missing", async () => {
-    expect(await claudeSignInNotice(config("claude_code", "opencode"), status(false))).toBe(CLAUDE_SIGN_IN_NOTICE);
-    expect(await claudeSignInNotice(config("claude_code", "opencode"), status(true))).toBeNull();
-    expect(await claudeSignInNotice(config("opencode", "axh"), status(false))).toBeNull();
+    expect(await claudeSignInNotice(config("claude_code", "axh"), status(false))).toBe(CLAUDE_SIGN_IN_NOTICE);
+    expect(await claudeSignInNotice(config("claude_code", "axh"), status(true))).toBeNull();
+    expect(await claudeSignInNotice(config("axh", "axh"), status(false))).toBeNull();
   });
 
   it("does not ask for the sign-in when no role needs it, and stays silent when a look fails", async () => {
     let asked = false;
-    await claudeSignInNotice(config("opencode", "opencode"), async () => {
+    await claudeSignInNotice(config("axh", "axh"), async () => {
       asked = true;
       return { logged_in: false, email: null, subscription: null };
     });
@@ -75,7 +72,7 @@ describe("the start notice for Claude Code's sign-in", () => {
     const failing = async (): Promise<ClaudeLoginStatus> => {
       throw new Error("no claude");
     };
-    expect(await claudeSignInNotice(config("claude_code", "opencode"), failing)).toBeNull();
+    expect(await claudeSignInNotice(config("claude_code", "axh"), failing)).toBeNull();
   });
 });
 

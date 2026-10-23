@@ -17,7 +17,7 @@ export type WaitReason = "prompt" | "plan_draft";
  *  the agent: shown as plain text only. */
 export interface WaitingAsk {
   id: string;
-  source: "claude" | "opencode";
+  source: "claude";
   tool: string;
   detail: string;
 }
@@ -52,13 +52,14 @@ export function parseAsk(value: unknown): WaitingAsk | null {
   if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
   if (!isString(v.id) || !isString(v.tool) || !isString(v.detail)) return null;
-  if (v.source !== "claude" && v.source !== "opencode") return null;
+  if (v.source !== "claude") return null;
   return { id: v.id, source: v.source, tool: v.tool, detail: v.detail };
 }
 
 /** The answers the app offers for a request: "in terminal" only where the pane's prompt is not already open. */
-export function askDecisions(ask: WaitingAsk): AskDecision[] {
-  return ask.source === "claude" ? ["allow", "deny", "terminal"] : ["allow", "deny"];
+export function askDecisions(_ask: WaitingAsk): AskDecision[] {
+  // Every ask comes from a hook or Glut's pane, whose own prompt waits behind it: "in terminal" is always an answer.
+  return ["allow", "deny", "terminal"];
 }
 
 /** The entries of an answer that are waiting agents; anything else is dropped. */

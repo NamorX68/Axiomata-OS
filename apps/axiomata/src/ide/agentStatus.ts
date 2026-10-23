@@ -71,7 +71,7 @@ export function describeStatus(status: AgentStatus | undefined, agent: IdeAgent,
         tone: "none",
         label: "no status",
         title:
-          "No status channel (own command). Opencode connects on its own; for Claude Code, " +
+          "No status channel (own command). For Claude Code, " +
           'add --settings "$AXIOMATA_CLAUDE_SETTINGS" to the command.',
       };
     }
@@ -82,10 +82,10 @@ export function describeStatus(status: AgentStatus | undefined, agent: IdeAgent,
 /**
  * A status for an agent whose pane is closed.
  *
- * Claude Code reports `ended` itself when its session closes. An Opencode session lives on the shared
- * service and stays `idle` after its terminal is gone — a green dot for something nobody is attached to.
- * So without a pane an idle (or never started) agent reads as closed; one still *working* or *waiting* on
- * the service keeps showing that, since it is true and the user wants to know.
+ * Claude Code reports `ended` itself when its session closes; a session whose channel still says `idle`
+ * after its terminal is gone would be a green dot for something nobody is attached to. So without a pane
+ * an idle (or never started) agent reads as closed; one still *working* or *waiting* keeps showing that,
+ * since it is true and the user wants to know.
  */
 export function withoutPane(view: StatusView): StatusView {
   if (view.tone !== "idle" && view.tone !== "starting") return view;

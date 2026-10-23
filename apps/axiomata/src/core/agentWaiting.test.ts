@@ -190,7 +190,6 @@ describe("permission requests in the waiting list", () => {
 
   it("offers 'in terminal' only for Claude Code, whose pane prompt waits behind the hook", () => {
     expect(askDecisions({ id: "1", source: "claude", tool: "Bash", detail: "" })).toEqual(["allow", "deny", "terminal"]);
-    expect(askDecisions({ id: "p", source: "opencode", tool: "shell", detail: "" })).toEqual(["allow", "deny"]);
   });
 });
 

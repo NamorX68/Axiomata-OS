@@ -10,8 +10,6 @@
 //!   of a reply, and every line of one reply repeats that reply's `usage`. Counting lines would count a reply as many
 //!   times as it has blocks, so a reply is counted once by its message id ([`ClaudeTally`]).
 //! * **Glut** writes an event log into the session's channel, one event per line ([`GlutTally`]).
-//! * **Opencode** returns its messages over the API; an assistant message carries `tokens` and its tool calls as
-//!   content parts of the type `tool` ([`opencode_usage`]).
 //!
 //! Tokens are input, output and cache *writes*; cache *reads* are left out (A27) — they cost a tenth and, on a long
 //! session, would be most of the count without saying anything about the work.
@@ -281,38 +279,6 @@ impl GlutTally {
     }
 }
 
-/// What the messages of an Opencode session add up to. `messages` is the whole session, in any order: a figure is taken
-/// per message, so the order does not matter.
-pub fn opencode_usage(messages: &[Value]) -> Usage {
-    let mut usage = Usage::default();
-    for message in messages {
-        if message.get("type").and_then(Value::as_str) != Some("assistant") {
-            continue;
-        }
-        if let Some(tokens) = message.get("tokens") {
-            let input =
-                number(tokens.get("input")).saturating_add(number(tokens.pointer("/cache/write")));
-            let output =
-                number(tokens.get("output")).saturating_add(number(tokens.get("reasoning")));
-            usage.input_tokens = usage.input_tokens.saturating_add(input);
-            usage.output_tokens = usage.output_tokens.saturating_add(output);
-        }
-        let calls = message
-            .get("content")
-            .and_then(Value::as_array)
-            .map_or(0, |parts| {
-                parts
-                    .iter()
-                    .filter(|part| part.get("type").and_then(Value::as_str) == Some("tool"))
-                    .count()
-            });
-        usage.steps = usage
-            .steps
-            .saturating_add(u32::try_from(calls).unwrap_or(u32::MAX));
-    }
-    usage
-}
-
 /// A new random session id in the spelling Claude Code's `--session-id` wants (a version 4 UUID), so the transcript's
 /// name is known before the harness starts.
 ///
@@ -530,39 +496,6 @@ mod tests {
     fn a_missing_transcript_is_an_error_for_the_caller_to_expect() {
         let mut tally = ClaudeTally::default();
         assert!(tally.advance(&temp_file("missing.jsonl")).is_err());
-    }
-
-    #[test]
-    fn opencode_messages_add_up_tokens_and_tool_parts() {
-        let messages = vec![
-            json!({"type": "user", "content": []}),
-            json!({"type": "assistant",
-                   "tokens": {"input": 362, "output": 102, "reasoning": 28, "cache": {"read": 28_544, "write": 10}},
-                   "content": [{"type": "reasoning"}, {"type": "tool", "id": "a"}, {"type": "tool", "id": "b"}]}),
-            json!({"type": "assistant", "tokens": {"input": 5, "output": 1}, "content": [{"type": "text"}]}),
-            json!({"type": "idle", "outcome": "succeeded"}),
-        ];
-        assert_eq!(
-            opencode_usage(&messages),
-            Usage {
-                input_tokens: 377,
-                output_tokens: 131,
-                steps: 2
-            }
-        );
-    }
-
-    #[test]
-    fn an_assistant_message_without_tokens_counts_nothing_but_its_tools() {
-        let messages = vec![json!({"type": "assistant", "content": [{"type": "tool"}]})];
-        assert_eq!(
-            opencode_usage(&messages),
-            Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-                steps: 1
-            }
-        );
     }
 
     #[test]

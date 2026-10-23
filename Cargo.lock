@@ -401,7 +401,6 @@ dependencies = [
  "axiomata-board",
  "axiomata-files",
  "axiomata-ide",
- "axiomata-opencode",
  "axiomata-roster",
  "axiomata-tasks",
  "base64 0.22.1",
@@ -481,19 +480,6 @@ dependencies = [
  "objc2-event-kit",
  "objc2-foundation",
  "thiserror 2.0.20",
-]
-
-[[package]]
-name = "axiomata-opencode"
-version = "0.1.0"
-dependencies = [
- "reqwest 0.12.28",
- "rustix",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -37,20 +37,4 @@ describe("describeEntry", () => {
     const view = describeEntry(entry({ status: "not_applicable", note: "runs a command of its own" }));
     expect(view).toEqual({ label: "Team tools off", tone: "none", detail: "runs a command of its own" });
   });
-
-  it("reads a registered session whose server is gone as not reachable, with the reason", () => {
-    const view = describeEntry(entry({}), "unreachable", "the service refused it");
-    expect(view.label).toBe("Not reachable");
-    expect(view.tone).toBe("warn");
-    expect(view.detail).toContain("the service refused it");
-  });
-
-  it("says so while the tools are being registered again", () => {
-    expect(describeEntry(entry({}), "reconnecting").label).toBe("Reconnecting…");
-  });
-
-  it("keeps an unavailable entry as it is, whatever the reach says", () => {
-    const view = describeEntry(entry({ status: "unavailable", note: "x" }), "unreachable");
-    expect(view.label).toBe("Team tools unavailable");
-  });
 });

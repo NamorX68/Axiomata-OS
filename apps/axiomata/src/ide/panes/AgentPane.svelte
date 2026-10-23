@@ -34,17 +34,7 @@
   import { relativeInside } from "../outputPath";
   import { renderMarkdown } from "../../core/markdown";
   import Terminal from "../../modules/terminal.svelte";
-  import { mailboxNudge, mailboxNudged, newAgentSession, prepareAgent, sessionReach } from "../agents";
-  import {
-    FIRST_LOOK_MS,
-    WATCH_INTERVAL_MS,
-    applyAnswer,
-    FRESH_MEMORY,
-    harnessRuns,
-    healWhile,
-    type ReachView,
-  } from "../reach";
-  import type { AgentState } from "../../core/backend";
+  import { mailboxNudge, mailboxNudged, prepareAgent } from "../agents";
   import { agentStatus, describeStatus } from "../agentStatus";
   import { waitingAgents } from "../../core/agentWaiting";
   import AskAnswer from "../../ui/AskAnswer.svelte";
@@ -142,95 +132,10 @@
   /** What is typed into the shell — including the status hookup. */
   const command = $derived(ready?.launch_command ?? agent.effective_command);
 
-  /**
-   * An Opencode agent on the generated command runs in a session the IDE
-   * keeps for it (opencode2.md OC2); a restart continues it. "New session"
-   * forgets it, so the restart that follows opens a fresh one — the old one
-   * stays in Opencode's own list.
-   */
-  const keepsSession = $derived(agent.harness === "opencode" && !agent.command.trim());
-
-  async function startNewSession(): Promise<void> {
-    try {
-      await newAgentSession(agent.id);
-      restarts += 1;
-    } catch (err) {
-      toast(`${agent.name}: ${err instanceof Error ? err.message : String(err)}`, "danger");
-    }
-  }
-
   const statuses = agentStatus.statuses;
   const status = $derived($statuses.byAgent.get(agent.id));
   /** The permission request this agent waits on, answerable here (card #88). */
   const ask = $derived($waitingAgents.find((waiting) => waiting.agent_id === agent.id)?.ask ?? null);
-
-  // Keeps the running Opencode session's team tools registered (card #72): the service drops a location that sat
-  // idle, and its MCP server with it, while this pane still shows an idle session. `reach.ts` holds the rules.
-  let reach = $state<ReachView>("unknown");
-  let reachReason = $state<string | null>(null);
-  let memory = FRESH_MEMORY;
-  // Bumped by every restart of the pane, so a look that was in flight then cannot write over the new one's state.
-  let epoch = 0;
-  // A plain variable, not `status`: reading the reactive one inside the timer's effect would rebuild the timer on
-  // every one-second status tick.
-  let latestState: AgentState | undefined;
-  $effect(() => {
-    latestState = status?.state;
-  });
-
-  async function lookAtReach(heal: AgentState | null): Promise<void> {
-    const mine = epoch;
-    try {
-      const step = applyAnswer(await sessionReach(agent.id, heal), heal !== null, memory);
-      if (mine !== epoch) return;
-      memory = step.memory;
-      reach = step.view;
-      reachReason = step.reason;
-    } catch (err) {
-      if (mine !== epoch) return;
-      // A failed look says nothing about the server. A failed repair counts, so a backend that keeps failing is not
-      // asked every half minute for ever.
-      if (heal !== null) memory = { ...memory, failedHeals: memory.failedHeals + 1 };
-      if (reach === "reconnecting") {
-        reach = "unreachable";
-        reachReason = err instanceof Error ? err.message : String(err);
-      }
-    }
-  }
-
-  async function reconnectByHand(): Promise<void> {
-    // The owner's own click: no second miss needed, but the harness must still run.
-    const running = latestState;
-    if (!harnessRuns(running) || running === undefined) return;
-    reach = "reconnecting";
-    memory = { ...memory, failedHeals: 0 };
-    await lookAtReach(running);
-  }
-
-  $effect(() => {
-    if (!keepsSession || !ready) return;
-    void restarts;
-    epoch += 1;
-    reach = "unknown";
-    reachReason = null;
-    memory = FRESH_MEMORY;
-    let busy = false;
-    const tick = async (): Promise<void> => {
-      if (busy) return;
-      busy = true;
-      try {
-        await lookAtReach(healWhile(latestState, memory));
-      } finally {
-        busy = false;
-      }
-    };
-    const first = setTimeout(() => void tick(), FIRST_LOOK_MS);
-    const timer = setInterval(() => void tick(), WATCH_INTERVAL_MS);
-    return () => {
-      clearTimeout(first);
-      clearInterval(timer);
-    };
-  });
 
   /** The terminal's two hands the nudge needs (`modules/terminal.svelte`). */
   let terminal = $state<{ msSinceInput: () => number | null; typeLine: (line: string) => Promise<boolean> } | null>(
@@ -418,12 +323,7 @@
       </div>
     {:else if sideTab === "inbox"}
       <div class="inbox" id="agent-view-inbox" role="tabpanel" aria-labelledby="agent-tab-inbox">
-        <AgentTeamEntry
-          entry={ready?.mcp ?? null}
-          {reach}
-          reason={reachReason}
-          onreconnect={harnessRuns(status?.state) ? () => void reconnectByHand() : undefined}
-        />
+        <AgentTeamEntry entry={ready?.mcp ?? null} />
         <SessionMail agentId={agent.id} />
       </div>
     {:else if sideTab !== "terminal" && sideTab !== "diffs"}
@@ -471,16 +371,6 @@
     {/if}
     {#if ready?.agent.port}<span class="port" title="AXIOMATA_PORT">:{ready.agent.port}</span>{/if}
     <code class="command" title={command}>{command}</code>
-    {#if keepsSession}
-      <IconButton
-        icon="message-square-plus"
-        size="sm"
-        label={ready?.agent.opencode_session
-          ? `New session — leave ${ready.agent.opencode_session} and start a fresh one`
-          : "New session — start a fresh Opencode session"}
-        onclick={startNewSession}
-      />
-    {/if}
     <IconButton icon="rotate-ccw" size="sm" label="Restart the agent" onclick={() => (restarts += 1)} />
   </footer>
 </div>

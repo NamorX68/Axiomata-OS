@@ -114,10 +114,10 @@ describe("the command list", () => {
   });
 
   it("offers /effort only while the chat runs on Glut, and everything while the harness is unknown", () => {
-    const names = (harness: "axh" | "opencode" | null) => commandEntries([], harness).map((c) => c.name);
+    const names = (harness: "axh" | "claude_code" | null) => commandEntries([], harness).map((c) => c.name);
     expect(names("axh")).toContain("effort");
-    expect(names("opencode")).not.toContain("effort");
-    expect(names("opencode")).toContain("model");
+    expect(names("claude_code")).not.toContain("effort");
+    expect(names("claude_code")).toContain("model");
     expect(names(null)).toContain("effort");
     chatHarness.set("claude_code");
     expect(suggestions("/eff", [])).toEqual([]);

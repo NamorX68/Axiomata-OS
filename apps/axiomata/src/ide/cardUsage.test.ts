@@ -59,7 +59,7 @@ describe("unmeasuredNote", () => {
     const fresh = unmeasuredNote({ measured: false, unmeasured: "no_record_yet" })!;
     expect(fresh).toContain("just started");
     expect(fresh).toContain("limit only applies");
-    expect(unmeasuredNote({ measured: false, unmeasured: "service_down" })).toContain("Opencode service is not running");
+    expect(unmeasuredNote({ measured: false, unmeasured: "not_measured" })).toContain("not measured");
     expect(unmeasuredNote({ measured: false, unmeasured: null })).toContain("could not be read");
   });
 });

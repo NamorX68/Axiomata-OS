@@ -18,7 +18,7 @@ export interface Engine {
   harness: Harness;
   /** Empty = the harness's own default command. */
   command: string;
-  /** For Opencode the full `provider/model` id. */
+  /** For Glut, `openrouter/…` or `ollama/…` in front picks the provider. */
   model: string | null;
   /** `KEY=value` per line. */
   env: string;

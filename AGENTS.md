@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository — Opencode and Claude Code alike
+Guidance for coding agents working in this repository — Glut, Opencode and Claude Code alike
 (Claude Code reads it through `CLAUDE.md`, which imports this file and adds what is specific
 to it). It is intentionally short and pointer-heavy — it is loaded in full on **every** turn,
 so it only carries build/run commands, a compact current-state summary, and the handful of
@@ -40,7 +40,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   `docs/plans/glut-cards.md`: engine kind `glut` — the former `mini` —, `axiomata-cli harness card` in the pane, asks
   in the pane and the app at once, a budget per run, resume of a lost turn), and slash commands in the chat
   (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
-  (`docs/plans/durable.md`: a journal per run, resume on click). LocalBrain was built, measured and not taken over
+  (`docs/plans/durable.md`: a journal per run, resume on click), and Opencode's exit (2026-10-23,
+  `docs/plans/opencode-exit.md`: everything on Glut or Claude Code, a plain Opencode master tile stays). LocalBrain was built, measured and not taken over
   (`docs/plans/localbrain.md`, "Outcome").
   Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
@@ -115,7 +116,7 @@ from the code itself:
   `AXIOMATA_HOME` in tests. New shared Cargo deps go in the root `Cargo.toml` under
   `[workspace.dependencies]`, referenced per-crate as `some_crate.workspace = true`.
 - **The installed app is a second front end on the same `~/.axiomata`** (`apps/axiomata/scripts/build-app.sh`): never run it and
-  `cargo tauri dev` at once (one database, one Opencode service, doubled watchers). Started from the Finder it has only
+  `cargo tauri dev` at once (one database, doubled watchers). Started from the Finder it has only
   `/usr/bin:/bin:…` as `PATH`, so `login_path::adopt` (src-tauri, first thing in `run`) takes the login shell's `PATH`; the CLI
   goes in as a sidecar (`tauri.bundle.conf.json`, merged only by the script — in the base config `externalBin` would break every
   ordinary build while the copied binary is missing) and is found next to the executable (`agent_entry::cli_path`). Ad-hoc
@@ -124,38 +125,21 @@ from the code itself:
 - **Skills live in one place only**, `~/.axiomata/skills/<name>/SKILL.md` — there is no
   workspace-local skill location (dropped deliberately; `docs/architecture.md` §4 explains
   why).
-- **Opencode is leaving** (`docs/plans/opencode-exit.md`, OX1 done 2026-10-23): no role, skill, routine or card runs
-  on it any more — a stored `opencode` harness or backend resolves to today's (`HarnessId::default_for`: Claude Code for
-  Anthropic, Glut otherwise), its engines load as Glut engines with the same id and model (`ollama/…` / `openrouter/…`
-  pick the provider, `glut_card::endpoint`), a new Opencode engine is refused, and the app stops its own instances at
-  start. Only the Agents panel's **plain Opencode tile** remains: the owner's own `opencode`, no team tools. The trap
-  below describes the code OX2 removes.
-- **Opencode 2 is a service, and Axiomata is its API client** (`docs/plans/opencode2.md`,
-  crate `axiomata-opencode`; docs: https://opencode.ai/v2/docs, *not* `/docs`, that is v1).
-  Skills, chat and card sessions run on the **app's own** services, never the owner's
-  (`docs/plans/agent-isolation.md`, `agents/opencode_instance.rs`): two instances, each with its own `XDG_*`
-  folders under `~/.axiomata/opencode/<write|read>/`, its own port, a config generated at every connect (keys from
-  `config.toml`, MCP from `~/.axh/mcp.json`, the owner's model catalog without credentials), left
-  running when the app quits. Reviewers, planners and skills with `access: read` run on `read`: its rights are in
-  its config **and** in front of every session's rules — measured, a project's `opencode.json` and a saved
-  "always" beat the config, a session's rules beat both. A project's **master** pane (role `master`, Agents panel)
-  is the engine as the owner uses it outside, in the real folder: Claude Code with only `--mcp-config`, Opencode on
-  a third instance `master` whose config is the owner's `opencode.json` (keys from `config.toml`) with their
-  `agents/`, `commands/`, `AGENTS.md` linked — never a card, no worktree, no hooks.
-  Sessions get the owner's environment back for their shell commands (`PUT
-  …/environment`); a pane's TUI attaches with `XDG_STATE_HOME` alone. Each session is
-  `POST /api/session`, prompt, wait on `/api/event`, read the messages back — never parse a CLI's output again,
-  never `--standalone` (it deadlocks on the shared database and starts its own MCP servers,
-  apple-mail opening Mail.app each time). Unit tests cannot reach the real service
-  (`cfg(test)` guard in `agents/opencode.rs`); live checks are `#[ignore]`d in
-  `crates/axiomata-opencode/tests/live.rs`. After every Opencode update, check one real skill run.
-- **Connector skills reach MCP through the app instance's generated config** — skill
-  sessions run on the app's service (`AgentBackend::Opencode`), which starts the
-  MCP servers listed in `~/.axh/mcp.json` (the `apple-mail` / `apple-reminders` servers; the
-  owner's `~/.config/opencode/opencode.json` is not read for them); tool use is pre-approved
-  by the session's permission rules (`auto_approve_tools`, the former `--auto`). There is no
-  `allowed_tools` allow-listing at runtime anymore (that was a Claude Code `--allowedTools`
-  trap, §5 of `docs/architecture.md`); the frontmatter field is kept as documentation only.
+- **Opencode left** (`docs/plans/opencode-exit.md`, OX1 + OX2 2026-10-23): skills, chat, routines and card sessions run
+  on Glut or Claude Code. A stored `opencode` reads as today's harness — as a role's harness it is Glut's serde alias,
+  and the load moves a role whose provider Glut cannot serve (Anthropic) to Claude Code (`HarnessId::default_for`); as a
+  skill's or routine's `backend:` it follows `agents.skill_harness`; its engines load as Glut engines with the same id
+  and model (`ollama/…` / `openrouter/…` pick the provider, `glut_card::endpoint`); a new Opencode engine is refused,
+  and migration 36 moved the Studio's Opencode sessions to Glut. Only the Agents panel's **plain Opencode tile** stays
+  (`roster::master_session`, harness `opencode`): the owner's own `opencode` in the project folder — no team tools,
+  because a config handed to `opencode` does not reach the long-running service it attaches to (measured). A project's
+  **master** pane is the engine as the owner uses it outside, in the real folder, never a card, no worktree, no hooks:
+  Claude Code with only `--mcp-config`, Glut as `axiomata-cli harness master`, Opencode as plain `opencode`. The column
+  `ide_agents.opencode_session` and its frozen migration stay in the schema's history. Docs, if Opencode is ever
+  needed again: https://opencode.ai/v2/docs, *not* `/docs` (v1).
+- **Connector skills reach MCP through Glut** — the digests run on `agents.skill_harness` (Glut), which starts the MCP
+  servers of `~/.axh/mcp.json` (the `apple-mail` / `apple-reminders` servers); the skill's `allowed_tools` are the run's
+  whole rights.
 - **Routines**: cron is the `cron` crate's **6–7 field, seconds-first** format
   (`0 */2 * * * *`), not 5-field crontab. `add`/`update`/`delete` all exist (`update` is a
   full replace, not a partial patch); the dashboard's Routines module UI uses a friendly
@@ -166,12 +150,8 @@ from the code itself:
   integration rather than hand-rolling Tauri commands for it (`docs/architecture.md` §5). The one exception: a
   **repeating** calendar event goes through EventKit (`axiomata_macos::calendar`, Tauri `calendar_create_recurring`,
   card #77), because the MCP tool cannot set recurrence — only what the tool cannot do goes native.
-  The digests run on the single agent harness — an Opencode session on whatever
-  `skill_provider` routes to (`openrouter/deepseek/...`, `anthropic/claude-haiku-5-5`, or a
-  local `ollama/<model>`), the same way opencode itself would run them; that harness is what
-  replaced both the Claude Code CLI and the Stufe 2 `ollama-agent` tool loop.
-  `mail-digest` also uses `prepend_files: ["Mail/.topics.md"]` to inline its workspace topics
-  (opencode has no file tool for `mail-digest`'s workspace file).
+  The digests run on the skill harness (Glut on OpenRouter or Ollama, Claude Code on Anthropic).
+  `mail-digest` also uses `prepend_files: ["Mail/.topics.md"]` to inline its workspace topics.
 - **The vault router is `AGENTS.md`** (was `CLAUDE.md`, 2026-09-28): `memory sync` writes the router block into
   `<workspace>/AGENTS.md` and `<area>/AGENTS.md`, renames an old `CLAUDE.md` router on the way (the owner's own text
   goes along) and leaves a `CLAUDE.md` that only imports `@AGENTS.md`, so Claude Code reads the same map. The chat's
@@ -250,12 +230,12 @@ from the code itself:
   `calc(…)`, not a number. UI icons: `ui/Icon.svelte`/`ui/IconButton.svelte` over the Lucide subset
   vendored by `scripts/vendor-icons.sh`.
 - **Backend ids + the one frontmatter bridge**: `backend:` is optional — unset, a run takes `agents.skill_harness`
-  (`docs/plans/harness-choice.md`; the chat takes `agents.chat_harness`) — else `opencode` | `claude_code` (`claude -p`
+  (`docs/plans/harness-choice.md`; the chat takes `agents.chat_harness`) — else `claude_code` (`claude -p`
   on the app's own login folder `~/.axiomata/claude`, never `~/.claude`; Anthropic only; `--setting-sources ""` —
   a folder's `.claude/settings.json` runs hooks/env even untrusted — with the folder's `AGENTS.md` handed over by the
   app, `--strict-mcp-config` with `~/.axh/mcp.json` as a 0600 file; the skill's `allowed_tools` are its whole rights) |
   `ollama` | `axh` (the own harness, HS6b — needs a skill provider **with a `base_url`**
-  (open_router/ollama), else the run records a clear `Failed`, never a silent hop to opencode;
+  (open_router/ollama), else the run records a clear `Failed`, never a silent hop elsewhere;
   MCP servers come from `~/.axh/mcp.json` + `.mcp.json`, **never** `opencode.json`; the skill's
   `allowed_tools` become the run's whole permissions — `~/.axh` `deny`/`ask` still beat them, `~/.axh` `allow`
   never widens them);
@@ -264,14 +244,13 @@ from the code itself:
   `..`/absolute, a `.git`/`.hg`/`.jj` store, a linked or special file or one over 256 KiB = run fails as
   a recorded `Failed`; one reader for core and harness, `axiomata_harness::skills::context`, through
   `axiomata-files`' pinned walk, strict link policy for the workspace). The `local_backend` /
-  `effective_backend` mechanism and the `ollama-agent` backend are gone.
+  `effective_backend` mechanism, the `ollama-agent` backend and `opencode` are gone (a stored `opencode` follows the
+  skill harness).
 - **Model / provider**: the provider is chosen **per role** — `agents.chat_provider` for
   interactive chat, `agents.skill_provider` for skill/routine runs — resolved via
-  `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. Every Opencode session gets
-  the model `provider/<model>` from *its role's* provider (`providers[chat_provider].chat_model`
-  / `providers[skill_provider].skill_model`; a skill's own `model:` frontmatter still wins),
-  and opencode resolves the provider's auth/keys itself from its own credential store — there
-  is no `ANTHROPIC_*` env plumbing anymore. `guard_redirected_turn(db, config, role)` still
+  `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. A run gets the model from *its role's* provider
+  (`providers[chat_provider].chat_model` / `providers[skill_provider].skill_model`; a skill's own `model:` frontmatter
+  still wins). `guard_redirected_turn(db, config, role)` still
   gates the paid roles, metering them from token counts × an owner-set per-model price table
   (`config.agents.costs` / `spend::metered_cost_usd`) rather than the CLI's own estimate —
   `runs.model` (migration 0007) records the model so `spend::reconcile_recorded_costs` can
@@ -290,7 +269,7 @@ from the code itself:
   CLI's direct commands (`board list`, `board add`, `inbox move` — `agent_entry::cli_direct_program`) starts the CLI
   directly, without a shell. Every app-harness command carries `AXIOMATA_HARNESS_RUN=skill|chat`: a skill run gets only a
   short CLI list (`main.rs` `skill_run_may`), a chat turn no owner gate and only plain cards (`board_flow::plain_*`).
-  Widen either list only with the same care; on Opencode's unattended shell the mark is a second line, not a boundary.
+  Widen either list only with the same care.
 - **Glut's own traps live in its repository** (`../Axiomata-Glut/AGENTS.md`): code mode without regular expressions, the
   refusal ledger and compaction, never cutting a tool result, hooks that only veto, the two layers of subagents.
   Read them before touching how Axiomata drives a Glut run.

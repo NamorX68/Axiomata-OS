@@ -119,8 +119,8 @@ pub enum AxiomataError {
     },
 
     /// The model to run with is missing or malformed for the active provider.
-    /// The agent is *not* spawned in this case: opencode needs a concrete
-    /// `provider/model` id, and there is no safe "default model" to fall back
+    /// The agent is *not* spawned in this case: the harness needs a concrete
+    /// model id, and there is no safe "default model" to fall back
     /// to that stays on the right provider — a config gap must fail loudly,
     /// not silently bill the wrong endpoint.
     #[error("{reason}")]

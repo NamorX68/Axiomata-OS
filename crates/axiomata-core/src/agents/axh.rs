@@ -44,8 +44,8 @@ use glut::{
 };
 
 use crate::agents::claude_code::{bash_rule, is_shell_rule};
-use crate::agents::opencode::{JSON_REPAIR_PROMPT, JSON_REPAIR_TIMEOUT, find_json_object};
-use crate::agents::opencode_instance::{READ_COMMANDS, READ_DENIED_COMMANDS};
+use crate::agents::json_reply::{JSON_REPAIR_PROMPT, JSON_REPAIR_TIMEOUT, find_json_object};
+use crate::agents::read_access::{READ_COMMANDS, READ_DENIED_COMMANDS};
 use crate::agents::{
     AgentRequest, AgentRunResult, BACKEND_AXH, ChatCommand, ChatReply, ChatRequest, agent_slots,
 };

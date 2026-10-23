@@ -28,9 +28,9 @@ use crate::error::AxiomataError;
 pub mod axh;
 pub mod claude_auth;
 pub mod claude_code;
+pub(crate) mod json_reply;
 pub mod ollama;
-pub mod opencode;
-mod opencode_instance;
+pub(crate) mod read_access;
 
 /// Backend identifier stored verbatim in a `SKILL.md` frontmatter `backend`
 /// field and in a routine's DB row. Kept as a plain string on disk so the file
@@ -166,15 +166,6 @@ pub fn valid_session_id(id: &str) -> bool {
 /// Which agent runs a given skill or routine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentBackend {
-    /// A session on Opencode 2's shared background service. A model-agnostic
-    /// agent harness: talks to whatever provider/model the session is created
-    /// with, using the provider's own native tool-calling protocol and the
-    /// user's existing opencode config (MCP servers, auth) — so a
-    /// non-Anthropic model like deepseek-v4-flash runs its skills the same way
-    /// it runs in opencode itself. Model travels via [`AgentRequest::model`] as
-    /// the full `provider/model` id, e.g.
-    /// `openrouter/deepseek/deepseek-v4-flash-0731`.
-    Opencode,
     /// A single completion call against a local Ollama model — no tools, no
     /// loop. Intended for simple, deterministic tasks (e.g. appending a to-do
     /// item).
@@ -236,13 +227,7 @@ impl AgentBackend {
             // Opencode left too (`docs/plans/opencode-exit.md`, O3): a skill or routine that names it runs on the
             // configured harness as well.
             BACKEND_OPENCODE | "claude-code" | "ollama-agent" => {
-                // The configured one is never Opencode after the config's load; a config made in code could still say
-                // so, and must not send this back here.
-                let harness = match config.agents.skill_harness {
-                    HarnessId::Opencode => HarnessId::default_for(config.agents.skill_provider),
-                    configured => configured,
-                }
-                .as_str();
+                let harness = config.agents.skill_harness.as_str();
                 tracing::warn!(
                     backend,
                     harness,
@@ -260,7 +245,6 @@ impl AgentBackend {
     /// [`AgentBackend::resolve`] accepts.
     pub fn id(&self) -> &'static str {
         match self {
-            Self::Opencode => BACKEND_OPENCODE,
             Self::Ollama { .. } => BACKEND_OLLAMA,
             Self::Axh => BACKEND_AXH,
             Self::ClaudeCode => BACKEND_CLAUDE_CODE,
@@ -282,7 +266,6 @@ impl AgentBackend {
         config: &Config,
     ) -> Result<AgentRunResult, AxiomataError> {
         match self {
-            Self::Opencode => opencode::run(request).await,
             Self::Ollama { model } => ollama::run(request, model).await,
             Self::Axh => axh::run(request, config).await,
             Self::ClaudeCode => claude_code::run(request).await,
@@ -446,16 +429,6 @@ pub async fn chat_commands(config: &Config) -> Result<Vec<EngineCommand>, Axioma
                     .unwrap_or_else(|| "command file".to_owned()),
             })
             .collect(),
-        HarnessId::Opencode => opencode::chat_commands()
-            .await?
-            .into_iter()
-            .map(|command| EngineCommand {
-                name: command.name,
-                source: CommandSource::Oc,
-                hint: None,
-                description: command.description.unwrap_or_default(),
-            })
-            .collect(),
         HarnessId::ClaudeCode => claude_code::known_commands()
             .into_iter()
             .map(|command| EngineCommand {
@@ -508,7 +481,6 @@ fn title_of(text: &str) -> String {
 fn session_of(harness: HarnessId, id: &str) -> bool {
     match harness {
         HarnessId::Axh => id.starts_with("axh-"),
-        HarnessId::Opencode => id.starts_with("ses_"),
         HarnessId::ClaudeCode => {
             id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
         }
@@ -543,7 +515,6 @@ pub fn chat_sessions(
             let title = match harness {
                 HarnessId::Axh => axh::session_title(&id)?,
                 HarnessId::ClaudeCode => claude_code::session_title(&config.workspace_root, &id)?,
-                HarnessId::Opencode => String::new(),
             };
             Some(ChatSession {
                 id,
@@ -585,7 +556,6 @@ pub async fn chat_undo(
     }
     match config.agents.chat_harness {
         HarnessId::Axh => axh::undo_last(session_id, &config.workspace_root).await,
-        HarnessId::Opencode => opencode::undo_last(session_id).await,
         HarnessId::ClaudeCode => Err(AxiomataError::AgentApi {
             backend: BACKEND_CLAUDE_CODE,
             message: "Claude Code cannot undo in the app's chat: it has no rewind outside its own terminal".to_owned(),
@@ -699,16 +669,6 @@ pub async fn chat(
         effort: extras.effort,
     };
     match harness {
-        HarnessId::Opencode => {
-            opencode::chat(ChatRequest {
-                // The provider-specific reading happens inside `opencode::chat_model_id`;
-                // `None` fails the turn with a clear config error rather than silently
-                // hitting an opencode default model.
-                model: opencode::chat_model_id(config).ok(),
-                ..request
-            })
-            .await
-        }
         // Claude Code serves Anthropic only (harness-choice D2); a hand-edited config that pairs it with another
         // provider refuses the turn rather than sending that provider's model to Anthropic.
         HarnessId::ClaudeCode if config.agents.chat_provider != ProviderId::Anthropic => {
@@ -1004,13 +964,6 @@ mod tests {
             AgentBackend::resolve(BACKEND_OPENCODE, None, &config).unwrap(),
             AgentBackend::Axh
         );
-        // A config made in code that still says Opencode takes the provider's harness, never loops back.
-        config.agents.skill_harness = HarnessId::Opencode;
-        config.agents.skill_provider = ProviderId::Anthropic;
-        assert_eq!(
-            AgentBackend::resolve(BACKEND_OPENCODE, None, &config).unwrap(),
-            AgentBackend::ClaudeCode
-        );
     }
 
     #[test]
@@ -1067,11 +1020,9 @@ mod tests {
         .unwrap();
         let db = std::sync::Mutex::new(conn);
         let mut config = Config::default();
-        config.agents.chat_harness = HarnessId::Opencode;
-        let listed = chat_sessions(&config, &db).unwrap();
-        let ids: Vec<(&str, u32)> = listed.iter().map(|s| (s.id.as_str(), s.turns)).collect();
-        assert_eq!(ids, [("ses_b", 1), ("ses_a", 2)]);
-        assert_eq!(listed[1].updated_at, "2026-10-20T09:00:00Z");
+        // Opencode's `ses_` conversations name no harness of today's.
+        config.agents.chat_harness = HarnessId::ClaudeCode;
+        assert!(chat_sessions(&config, &db).unwrap().is_empty());
         // Glut's conversation lists only while its file is there.
         config.agents.chat_harness = HarnessId::Axh;
         assert!(chat_sessions(&config, &db).unwrap().is_empty());
@@ -1087,7 +1038,7 @@ mod tests {
         .unwrap();
         let db = std::sync::Mutex::new(conn);
         let mut config = Config::default();
-        config.agents.chat_harness = HarnessId::Opencode;
+        config.agents.chat_harness = HarnessId::Axh;
         for id in ["ses_card", "ses_never", "../x"] {
             let err = chat_undo(&config, &db, id).await.unwrap_err();
             assert!(
@@ -1101,7 +1052,7 @@ mod tests {
     #[tokio::test]
     async fn only_a_glut_chat_turn_is_resumed() {
         let mut config = Config::default();
-        config.agents.chat_harness = HarnessId::Opencode;
+        config.agents.chat_harness = HarnessId::ClaudeCode;
         let resume = |command: Option<ChatCommand>| ChatExtras {
             resume: Some("run-1".into()),
             command,

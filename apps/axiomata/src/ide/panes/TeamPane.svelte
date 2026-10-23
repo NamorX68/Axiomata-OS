@@ -4,7 +4,7 @@
   it works on, and a live line with its newest step ("Edit …/src/a.rs"). A click on a tile opens the trail of its last
   steps and what it has used against its limits; "Terminal" puts its pane in front, as the Canvas shows it.
 
-  The steps come from the harness's own record (`session_activity`: the Claude Code transcript, the Opencode messages),
+  The steps come from the harness's own record (`session_activity`: the Claude Code transcript, Glut's event log),
   read every few seconds while the pane is shown. Nothing here starts, stops or changes a session.
 -->
 <script lang="ts">

@@ -1716,13 +1716,6 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
 
     // The mock has no git, so it answers the way a non-repository project
     // does: agents share the project folder and still get a port.
-    case "ide_session_reach":
-      return { state: "reachable" } as T;
-    case "ide_agent_new_session": {
-      const agent = ideAgents.find((a) => a.id === args.id);
-      if (agent) agent.opencode_session = null;
-      return Boolean(agent) as T;
-    }
     // Starting a card in the browser mock: a session of the card's role on the chosen engine, nothing runs.
     case "start_card_session": {
       const template = ideAgents.find((a) => a.project_id === args.projectId) ?? ideAgents[0];

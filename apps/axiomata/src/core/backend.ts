@@ -22,7 +22,7 @@ export interface AppInfo {
 export type ProviderId = "anthropic" | "open_router" | "ollama";
 
 /** Mirrors `axiomata_core::config::HarnessId` (its TOML/serde token); the matrix is `core/harness.ts`. */
-export type HarnessId = "opencode" | "claude_code" | "axh";
+export type HarnessId = "claude_code" | "axh";
 
 /** Mirrors `axiomata_core::spend::SpendSummary`. `get_spend_summary` returns
  *  one entry per distinct provider across the chat and skill role selectors. */
@@ -286,8 +286,8 @@ export interface IdeAgent {
    *  (M7.3). `null` for an older worktree: the project folder's branch then
    *  stands in. */
   base_branch: string | null;
-  /** The Opencode session this agent runs in, created by the IDE on the shared
-   *  Opencode service and continued on every start (opencode2.md OC2). `null`
+  /** The Opencode session this agent once ran in (opencode2.md OC2), a column kept from before Opencode left
+   *  (opencode-exit.md); nothing sets it any more. `null`
    *  before the first start, for other harnesses, and after "New session". */
   opencode_session: string | null;
   /** The engine this session runs on — an id of the owner's catalog (`core/roster.ts`, a2a.md CP-A1). `null`
@@ -382,9 +382,6 @@ export type Unmeasured =
   | "no_session_id"
   | "no_record_yet"
   | "read_failed"
-  | "no_opencode_session"
-  | "service_down"
-  | "service_failed"
   | "not_measured";
 
 /** How a session is wired to the agent MCP server. Mirrors `axiomata_core::agent_entry::EntryStatus`. */

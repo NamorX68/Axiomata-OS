@@ -187,7 +187,7 @@
           value={form.model ?? ""}
           options={engineOptions($modelCatalog, form.harness)}
           onchange={(value) => form && (form.model = value)}
-          placeholder="empty = the harness picks; Opencode: provider/model"
+          placeholder="empty = the harness picks; Glut: openrouter/… or ollama/… picks the provider"
         />
       </div>
       <details class="advanced" open={advancedProblem}>

@@ -300,6 +300,10 @@ project by id, never by path (`project_roles`, `confirm_project_roles`).
 
 ### `axiomata-opencode`
 
+> **Removed 2026-10-23** (`docs/plans/opencode-exit.md`, OX2): this crate, the app's Opencode instances and the status
+> tracker are gone; skills, chat and card sessions run on Glut or Claude Code, and the Agents panel keeps a plain Opencode
+> tile. What follows describes the code as it was.
+
 The client for Opencode 2's background service (`docs/plans/opencode2.md`, OC1). Since
 2026-10-18 the services it talks to are the **app's own instances**, not the owner's
 (`docs/plans/agent-isolation.md`, CP1/CP2): core's `agents/opencode_instance.rs` gives each its own
@@ -1289,7 +1293,7 @@ a Unix timestamp) and `started`. For Claude Code the harness writes, Rust reads:
   Claude Code's task tools (`TaskCreate`/`TaskUpdate` — `TodoWrite` no longer exists) only
   report single changes to a hook, so we pin the list with `CLAUDE_CODE_TASK_LIST_ID` and read
   Claude Code's own `~/.claude/tasks/<list>/*.json`, tolerantly.
-- **Opencode** reports through its own service since OC3 (`docs/plans/opencode2.md`): the v1
+- *(Gone since 2026-10-23, opencode-exit.md.)* **Opencode** reports through its own service since OC3 (`docs/plans/opencode2.md`): the v1
   plugin under `OPENCODE_CONFIG_DIR` died with Opencode 2 (plugin format, config key and event
   names all changed, and the service ignores that variable) and is gone; `reset` removes what
   it left in a channel. `axiomata_core::ide_status` runs one watcher per process — started by
@@ -1513,6 +1517,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `axiomata-files` moved to `Axiomata-Foundation`, the shared building blocks of the Axiomata apps (later the terminal
   emulator, when the Studio becomes an app of its own). Both are checked out beside this repository and built from
   there (path dependencies in the root `Cargo.toml`); Glut's own traps and the TUI's plan live in its repository.
+- **Opencode's exit** (2026-10-23, `docs/plans/opencode-exit.md`): skills, chat, routines and card sessions run on Glut
+  or Claude Code; the crate `axiomata-opencode` and the app's own Opencode instances are gone (≈8,000 lines). Old
+  `opencode` values read as today's harness, its engines as Glut engines, migration 36 moved its Studio sessions to
+  Glut. The Agents panel keeps a plain Opencode tile (the owner's own `opencode`, no team tools); the master tiles are
+  Glut and Claude Code side by side, Opencode below.
 - **Watching a Glut session** (2026-10-23, Glut TUI8d): Glut's TUI writes every session's event log itself — a card's
   channel `glut-events.jsonl` (`Launch::log`), the owner's beside their session in `~/.axh/sessions` — and `glut watch`
   follows one read-only. A Glut tile in Flow has **Watch**: `axiomata-cli harness watch --agent N` in a pane of its own,
@@ -1770,7 +1779,7 @@ app's Files | Search column and the IDE's `search` pane, ⇧⌘F). ED5.8: instal
 (`axiomata-macos::fonts`, CoreText through raw `unsafe extern` FFI; `core/installedFonts.ts`). ED5.9: moving in the
 tree by dragging (`FileTree.svelte`, pointer events, `treeModel.moveTarget`) — **ED5 is complete**. **Opencode 2
 (`docs/plans/opencode2.md`, OC1–OC4) is done**: Axiomata is a client of Opencode 2's shared background service
-(crate `axiomata-opencode`) — skills and chat run as sessions on it, IDE Opencode agents start on a session the IDE
+(crate `axiomata-opencode`, *gone since 2026-10-23, opencode-exit.md*) — skills and chat run as sessions on it, IDE Opencode agents start on a session the IDE
 keeps (`opencode --session <id>`), and their status comes from the service's event stream. **ED6 (LSP) is done**
 (`docs/plans/editor.md` "ED6 im Detail", L0–L11): L0 refuses `$HOME` and above as a project root; ED6.1 runs language
 servers from Rust (`axiomata-files::lsp` — which program, only from a built-in table or `~/.axiomata/lsp.json`; only

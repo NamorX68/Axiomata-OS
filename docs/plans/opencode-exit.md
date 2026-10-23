@@ -1,6 +1,7 @@
 # Opencode's exit (Glut TUI plan T22)
 
-Status: **grilled 2026-10-23 (owner)**; OX1 built 2026-10-23, Mac test next, then OX2.
+Status: **grilled 2026-10-23 (owner)**; OX1 built and tested by the owner, OX2 built 2026-10-23; the folder
+`~/.axiomata/opencode` waits for the owner's yes.
 
 Opencode came in as the one harness for skills, the chat and card sessions (`opencode2.md`). Since then Glut does all
 three (`harness-choice.md`, `glut-cards.md`) and has a terminal UI of its own (`../Axiomata-Glut/docs/plans/glut-tui.md`,
@@ -62,4 +63,13 @@ usage and activity readers — about 8,000 lines, and 904 MB under `~/.axiomata/
   Opencode choices and its panes' "New session"; the Opencode master becomes the plain `opencode` command (no
   instance, no env prefix, no MCP). The frozen migration and the `opencode_session` column stay in the schema history.
   `AGENTS.md`, `architecture.md` and the plans that describe Opencode as a part get their closing note.
+- **OX2 — built 2026-10-23.** Gone: the crate `axiomata-opencode`, `agents/opencode.rs`, `opencode_instance.rs`, the
+  service tracker of `ide_status.rs` (what is left are the waiting agents and the answers from the app), the Opencode
+  parts of `session_limits` (no interrupt, no service metering), `session_activity`, `card_session` and `plan_session`
+  (no MCP registration to take back), `ide_start` (`reach`, `Registration`, `new_session`), `axiomata-ide`'s Opencode
+  readers, the Tauri `ide_session_reach` / `ide_agent_new_session`, the panes' reach and "New session", the
+  `HarnessId::Opencode` variant (an `opencode` in a config is Glut's serde alias, and the load gives an Anthropic role
+  Claude Code). Kept apart and moved: the JSON reply helpers (`agents/json_reply.rs`) and the read-only command lists
+  (`agents/read_access.rs`) that Glut and Claude Code share. The app no longer stops Opencode services at start: OX1's
+  start already did on the owner's machine.
 - **After the owner's yes:** `~/.axiomata/opencode` deleted.

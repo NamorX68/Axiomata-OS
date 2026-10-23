@@ -737,7 +737,7 @@ mod tests {
                 chat_provider: ProviderId::Anthropic,
                 skill_provider: ProviderId::Anthropic,
                 chat_harness: HarnessId::ClaudeCode,
-                skill_harness: HarnessId::Opencode,
+                skill_harness: HarnessId::Axh,
                 chat_effort: None,
                 skill_effort: None,
                 daily_usd_cap: Some(2.0),
@@ -747,13 +747,13 @@ mod tests {
         };
         let merged = merge_view_update(&current, update);
         assert_eq!(merged.agents.chat_harness, HarnessId::ClaudeCode);
-        assert_eq!(merged.agents.skill_harness, HarnessId::Opencode);
-        // Taken as given, and refused at the save: Opencode serves no role any more (opencode-exit.md).
+        assert_eq!(merged.agents.skill_harness, HarnessId::Axh);
+        // Taken as given, and refused at the save: Glut serves no Anthropic.
         assert!(
             merged
                 .validate_for_save()
                 .unwrap_err()
-                .starts_with("Skill harness opencode cannot serve")
+                .starts_with("Skill harness axh cannot serve")
         );
         assert_eq!(
             ConfigView::from_config(&merged).agents.chat_harness,
@@ -2970,22 +2970,11 @@ pub fn confirm_project_roles(
 /// first: a channel without a row is harmless, a row whose plan vanished is not.
 #[tauri::command]
 pub async fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
-    // The connection is let go of before anything is awaited (a guard held across an await makes the command
-    // unsendable). The worktree is read first: the row is gone afterwards, and the MCP registration is keyed on it.
-    let (deleted, opencode_worktree) = {
+    let deleted = {
         let db = state.db_lock();
-        let registration =
-            match ide::agent_store::get_agent(&db, id).map_err(|err| err.to_string())? {
-                Some(agent) => axiomata_core::ide_start::Registration::of(&agent),
-                None => None,
-            };
-        let deleted = ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?;
-        (deleted, registration)
+        ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?
     };
     if deleted {
-        if let Some(registration) = opencode_worktree {
-            registration.forget().await;
-        }
         ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
             .map_err(|err| {
                 format!("the agent was removed, but its status folder was not: {err}")
@@ -2995,8 +2984,7 @@ pub async fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bo
 }
 
 /// Gives an agent what it needs to run — its own git worktree, a reserved
-/// port (M7.2 CP5), a fresh status channel (CP6) and, for Opencode, its
-/// session on the shared service (opencode2.md OC2) — and says where and with
+/// port (M7.2 CP5), a fresh status channel (CP6) — and says where and with
 /// which command line the harness should start.
 ///
 /// Idempotent, and called on every start rather than only on creation: an
@@ -3010,28 +2998,6 @@ pub async fn prepare_ide_agent(
     axiomata_core::ide_start::start_agent(&state, id)
         .await
         .map_err(|err| err.to_string())
-}
-
-/// Whether session `id`'s team tools (its MCP server) can be reached. With `heal_while` set to the status the pane
-/// shows, a running session whose server the service dropped while the pane sat idle gets it registered again
-/// (card #72); any other status only looks.
-#[tauri::command]
-pub async fn ide_session_reach(
-    state: State<'_, CoreState>,
-    id: i64,
-    heal_while: Option<String>,
-) -> Result<axiomata_core::ide_start::Reach, String> {
-    let heal_while = heal_while.and_then(|status| ide::lifecycle::AgentState::parse(&status));
-    axiomata_core::ide_start::reach(&state, id, heal_while)
-        .await
-        .map_err(|err| err.to_string())
-}
-
-/// Forgets an Opencode agent's session so its next start opens a fresh one
-/// ("New session", opencode2.md Q9). The old session stays in Opencode.
-#[tauri::command]
-pub fn ide_agent_new_session(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
-    axiomata_core::ide_start::new_session(&state.db, id).map_err(|err| err.to_string())
 }
 
 /// The "you have mail" line to type into session `id`'s terminal, or `None` when there is nothing to announce
@@ -3101,25 +3067,22 @@ pub fn ide_mailbox_nudged(state: State<'_, CoreState>, id: i64) -> Result<(), St
 /// One call for the whole project, because the IDE polls it every second
 /// while it is open. Reads small files only.
 ///
-/// Claude Code agents report through their file channel; Opencode agents
-/// through the Opencode service, whose watcher starts on the first call
-/// (opencode2.md OC3). Async so that watcher starts inside the runtime.
+/// Every harness reports through its file channel.
 #[tauri::command]
 pub async fn ide_agent_states(
     state: State<'_, CoreState>,
     project_id: i64,
 ) -> Result<Vec<ide::lifecycle::AgentStatus>, String> {
-    axiomata_core::ide_status::ensure_running(std::sync::Arc::clone(&state.db));
     // List, then let go of the connection before the file reads: this runs
     // every second, and the connection is shared by every other command.
     let agents = {
         let db = state.db_lock();
         ide::agent_store::list_agents(&db, project_id).map_err(|err| err.to_string())?
     };
-    let mut statuses =
-        ide::provision::agent_statuses(&agents, &axiomata_core::paths::ide_locations().channels);
-    axiomata_core::ide_status::overlay(&mut statuses, &agents);
-    Ok(statuses)
+    Ok(ide::provision::agent_statuses(
+        &agents,
+        &axiomata_core::paths::ide_locations().channels,
+    ))
 }
 
 /* ------------------------------------------------------------ git (M7.3) ---
@@ -3450,9 +3413,6 @@ pub async fn discard_ide_agent_worktree(
         Ok((target, removed))
     })
     .await?;
-    if removed {
-        axiomata_core::agents::opencode::forget_mcp(target.path()).await;
-    }
     let db = state.db_lock();
     target.forget(&db, removed).map_err(|err| err.to_string())?;
     Ok(removed)

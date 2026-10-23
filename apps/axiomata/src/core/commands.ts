@@ -79,7 +79,7 @@ interface EngineCommandWire {
 }
 
 /**
- * Reads the chat harness's commands again. A harness that cannot answer just now (Opencode not up yet) keeps the last
+ * Reads the chat harness's commands again. A harness that cannot answer just now keeps the last
  * list: that is no reason to forget it.
  */
 export async function refreshEngineCommands(): Promise<void> {

@@ -81,7 +81,7 @@
   const engines = $derived($engineCatalog);
 
   /** The engines a project has a master pane for, in the order the tiles show them. */
-  const MASTER_HARNESSES = ["claude_code", "opencode", "glut"] as const satisfies readonly Harness[];
+  const MASTER_HARNESSES = ["glut", "claude_code", "opencode"] as const satisfies readonly Harness[];
   /** The project's master agents by engine: they are the tiles at the top, not cards in the list. */
   const masters = $derived(new Map(agents.filter((a) => a.agent_role === "master").map((a) => [a.harness, a])));
   const listed = $derived(agents.filter((a) => a.agent_role !== "master"));
@@ -530,8 +530,8 @@
      harness's colour is the tile's edge; only a working master glows (the accent rule). */
   .masters {
     display: grid;
-    /* Three engines: side by side where the panel is wide enough, otherwise they wrap. */
-    grid-template-columns: repeat(auto-fit, minmax(calc(112px * var(--ax-ui-scale)), 1fr));
+    /* Two a row, the owner's order: Glut and Claude Code side by side, Opencode below. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--ax-space-3);
     margin-bottom: var(--ax-space-4);
   }
