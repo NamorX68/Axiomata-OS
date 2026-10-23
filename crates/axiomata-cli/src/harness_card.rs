@@ -430,6 +430,7 @@ async fn budget(
         max_tokens: Some(tokens),
         max_usd: money,
         prices,
+        ..Budget::default()
     })
 }
 

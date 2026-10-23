@@ -484,7 +484,9 @@ fn gain(days: Option<u32>) -> Result<()> {
 /// `Error` (stderr's, [`emit`] takes those before this is asked).
 fn render(event: &Event) -> Option<String> {
     let line = match event {
-        Event::Started { model, cwd, tools } => {
+        Event::Started {
+            model, cwd, tools, ..
+        } => {
             format!("▸ {} in {cwd} · {} tools", plain(model), tools.len())
         }
         // The command a prompt came from, before the run's own lines (HS4).

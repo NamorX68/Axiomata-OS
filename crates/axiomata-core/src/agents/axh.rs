@@ -1912,6 +1912,7 @@ mod tests {
             model: "m".into(),
             cwd: ".".into(),
             tools: vec![],
+            prices: None,
         });
         notes.emit(Event::Error {
             message: "the model API answered 500".into(),
