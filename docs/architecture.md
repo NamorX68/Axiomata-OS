@@ -625,12 +625,12 @@ the run's permissions for axh; see below).
   runner's **bare** model — a provider without a base URL (Anthropic today) records a clear
   `Failed`, never a fallback to opencode. The gate is built fresh per run from the skill's
   `allowed_tools` (split by the harness's own `rules_of`) over mode `default` with `Nobody` to
-  ask, narrowed by the skill's own list (`Gate::narrow`); of the `~/.axh` permission rules only `deny`/`ask` join
+  ask, narrowed by the skill's own list (`Gate::narrow`); of the `~/.glut` permission rules only `deny`/`ask` join
   the gate (they only make it stricter), their `allow` and mode feed neither gate nor mode,
   `settings::load` word on the sandbox **and** on the hooks (HS7, B4: the owner's
-  `~/.axh/settings.json` hooks run unattended too — they may only block and fail open; a
+  `~/.glut/settings.json` hooks run unattended too — they may only block and fail open; a
   project's hooks are parsed and left out, the skip note going into the run's `stderr`).
-  MCP servers come from `~/.axh/mcp.json` +
+  MCP servers come from `~/.glut/mcp.json` +
   `.mcp.json` (a project's server never asked about headless), catalog notes go to
   `tracing::warn`, and one `Notes` collector joins event errors, failed servers, refused
   calls and hook notes into the run's `stderr` — events of a subagent (HS8) as
@@ -693,7 +693,7 @@ MCP tools behind code** (45 tools → 15, 16.9k → 3.5k input tokens a step); *
 them direct** and gets `codemode` only when it names it — measured on the calendar digest, whose output *is* its
 data. `[agents.glut] codemode` switches it. **Effort** (`docs/plans/glut-effort.md`): `ModelEndpoint.effort` goes to
 OpenRouter as `reasoning.effort`, elsewhere as `reasoning_effort`; Glut's own sources (`effort:` frontmatter,
-`--effort`, `~/.axh/settings.json`) come first, Axiomata's `/effort` and `[agents.glut] chat_effort|skill_effort` sit
+`--effort`, `~/.glut/settings.json`) come first, Axiomata's `/effort` and `[agents.glut] chat_effort|skill_effort` sit
 on top; the reasoning a provider sends is kept on the message and sent back only after the latest user message.
 **Nothing is cut** (Glut lean, `docs/plans/glut-lean.md`; Glut 2's
 shrinking of old results is gone): a result over 30,000 characters enters the conversation as head + tail with a note,
@@ -705,14 +705,14 @@ output's content-free lines left out (progress, passing tests, hints, colour cod
 one), the raw output in the store; the model's own format flags, pipes and redirections leave it alone. A **chain** of
 simple commands (`cargo fmt && cargo test`) runs with a random mark before each part and is compacted part by part;
 the gate judges the command as written, the marks never reach the hooks, the events or the store. What every
-mechanism spares is an `Event::Lean` and a line in `~/.axh/lean.jsonl` (all Glut runs, the app's too; a known command
-in front of a pipe is counted, not compacted), summed by `axh gain` / `axiomata-cli harness gain`. An **unchanged
+mechanism spares is an `Event::Lean` and a line in `~/.glut/lean.jsonl` (all Glut runs, the app's too; a known command
+in front of a pipe is counted, not compacted), summed by `glut gain` / `axiomata-cli harness gain`. An **unchanged
 re-read** of a file whose result is still in the conversation is answered with a pointer to it, and `read_file` has an
 **outline** mode (`tools/outline.rs`: declarations with line numbers, one line-based reader per Studio language).
 **From Opencode**: `todo_write` (`Event::Todo`), `exit_plan` from Plan mode (the owner's answer switches the gate to the
 run's build mode; the app chat gets a **Plan/Build switch**, `ChatMode::Plan` on Glut, Claude Code and new Opencode
 sessions — a session whose switch no longer matches goes on in a new one), **snapshots** before every changing step in
-a shadow git store (`snapshot.rs`, `~/.axh/snapshots`, `axh undo`), and **the language server's errors** appended to an
+a shadow git store (`snapshot.rs`, `~/.glut/snapshots`, `glut undo`), and **the language server's errors** appended to an
 edit (`diagnostics.rs`, the editor's server table, only servers that never run the project's code — rust-analyzer
 without build scripts, proc macros or `cargo check`).
 
@@ -724,7 +724,7 @@ tiles and their actions — the module names no longer sit at the top — `/them
 harness's own commands** under their own name, or `/glut:` `/oc:` `/cc:` + name where an app name took it. An unknown
 `/x` is refused with the nearest names; the one-shot instruction is `/do <text>` only (it used to be any unknown
 `/text` — a typo cost a turn). Typing `/` opens a list of matches above the bar. The lists come from `chat_commands`:
-Glut's from the owner's `~/.axh/commands/` (never a project's — nothing is trusted in a chat turn), Opencode's from
+Glut's from the owner's `~/.glut/commands/` (never a project's — nothing is trusted in a chat turn), Opencode's from
 `GET /api/command` of the write instance, Claude Code's from the `init` event of the last chat turn — the chat on
 Claude Code runs `stream-json` for that, and shows only the skills, command files and the built-ins measured to work
 in `-p` (`context`, `usage`, `init`). A command turn is `assistant_send` with `command` (`agents::ChatCommand`):
@@ -734,7 +734,7 @@ summary), Opencode's `…/compact`, Claude Code's `/compact`. `/model <id>` hold
 (`ChatExtras.model`, checked against the chat provider's catalog, metered at that model). `/resume` lists the
 conversations `chat_turns` recorded (never a skill run in the same folder). `/undo`: Glut puts the workspace back
 from the snapshot of the conversation's latest turn that changed it — the folder before the undo is kept as a run of
-its own (`axh undo --run undo-…`), since the restore takes back later changes too; Opencode reverts its last message
+its own (`glut undo --run undo-…`), since the restore takes back later changes too; Opencode reverts its last message
 (`…/revert/stage` + `commit`); Claude Code has no rewind in `-p` and says so.
 
 ### Durable Glut runs (`docs/plans/durable.md`, built 2026-10-20)
@@ -748,7 +748,7 @@ decides. In the app (`durable.rs`): every skill/routine run's row is written as 
 `journal` columns, migration 35) and completed at its end; at start a `running` row whose process is gone becomes
 `interrupted`, resumable when its journal is there (`list_runs`' `resumable`). Resume is the owner's click — the Skills
 Deck's "resume / drop", the chat panel's note for a lost Glut chat turn — never by itself. `axh` journals its own runs
-in `~/.axh/runs` (`axh resume`). Journals of runs never resumed are swept after 7 days.
+in `~/.glut/runs` (`glut resume`). Journals of runs never resumed are swept after 7 days.
 
 ### Model providers (`config.agents.providers`)
 
@@ -1502,10 +1502,10 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   their rights, `todo-to-kanban` and `inbox-sort` running on Glut as on Opencode and Claude Code. §5 "Glut rund".
 - **Glut 2 built** (2026-10-20, `docs/plans/glut-2.md`): code mode in QuickJS with MCP behind code in the chat, old
   tool results shrinking over a budget, `todo_write`, Plan/Build with `exit_plan` and the chat's switch, snapshots
-  with `axh undo`, the language server's errors after an edit. §5 "Glut 2".
+  with `glut undo`, the language server's errors after an edit. §5 "Glut 2".
 - **Glut lean built** (2026-10-20, `docs/plans/glut-lean.md`): no cutting (relocation into the run's store), compact
   outputs of frequent commands, unchanged re-reads as a pointer, `read_file` outlines. §5 "Glut 2". Round 2 the same
-  day: chains compacted part by part, the savings counted (`axh gain`), pipes counted only.
+  day: chains compacted part by part, the savings counted (`glut gain`), pipes counted only.
 - **Glut robust built** (2026-10-21, `docs/plans/glut-robust.md`, cards #112 and the "Kürzen" item of #111): a ledger
   of refused calls (the second identical one warns, the third ends the run as `Refused`, 15 in all end it), and
   compaction before the context is full (15 % reserve, capped for small windows; the provider's "too long" compacts
@@ -1523,11 +1523,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   Glut. The Agents panel keeps a plain Opencode tile (the owner's own `opencode`, no team tools); the master tiles are
   Glut and Claude Code side by side, Opencode below.
 - **Watching a Glut session** (2026-10-23, Glut TUI8d): Glut's TUI writes every session's event log itself — a card's
-  channel `glut-events.jsonl` (`Launch::log`), the owner's beside their session in `~/.axh/sessions` — and `glut watch`
+  channel `glut-events.jsonl` (`Launch::log`), the owner's beside their session in `~/.glut/sessions` — and `glut watch`
   follows one read-only. A Glut tile in Flow has **Watch**: `axiomata-cli harness watch --agent N` in a pane of its own,
   its line from Rust (`ide_watch_line`).
 - **A master pane on Glut** (2026-10-23, Glut TUI8c): the Agents panel's third master tile. `axiomata-cli harness
-  master` runs the owner's own Glut (`glut_tui::standalone`, their `~/.axh`) in the project folder, with the team
+  master` runs the owner's own Glut (`glut_tui::standalone`, their `~/.glut`) in the project folder, with the team
   server the studio wrote into the channel beside the owner's MCP servers (`glut --mcp-config`); no spec, no host.
 - **Glut's TUI in a card's pane** (2026-10-23, Glut `docs/plans/glut-tui.md` TUI8a/8b/8e): `glut-tui` is a library
   too (`glut_tui::run` with a `Launch` and a `Host`), and `axiomata-cli harness card` runs it in the pane instead of
@@ -1540,14 +1540,14 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   writes the run's spec and the team server into the channel, the pane runs `axiomata-cli harness card`, asks come in
   the pane and the app at once, the meter and the Flow tiles read Glut's event log, the session's remaining limits
   become the run's budget (new in Glut: `RunConfig.budget`, `FinishReason::Budget`, `axh --max-tokens/--max-usd`,
-  `prices` in `~/.axh/settings.json`), the conversation goes on across turns and a lost turn resumes from its
+  `prices` in `~/.glut/settings.json`), the conversation goes on across turns and a lost turn resumes from its
   journal. Live on DeepSeek V4.1 Flash with a scratch home: four cards worked and reported, an ask answered in the app
   and one in the pane, a killed turn resumed.
 - **Glut effort built** (2026-10-21, `docs/plans/glut-effort.md`): the reasoning level from a command's or skill's
-  `effort:`, `axh --effort`, the chat's `/effort`, `[agents.glut]`, `~/.axh/settings.json`; the model's thinking goes
+  `effort:`, `axh --effort`, the chat's `/effort`, `[agents.glut]`, `~/.glut/settings.json`; the model's thinking goes
   back while it works on the same prompt. §5 "Glut 2".
 - **Durable Glut runs built** (2026-10-20, `docs/plans/durable.md`): a journal per Glut run, resume on the owner's
-  click (skills, routines' skills, chat turns, `axh resume`), replay only of what reads, every run's row from its start
+  click (skills, routines' skills, chat turns, `glut resume`), replay only of what reads, every run's row from its start
   and `interrupted` after a lost process. §5 "Durable Glut runs".
 - **Slash commands in the chat built** (2026-10-20, #108, `docs/plans/slash-commands.md`): three levels, `/tile`,
   `/do`, unknown `/x` refused, the engines' own commands listed and run, `/compact` `/model` `/resume` `/undo` on all
@@ -2054,22 +2054,22 @@ API (OpenRouter, Ollama) with guarded file tools (`axiomata_files::Root`), a sho
 HS2 (2026-10-13): the shell — `bash` in the owner's shell with a profile snapshot, the folder carried
 over, process groups killed on timeout/stop, background jobs (`bash_output`, `kill_shell`), off unless `--allow-bash`.
 HS3a (2026-10-13): permissions in Claude Code's format — allow/ask/deny rules (also a role's), modes
-(default, accept_edits, plan, dont_ask, auto), `~/.axh/` and trusted project `.axh/` settings, asks in the terminal
+(default, accept_edits, plan, dont_ask, auto), `~/.glut/` and trusted project `.glut/` settings, asks in the terminal
 (the app's asker follows with the Studio).
 HS3b (2026-10-13): `bash` runs under macOS Seatbelt — writes only in the working folder, temp folders, package caches
 and git (never its `config`/`hooks`), the owner's secrets and `.env` unreadable, signals only its own processes, the
 network only through the run's proxy, which asks the gate per host (`Network(crates.io)`); the escape
 `dangerously_disable_sandbox` is always asked.
-HS4 (2026-10-13): slash commands — `~/.axh/commands/` plus a trusted project's `.axh/commands/`, folders naming the
+HS4 (2026-10-13): slash commands — `~/.glut/commands/` plus a trusted project's `.glut/commands/`, folders naming the
 command (`a/b/c/x.md` is `/a/b/c`, depth ≤ 3), YAML frontmatter by hand (`model`, `allowed-tools`, `disable-model-invocation`),
 `$ARGUMENTS`/`$1…` substitution, a `command` event, the built-ins `/help` and `/permissions`, and `allowed-tools`
 narrowing the run's gate only (never widening it).
-HS5 (2026-10-13): the MCP client — servers from `~/.axh/mcp.json` and the project's `.mcp.json` (the owner's win),
-a project's server only once the owner approved that very config (SHA-256 in `~/.axh/mcp-approved.json`), transports
+HS5 (2026-10-13): the MCP client — servers from `~/.glut/mcp.json` and the project's `.mcp.json` (the owner's win),
+a project's server only once the owner approved that very config (SHA-256 in `~/.glut/mcp-approved.json`), transports
 stdio (JSON-RPC lines, child process in its own group) and Streamable HTTP (JSON or SSE, `Mcp-Session-Id` kept, headers
 with `${VAR}`, https or loopback only), the tools offered as `mcp__<server>__<tool>` and judged by rules of that name;
 servers run outside the sandbox, a failed one is left out and the run goes on.
-HS6 (2026-10-13): skills in the harness — a `SKILL.md` catalog (`~/.axh/skills`, a trusted project's `.axh/skills`,
+HS6 (2026-10-13): skills in the harness — a `SKILL.md` catalog (`~/.glut/skills`, a trusted project's `.glut/skills`,
 folders the caller passes; YAML frontmatter by `gray_matter`, everything unknown ignored), two ways to use one: a
 skill **as the run** (`--skill <name>`, its body the instructions, `allowed_tools` narrowing, `model` overriding,
 `timeout_secs` capping, `prepend_files` inlined from the working folder) and the `skill` **tool** the model calls
@@ -2079,12 +2079,12 @@ HS6b (2026-10-14): skills through the own harness **in the core** — `backend: 
 core built as the user message, recorded like every other run (`runs.backend = "axh"`, no migration) and metered
 from the token counts × the price table. The endpoint is the skill provider as it is — without a `base_url`
 (Anthropic, today's skill default) the run records a clear `Failed` naming it, never a silent hop to opencode;
-MCP servers come only from `~/.axh/mcp.json` + the project's `.mcp.json`, never from `opencode.json`; the gate is
-built fresh per run from the skill's `allowed_tools` over mode default with nobody to ask, the `~/.axh`
+MCP servers come only from `~/.glut/mcp.json` + the project's `.mcp.json`, never from `opencode.json`; the gate is
+built fresh per run from the skill's `allowed_tools` over mode default with nobody to ask, the `~/.glut`
 permission rules feeding neither; no bundled skill switched — opt-in per frontmatter. The allowed dependency
 direction: core → harness, the harness still knowing nothing of core.
 HS7 (2026-10-14): hooks, Claude Code's four events — `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` — in the
-owner's `~/.axh/settings.json` (Claude's shape, `type: "command"`, an unanchored matcher regex against the tool's
+owner's `~/.glut/settings.json` (Claude's shape, `type: "command"`, an unanchored matcher regex against the tool's
 name and its Claude alias), the payload as JSON on stdin (`session_id`, `cwd`, `hook_event_name` + the event's
 fields) and the answers read Claude's way: `permissionDecision`/legacy `decision`, exit 2's stderr, plain stdout as
 `SessionStart` context. Hooks **veto only** — a block gives the model `error: <reason>` and nothing runs, `allow`
@@ -2105,7 +2105,7 @@ wraps whatever the subagent judged but did not get to report — nothing is lost
 tokens are summed into the run's usage. Every nested event arrives wrapped as `Event::Sub { depth, event }`
 (JSON: `…, "inner": {…}`): the CLI indents it by depth and prints the subagent's own finished line as
 `↳ subagent · …`, the core's `Notes` prefixes `subagent: `. In the core the tool is offered only to a skill that
-names `task` in its `allowed_tools` — the same declaration is that run's whole permission set (B3), and `~/.axh`
+names `task` in its `allowed_tools` — the same declaration is that run's whole permission set (B3), and `~/.glut`
 rules feed neither. Next: sessions over several turns, streaming and the Anthropic client, each planned on its own
 (`docs/plans/harness.md`).
 

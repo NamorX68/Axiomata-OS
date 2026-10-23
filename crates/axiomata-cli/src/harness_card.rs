@@ -99,12 +99,12 @@ pub async fn card(core: Arc<AxiomataCore>) -> Result<()> {
             allow: spec.allow.clone(),
             ask: Vec::new(),
             deny: spec.deny.clone(),
-            // The project's own `.axh/` rules never widen a session the studio started.
+            // The project's own `.glut/` rules never widen a session the studio started.
             trusted: false,
         },
         owner_trust: false,
         instructions: Instructions::Given(instructions(&spec)),
-        // The team server alone: the session's own file, never the owner's `~/.axh/mcp.json` nor the project's.
+        // The team server alone: the session's own file, never the owner's `~/.glut/mcp.json` nor the project's.
         servers: Servers::Only(spec.mcp_config.clone()),
         // The owner's skills, as a chat turn has them; a project's own only count in a trusted folder, which this is not.
         skill_dirs: Some(vec![axiomata_core::paths::global_skills_dir()]),

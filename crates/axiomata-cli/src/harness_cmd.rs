@@ -47,7 +47,7 @@ pub enum HarnessAction {
         agent: i64,
     },
     /// What Glut lean saved (`docs/plans/glut-lean.md`, N9): compacted outputs, unchanged re-reads and relocated
-    /// results per kind — every Glut run's, from `~/.axh/lean.jsonl`; the same table as `axh gain`.
+    /// results per kind — every Glut run's, from `~/.glut/lean.jsonl`; the same table as `glut gain`.
     Gain {
         /// Only the last N days.
         #[arg(long)]
@@ -65,7 +65,7 @@ pub struct RunFlags {
     #[arg(long)]
     model: Option<String>,
     /// How hard the model reasons: none, minimal, low, medium, high, xhigh or max. Otherwise a skill's or a
-    /// command's `effort:`, else `[agents.glut] skill_effort`, else `effort` in ~/.axh/settings.json.
+    /// command's `effort:`, else `[agents.glut] skill_effort`, else `effort` in ~/.glut/settings.json.
     #[arg(long)]
     effort: Option<String>,
     /// The folder the run works in.
@@ -98,8 +98,8 @@ pub struct RunFlags {
     /// A folder of skills beside the app's `~/.axiomata/skills` (HS6, K2); repeatable.
     #[arg(long)]
     skill_dir: Vec<PathBuf>,
-    /// The prompt — extra text beside `--skill`, or a slash command (`/review src/`) of `~/.axh/commands/`
-    /// and, in a trusted folder, the project's `.axh/commands/` (HS4). Without `--skill` a prompt is required;
+    /// The prompt — extra text beside `--skill`, or a slash command (`/review src/`) of `~/.glut/commands/`
+    /// and, in a trusted folder, the project's `.glut/commands/` (HS4). Without `--skill` a prompt is required;
     /// with one it defaults to "Run the skill.".
     prompt: Option<String>,
 }
@@ -170,7 +170,7 @@ pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> 
     let mut sink = SharedSink::new(inner);
     // Skills (HS6, K2): the app's own `~/.axiomata/skills` (this CLI knows where that is, the harness does not),
     // the folders of `--skill-dir` and — in a folder the owner trusted once, the same trust the project's allow
-    // rules need — the project's `.axh/skills`. A skill that cannot be used is a note, never an error (K3).
+    // rules need — the project's `.glut/skills`. A skill that cannot be used is a note, never an error (K3).
     let mut skill_dirs = vec![axiomata_core::paths::global_skills_dir()];
     skill_dirs.extend(skill_dir);
     let (catalog, notes) = skills::Catalog::load(&home, &cwd, trusted, &skill_dirs);
@@ -195,10 +195,10 @@ pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> 
     run_config.codemode = config.agents.glut.codemode;
     // G7 (revised), as the app: a skill's declared MCP tools stay direct.
     run_config.mcp_behind_code = skill.is_none();
-    // Glut 2 (D): snapshots before changes, in the harness's own store, for `axh undo`.
-    run_config.snapshots = Some(home.join(".axh").join("snapshots"));
+    // Glut 2 (D): snapshots before changes, in the harness's own store, for `glut undo`.
+    run_config.snapshots = Some(home.join(".glut").join("snapshots"));
     // Glut lean (N9): what the run saves is counted with the app's runs.
-    run_config.savings = Some(home.join(".axh").join(glut::lean::FILE));
+    run_config.savings = Some(home.join(".glut").join(glut::lean::FILE));
     // The flag, else the app's skill effort, else the harness's own settings; a skill's or a command's `effort:`
     // still wins in `prepare`.
     endpoint.effort = endpoint
@@ -269,7 +269,7 @@ pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> 
 /// The run's gate (HS3a): the settings files, the flags and a role's rules; asks in the terminal when there is one.
 /// Beside it the home folder and whether the project counts as trusted — the skills and the command registry of HS4
 /// are read with the same trust (C1), a project's commands count where its allow rules count.
-/// A project with `.axh/` settings in a folder not yet trusted is asked about first (P5).
+/// A project with `.glut/` settings in a folder not yet trusted is asked about first (P5).
 fn gate(
     cwd: &std::path::Path,
     mode: Option<String>,
@@ -307,7 +307,7 @@ fn gate(
             // What trusting would let in, shown before the question; the folder's name may hold anything, so it is
             // shown as plain text.
             let folder = printable(&cwd.display().to_string());
-            eprintln!("{folder} has its own harness settings (.axh/). Trusting it adds:");
+            eprintln!("{folder} has its own harness settings (.glut/). Trusting it adds:");
             for rule in &allow {
                 eprintln!("  allow {}", printable(rule));
             }
@@ -466,13 +466,13 @@ impl EventSink for Readable {
     }
 }
 
-/// `harness gain`: the count of savings as a table — from the folder `harness run` counts into (`$HOME/.axh`).
+/// `harness gain`: the count of savings as a table — from the folder `harness run` counts into (`$HOME/.glut`).
 fn gain(days: Option<u32>) -> Result<()> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|home| home.is_absolute())
         .context("HOME is not set to an absolute folder")?;
-    let path = home.join(".axh").join(glut::lean::FILE);
+    let path = home.join(".glut").join(glut::lean::FILE);
     let table =
         glut::lean::report(&path, days).with_context(|| format!("reading {}", path.display()))?;
     print!("{table}");
@@ -569,7 +569,7 @@ fn render(event: &Event) -> Option<String> {
         // Glut TUI3b (T10): a message the owner sent while the run worked, taken in before this step.
         Event::Steered { text, .. } => format!("› {}", plain(text)),
         Event::Snapshot { turn, run, .. } => format!(
-            "⟲ snapshot before step {turn} · axh undo --run {}",
+            "⟲ snapshot before step {turn} · glut undo --run {}",
             plain(run)
         ),
         // The readable lines show the whole answer once; its pieces, and the model's thinking, are for a `--json`

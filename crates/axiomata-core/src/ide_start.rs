@@ -149,7 +149,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             ),
         }),
         Harness::Glut if ready.agent.is_master() => {
-            // The master (TUI8c): the owner's own Glut — their `~/.axh`, their servers, their sessions — in the real
+            // The master (TUI8c): the owner's own Glut — their `~/.glut`, their servers, their sessions — in the real
             // folder, with the team server added; no card spec, so nothing of a card's is left to read.
             crate::glut_card::forget(&roots, ready.agent.id);
             let (cli, mcp) = agent_entry::wire_glut_master(&roots, &ready.agent);

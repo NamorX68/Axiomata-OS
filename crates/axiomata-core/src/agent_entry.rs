@@ -508,10 +508,10 @@ fn grantable(rule: &str) -> bool {
 /// which the role's own `git diff:*`/`git show:*` would take in), and write its own rules — `acceptEdits` takes edits
 /// without asking, and a
 /// session that can write `.claude/settings*.json` or a `.mcp.json` of its worktree could widen its own rights next
-/// time, and one that writes `~/.axh/mcp.json` would start a server of its own in every app instance.
+/// time, and one that writes `~/.glut/mcp.json` would start a server of its own in every app instance.
 const CLAUDE_CARD_DENIED: &str = concat!(
     "Bash(git push),Bash(git push *),Bash(git * push),Bash(git * push *),",
-    "Bash(git * --output*),Bash(git * --no-index*),Edit(.claude/**),Edit(.mcp.json),Edit(~/.axh/**)"
+    "Bash(git * --output*),Bash(git * --no-index*),Edit(.claude/**),Edit(.mcp.json),Edit(~/.glut/**)"
 );
 
 /// What a worker in the owner's auto mode is refused on top of [`CLAUDE_CARD_DENIED`]: the plain shell forms of
@@ -520,7 +520,7 @@ const CLAUDE_CARD_DENIED: &str = concat!(
 const CLAUDE_AUTO_DENIED: &str = concat!(
     "Bash(*.claude/*),Bash(*.mcp.json*),Bash(*opencode.json*),Bash(*.opencode/*),",
     "Bash(*.git/hooks*),Bash(*core.hooksPath*),",
-    "Bash(axiomata-cli*),Bash(*/axiomata-cli *),Bash(*/axiomata-cli),Bash(*sqlite3*),Bash(*.axiomata/*),Bash(*.axh/*),",
+    "Bash(axiomata-cli*),Bash(*/axiomata-cli *),Bash(*/axiomata-cli),Bash(*sqlite3*),Bash(*.axiomata/*),Bash(*.glut/*),",
     "Bash(*git push*)"
 );
 
@@ -652,7 +652,7 @@ fn wire_claude_with(
 }
 
 /// What a card session on Glut may never do, whatever the role says: [`CLAUDE_CARD_DENIED`] in Glut's spelling. Glut's
-/// file tools stay in the worktree and protect its configuration files themselves, and its sandbox hides `~/.axh` and
+/// file tools stay in the worktree and protect its configuration files themselves, and its sandbox hides `~/.glut` and
 /// `~/.axiomata` from every command, so the deny list only has to carry what a command could still do in the worktree.
 const GLUT_CARD_DENIED: [&str; 9] = [
     "Bash(git push)",
@@ -667,7 +667,7 @@ const GLUT_CARD_DENIED: [&str; 9] = [
 ];
 
 /// What a worker in the owner's auto mode is refused on Glut on top of [`GLUT_CARD_DENIED`]: the shell forms of
-/// [`CLAUDE_AUTO_DENIED`], all of them — the sandbox hides `~/.axiomata` and `~/.axh` too, but a machine without it,
+/// [`CLAUDE_AUTO_DENIED`], all of them — the sandbox hides `~/.axiomata` and `~/.glut` too, but a machine without it,
 /// or an owner who turned it off, must not leave the auto mode with fewer locks than Claude Code's.
 const GLUT_AUTO_DENIED: [&str; 11] = [
     "Bash(*.claude/*)",
@@ -678,7 +678,7 @@ const GLUT_AUTO_DENIED: [&str; 11] = [
     "Bash(*axiomata-cli*)",
     "Bash(*sqlite3*)",
     "Bash(*.axiomata/*)",
-    "Bash(*.axh/*)",
+    "Bash(*.glut/*)",
     "Bash(*.opencode/*)",
     "Bash(*git push*)",
 ];

@@ -9,12 +9,12 @@
 //! sandbox and MCP. What arrives here is an [`AgentRequest`]; its
 //! `allowed_tools` become the run's whole permission set (B3): what the skill
 //! declares is allowed, what it does not name is refused before anything is
-//! asked, nobody answers a question, and the settings files of `~/.axh` never
+//! asked, nobody answers a question, and the settings files of `~/.glut` never
 //! widen the gate — their `deny` and `ask` rules still hold (an `ask` is a
 //! refusal here, since nobody answers), their `allow` rules do not count.
 //! HS8 (B3): the `task` tool is offered only for a skill that names it in its
 //! `allowed_tools` — the same declaration feeds the gate and the tool list.
-//! HS7 (B4): the owner's hooks from `~/.axh/settings.json` run here too —
+//! HS7 (B4): the owner's hooks from `~/.glut/settings.json` run here too —
 //! they may only block, never permit (B2), fail open (B3), and a project's
 //! hooks are parsed and left out (B1), said so in the run's `stderr`.
 //!
@@ -66,7 +66,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         request.model.clone(),
         request.effort.as_deref(),
     )?;
-    // The harness's home (`~/.axh`, overridable as `AXH_HOME`): its settings,
+    // The harness's home (`~/.glut`, overridable as `GLUT_HOME`): its settings,
     // approvals, MCP config and the owner's own `skills/` folder live there.
     let home = settings::home_dir()?;
     // D5: one of the four global agent slots, taken before the tools are
@@ -103,7 +103,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     // cancels a recorded run from here — the timeout ends it.
     let cancel = Cancel::new();
     let started = Instant::now();
-    // Unset by the run and by `[agents.glut]`: the harness's own `effort` from `~/.axh/settings.json` (E1).
+    // Unset by the run and by `[agents.glut]`: the harness's own `effort` from `~/.glut/settings.json` (E1).
     let model = OpenAiCompat::new(ModelEndpoint {
         effort: endpoint.effort.or(harness.effort),
         ..endpoint
@@ -193,7 +193,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
 /// after an answer. An id that names no conversation (an Opencode or Claude Code one after a harness switch, a
 /// removed file) starts a new one, as on the other harnesses. The vault's `AGENTS.md` and the module manifest are
 /// the run's instructions. The rights: the turn's declared `allowed_tools` (a connector's instruct turn), else — with
-/// tools pre-approved — everything the owner's `~/.axh` rules do not deny (Opencode's unattended `*` allow), else
+/// tools pre-approved — everything the owner's `~/.glut` rules do not deny (Opencode's unattended `*` allow), else
 /// reads only. A turn that failed or answered nothing is an [`AxiomataError::AgentApi`].
 pub(crate) async fn chat(
     request: ChatRequest,
@@ -474,7 +474,7 @@ pub fn discard_chat_turn(run: &str) -> Result<(), AxiomataError> {
 }
 
 /// The runs of each chat conversation that took a snapshot, newest last: what `/undo` puts back, one turn at a time
-/// (#108, S9). Kept for this process only — a turn of an earlier app session is undone with `axh undo`.
+/// (#108, S9). Kept for this process only — a turn of an earlier app session is undone with `glut undo`.
 static UNDO_RUNS: Mutex<Vec<(String, Vec<String>)>> = Mutex::new(Vec::new());
 /// Most conversations, and most turns of one, `/undo` remembers; the oldest are forgotten.
 const MAX_UNDO_SESSIONS: usize = 32;
@@ -544,11 +544,11 @@ pub(crate) async fn undo_last(session_id: &str, cwd: &Path) -> Result<String, Ax
                 .to_owned(),
         )
     })?;
-    let root = settings::home_dir()?.join(".axh").join("snapshots");
+    let root = settings::home_dir()?.join(".glut").join("snapshots");
     let cwd = cwd.to_owned();
     let restored_run = run.clone();
     // The folder goes back as a whole, so whatever changed in it after the turn goes too: it is kept first, as a run
-    // of its own, and `axh undo --run <that>` brings it back.
+    // of its own, and `glut undo --run <that>` brings it back.
     let kept = tokio::task::spawn_blocking(move || -> Result<String, String> {
         let kept = format!("undo-{restored_run}");
         let mut before = glut::snapshot::Snapshots::open(&root, &cwd, &kept)?;
@@ -562,7 +562,7 @@ pub(crate) async fn undo_last(session_id: &str, cwd: &Path) -> Result<String, Ax
     forget_undo(session_id, &run);
     Ok(format!(
         "Undid the file changes of the last turn. The folder as it was before this undo is kept: \
-         `axh undo --run {kept}` brings it back."
+         `glut undo --run {kept}` brings it back."
     ))
 }
 
@@ -587,7 +587,7 @@ pub(crate) fn session_title(id: &str) -> Option<String> {
     )
 }
 
-/// The owner's command files a chat on Glut offers (#108, S7): `~/.axh/commands/` only — a project's own files count
+/// The owner's command files a chat on Glut offers (#108, S7): `~/.glut/commands/` only — a project's own files count
 /// only where its folder is trusted, and nothing is trusted in an unattended turn (B3). The built-ins are the app's
 /// own `/help`, `/clear`, `/model`, `/compact` there, so they are left out.
 ///
@@ -754,7 +754,7 @@ struct Rights<'a> {
     run_kind: &'static str,
     declared: Vec<Rule>,
     mode: Mode,
-    /// Refusals of the run's own beside the owner's `~/.axh` ones — a read run's git commands that reach beyond the
+    /// Refusals of the run's own beside the owner's `~/.glut` ones — a read run's git commands that reach beyond the
     /// folder.
     deny: Vec<Rule>,
 }
@@ -766,9 +766,9 @@ struct Harness {
     tools: glut::Toolbox,
     notes: Notes,
     sink: SharedSink,
-    /// The owner's `effort` in `~/.axh/settings.json`: the run's when neither the run nor `[agents.glut]` names one.
+    /// The owner's `effort` in `~/.glut/settings.json`: the run's when neither the run nor `[agents.glut]` names one.
     effort: Option<Effort>,
-    /// The owner's compaction switch and context windows in `~/.axh/settings.json` (#111, K2/K6).
+    /// The owner's compaction switch and context windows in `~/.glut/settings.json` (#111, K2/K6).
     compact_auto: bool,
     context_windows: std::collections::HashMap<String, u32>,
 }
@@ -801,7 +801,7 @@ impl Harness {
         // own short system prompt stays as it is.
         let mut run_config = RunConfig::new(cwd);
         run_config.timeout = timeout;
-        // #112: the owner's limits in `~/.axh/settings.json`, as the CLI takes them — Axiomata has none of its own.
+        // #112: the owner's limits in `~/.glut/settings.json`, as the CLI takes them — Axiomata has none of its own.
         run_config.refusals = loaded.refusals;
         run_config.skill_dirs = skill_dirs.to_vec();
         // HS8 (B3): the `task` tool exists only for a run that names it in its
@@ -813,10 +813,10 @@ impl Harness {
         // A declared skill gets `codemode` only when it names it, as `task` (HS8): measured on calendar-digest
         // (2026-10-20), a digest's model reached for scripts it did not need — ~89k input tokens on average with
         // the tool, ~57k without.
-        // Glut 2 (D): snapshots before changes, in the harness's own store (`axh undo` puts a folder back).
-        run_config.snapshots = Some(home.join(".axh").join("snapshots"));
-        // Glut lean (N9): what the run saves is counted beside `axh`'s and the Studio's runs, for `axh gain`.
-        run_config.savings = Some(home.join(".axh").join(glut::lean::FILE));
+        // Glut 2 (D): snapshots before changes, in the harness's own store (`glut undo` puts a folder back).
+        run_config.snapshots = Some(home.join(".glut").join("snapshots"));
+        // Glut lean (N9): what the run saves is counted beside `axh`'s and the Studio's runs, for `glut gain`.
+        run_config.savings = Some(home.join(".glut").join(glut::lean::FILE));
         run_config.codemode = config.agents.glut.codemode
             && (rights.declared.is_empty()
                 || rights
@@ -838,8 +838,8 @@ impl Harness {
         let notes = Notes::default();
         if loaded.project_hooks_skipped {
             notes.push(
-                "the project's own .axh/ hooks are not run: only the owner's \
-                 ~/.axh/settings.json hooks run"
+                "the project's own .glut/ hooks are not run: only the owner's \
+                 ~/.glut/settings.json hooks run"
                     .to_owned(),
             );
         }
@@ -1079,7 +1079,7 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
 /// The model endpoint of an `axh` run (B1): the base URL and key of `role`'s
 /// provider (the skill provider for a run, the chat provider for a chat turn),
 /// and the run's model — bare, as the API names it (D2). The effort is the run's own (a skill's `effort:`, a
-/// chat's `/effort`), else `[agents.glut]`'s for the role; unset, the harness's `~/.axh/settings.json` decides
+/// chat's `/effort`), else `[agents.glut]`'s for the role; unset, the harness's `~/.glut/settings.json` decides
 /// ([`Harness::prepare`]).
 ///
 /// # Errors
@@ -1153,7 +1153,7 @@ pub(crate) fn endpoint_on(
         .ok_or_else(|| {
             gap(match role {
                 ProviderRole::Skill => format!(
-                    "no model for an axh run: set `model:` in the skill's frontmatter \
+                    "no model for an glut run: set `model:` in the skill's frontmatter \
                      or the skill model of {}",
                     id.as_str()
                 ),
@@ -1955,13 +1955,13 @@ mod tests {
         assert_eq!(Notes::default().join(None), "");
     }
 
-    /// Isolated `AXIOMATA_HOME` **and** `AXH_HOME` — so the harness's own
+    /// Isolated `AXIOMATA_HOME` **and** `GLUT_HOME` — so the harness's own
     /// settings, approvals, MCP config and skill folder are scratch ones and
-    /// never the owner's real `~/.axh` — plus a migrated database.
+    /// never the owner's real `~/.glut` — plus a migrated database.
     struct Fixture {
         _guard: std::sync::MutexGuard<'static, ()>,
         home: PathBuf,
-        axh_home: PathBuf,
+        glut_home: PathBuf,
         config: Config,
         db: Mutex<Connection>,
     }
@@ -1971,14 +1971,14 @@ mod tests {
             let guard = ENV_MUTEX.lock().unwrap();
             let home = unique_temp_dir(&format!("axiomata-test-axh-{tag}-home"));
             let cwd = unique_temp_dir(&format!("axiomata-test-axh-{tag}-cwd"));
-            let axh_home = unique_temp_dir(&format!("axiomata-test-axh-{tag}-axh"));
+            let glut_home = unique_temp_dir(&format!("axiomata-test-axh-{tag}-axh"));
             std::fs::create_dir_all(home.join("logs")).unwrap();
             std::fs::create_dir_all(&cwd).unwrap();
-            std::fs::create_dir_all(&axh_home).unwrap();
+            std::fs::create_dir_all(&glut_home).unwrap();
             // SAFETY: serialized by `guard`, see `paths::tests`.
             unsafe {
                 std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
-                std::env::set_var("AXH_HOME", &axh_home);
+                std::env::set_var("GLUT_HOME", &glut_home);
             }
             let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
             let config = Config {
@@ -1988,7 +1988,7 @@ mod tests {
             Self {
                 _guard: guard,
                 home,
-                axh_home,
+                glut_home,
                 config,
                 db: Mutex::new(db),
             }
@@ -2191,7 +2191,7 @@ mod tests {
     #[tokio::test]
     async fn a_glut_chat_runs_a_command_file_and_compacts() {
         let mut fx = Fixture::new("chat-commands");
-        let commands = fx.axh_home.join(".axh").join("commands");
+        let commands = fx.glut_home.join(".glut").join("commands");
         std::fs::create_dir_all(&commands).unwrap();
         std::fs::write(commands.join("greet.md"), "Say hello to $ARGUMENTS.\n").unwrap();
         let api = FakeApi::spawn_each(vec![
@@ -2382,7 +2382,7 @@ mod tests {
         assert_eq!(kept, 0);
     }
 
-    /// A pre-approved chat turn runs in the owner's auto mode — but the owner's `~/.axh` deny rules still refuse,
+    /// A pre-approved chat turn runs in the owner's auto mode — but the owner's `~/.glut` deny rules still refuse,
     /// and an ask is refused since nobody answers.
     #[tokio::test]
     async fn a_chat_turn_in_auto_mode_still_obeys_the_owners_deny_and_ask_rules() {
@@ -2475,7 +2475,7 @@ mod tests {
     /// through the own harness against a fake OpenAI-compatible endpoint, and
     /// the `runs` row carries the backend, the provider, the bare model, the
     /// tokens and the metered cost — no model spend, no network, no real
-    /// `~/.axh`.
+    /// `~/.glut`.
     #[tokio::test]
     async fn an_axh_skill_runs_end_to_end_and_lands_in_the_runs_table() {
         let mut fx = Fixture::new("e2e");
@@ -2689,15 +2689,15 @@ mod tests {
             "---\nname: axh-hooked\ndescription: d\nbackend: axh\n---\n\
              Look at a.txt, then say ok.\n",
         );
-        std::fs::create_dir_all(fx.axh_home.join(".axh")).unwrap();
+        std::fs::create_dir_all(fx.glut_home.join(".glut")).unwrap();
         std::fs::write(
-            fx.axh_home.join(".axh/settings.json"),
+            fx.glut_home.join(".glut/settings.json"),
             r#"{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo 'hook says no' >&2; exit 2"}]}]}}"#,
         )
         .unwrap();
-        std::fs::create_dir_all(fx.config.workspace_root.join(".axh")).unwrap();
+        std::fs::create_dir_all(fx.config.workspace_root.join(".glut")).unwrap();
         std::fs::write(
-            fx.config.workspace_root.join(".axh/settings.json"),
+            fx.config.workspace_root.join(".glut/settings.json"),
             r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}]}}"#,
         )
         .unwrap();
@@ -2733,7 +2733,7 @@ mod tests {
             record.stderr
         );
         assert!(
-            record.stderr.contains(".axh/ hooks are not run"),
+            record.stderr.contains(".glut/ hooks are not run"),
             "and so did the project's hooks being left out: {}",
             record.stderr
         );

@@ -332,7 +332,7 @@ pub struct GlutSettings {
     #[serde(default = "default_true")]
     pub codemode: bool,
     /// How hard the chat's model reasons on Glut (`docs/plans/glut-effort.md`, E1); unset: `effort` in
-    /// `~/.axh/settings.json`, else the provider's default. A chat's `/effort` wins for its conversation.
+    /// `~/.glut/settings.json`, else the provider's default. A chat's `/effort` wins for its conversation.
     #[serde(
         default,
         deserialize_with = "known_effort",

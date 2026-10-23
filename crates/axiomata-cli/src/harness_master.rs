@@ -1,5 +1,5 @@
 //! `axiomata-cli harness master`: a project's Glut master in its pane (`../Axiomata-Glut/docs/plans/glut-tui.md`,
-//! TUI8c) — the owner's own `glut`, their `~/.axh` (providers, rules, skills, sessions), in the real project folder,
+//! TUI8c) — the owner's own `glut`, their `~/.glut` (providers, rules, skills, sessions), in the real project folder,
 //! with the team server beside the owner's MCP servers (`glut --mcp-config`). No card, no budget, no worktree, no host
 //! taking part: the studio only wrote the team server's file into the session's channel, found by the session's id.
 

@@ -33,7 +33,7 @@ pub async fn watch(core: &AxiomataCore, agent_id: i64) -> Result<()> {
 }
 
 /// The log session `agent` writes: a card's in its channel `channel`, a master's the newest of the owner's sessions in
-/// the project `folder` (`home` holds `~/.axh`).
+/// the project `folder` (`home` holds `~/.glut`).
 fn log_of(agent: &Agent, home: &Path, folder: &Path, channel: &Path) -> Result<PathBuf> {
     if agent.harness != Harness::Glut {
         bail!("only a Glut session keeps a log to watch");

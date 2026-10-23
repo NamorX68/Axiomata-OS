@@ -27,13 +27,13 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (card #75). Built since: the ⌘K spotlight, Orbit + 2Brain in one view, and the app-wide UI/UX round "Glut + Hex"
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
-  the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness Glut (`glut` / `axh`, since 2026-10-21 in its own repository `../Axiomata-Glut`)
+  the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness Glut (`glut`, since 2026-10-21 in its own repository `../Axiomata-Glut`; `axh` and `~/.axh` became `glut` and `~/.glut` on 2026-10-23, TUI T43)
   (#37, `docs/plans/harness.md`; HS1–HS8 built), made one to keep a role on in "Glut rund" (2026-10-19,
   `docs/plans/glut-round.md`: web fetch/search, fewer tokens, cached tokens metered apart, streaming, skills that name
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat,
   todo/plan-build/snapshots/LSP errors), and "Glut lean" (2026-10-20, `docs/plans/glut-lean.md`: nothing cut, compact
   outputs of frequent commands — a chain part by part —, unchanged re-reads as a pointer, `read_file` outlines, the
-  savings counted in `~/.axh/lean.jsonl`, `axh gain`), and "Glut effort" (2026-10-21, `docs/plans/glut-effort.md`:
+  savings counted in `~/.glut/lean.jsonl`, `glut gain`), and "Glut effort" (2026-10-21, `docs/plans/glut-effort.md`:
   the reasoning level, Glut's own sources first; levels per model in the catalog, the chat bar's effort switch), and
   "Glut robust" (2026-10-21, `docs/plans/glut-robust.md`: #112 a refused call warns once and ends the run the third
   time, #111 the run compacts its older steps itself before the window is full), and "Glut on cards" (2026-10-21,
@@ -100,7 +100,7 @@ and each module's manual ↻ still runs regardless (`core/devFlags.ts`).
 
 ## Architecture — traps worth knowing before you touch things
 
-- **Two crates live in repositories of their own, beside this one** (2026-10-21): Glut — the harness, `glut` and `axh`
+- **Two crates live in repositories of their own, beside this one** (2026-10-21): Glut — the harness and its program `glut`
   — in `../Axiomata-Glut`, and the guarded file service `axiomata-files` in `../Axiomata-Foundation` (shared with Glut
   and, later, the Studio as an app of its own). Both are path dependencies in the root `Cargo.toml`, so they must be
   checked out there; a change to either is made, tested and committed in its own repository, and takes effect here at
@@ -138,7 +138,7 @@ from the code itself:
   `ide_agents.opencode_session` and its frozen migration stay in the schema's history. Docs, if Opencode is ever
   needed again: https://opencode.ai/v2/docs, *not* `/docs` (v1).
 - **Connector skills reach MCP through Glut** — the digests run on `agents.skill_harness` (Glut), which starts the MCP
-  servers of `~/.axh/mcp.json` (the `apple-mail` / `apple-reminders` servers); the skill's `allowed_tools` are the run's
+  servers of `~/.glut/mcp.json` (the `apple-mail` / `apple-reminders` servers); the skill's `allowed_tools` are the run's
   whole rights.
 - **Routines**: cron is the `cron` crate's **6–7 field, seconds-first** format
   (`0 */2 * * * *`), not 5-field crontab. `add`/`update`/`delete` all exist (`update` is a
@@ -233,11 +233,11 @@ from the code itself:
   (`docs/plans/harness-choice.md`; the chat takes `agents.chat_harness`) — else `claude_code` (`claude -p`
   on the app's own login folder `~/.axiomata/claude`, never `~/.claude`; Anthropic only; `--setting-sources ""` —
   a folder's `.claude/settings.json` runs hooks/env even untrusted — with the folder's `AGENTS.md` handed over by the
-  app, `--strict-mcp-config` with `~/.axh/mcp.json` as a 0600 file; the skill's `allowed_tools` are its whole rights) |
+  app, `--strict-mcp-config` with `~/.glut/mcp.json` as a 0600 file; the skill's `allowed_tools` are its whole rights) |
   `ollama` | `axh` (the own harness, HS6b — needs a skill provider **with a `base_url`**
   (open_router/ollama), else the run records a clear `Failed`, never a silent hop elsewhere;
-  MCP servers come from `~/.axh/mcp.json` + `.mcp.json`, **never** `opencode.json`; the skill's
-  `allowed_tools` become the run's whole permissions — `~/.axh` `deny`/`ask` still beat them, `~/.axh` `allow`
+  MCP servers come from `~/.glut/mcp.json` + `.mcp.json`, **never** `opencode.json`; the skill's
+  `allowed_tools` become the run's whole permissions — `~/.glut` `deny`/`ask` still beat them, `~/.glut` `allow`
   never widens them);
   the only other relevant field is `prepend_files: ["rel/path.md"]` (workspace files
   inlined into the prompt as `## Context file:` blocks framed as untrusted data; missing = skipped,
@@ -288,5 +288,5 @@ from the code itself:
   TUI itself (`Launch::log`, TUI8d), with `owner` and `session` lines beside the run's events — a reader of it skips
   what it does not know; a Flow tile's **Watch** follows it read-only (`axiomata-cli harness watch --agent N`).
 - **Glut becomes an application of its own** (owner, 2026-10-21): a new Glut setting starts in the harness — its own
-  `~/.axh/settings.json`, an `axh` flag or frontmatter — and Axiomata's setting only passes a value on top
+  `~/.glut/settings.json`, a `glut run` flag or frontmatter — and Axiomata's setting only passes a value on top
   (`docs/plans/glut-effort.md` E1 is the pattern). Never a Glut option only `axiomata-core` can reach.

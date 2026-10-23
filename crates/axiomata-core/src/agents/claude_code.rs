@@ -7,7 +7,7 @@
 //! trusted — a run that may write the vault could otherwise start a process in the next one. The working folder's
 //! `AGENTS.md` (the vault's router) is handed over by the app instead, with the run's own context, as one appended
 //! system prompt (Claude Code keeps only the last `--append-system-prompt-file`, measured). MCP servers are the
-//! owner's `~/.axh/mcp.json` with `--strict-mcp-config` (agent isolation D7), passed as a file only the owner can
+//! owner's `~/.glut/mcp.json` with `--strict-mcp-config` (agent isolation D7), passed as a file only the owner can
 //! read, never on the command line where `ps` shows it.
 //!
 //! Permissions, nobody answers (`-p` refuses what is not allowed, it never waits):
@@ -550,11 +550,11 @@ fn valid_session_id(id: &str) -> bool {
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// The owner's MCP servers (`~/.axh/mcp.json`).
+/// The owner's MCP servers (`~/.glut/mcp.json`).
 fn owner_servers() -> Result<Vec<glut::mcp::config::ServerEntry>, AxiomataError> {
     let home = home::home_dir().ok_or_else(|| AxiomataError::AgentApi {
         backend: BACKEND_CLAUDE_CODE,
-        message: "no home folder to read ~/.axh/mcp.json from".to_owned(),
+        message: "no home folder to read ~/.glut/mcp.json from".to_owned(),
     })?;
     glut::mcp::config::owner(&home).map_err(|err| AxiomataError::AgentApi {
         backend: BACKEND_CLAUDE_CODE,
