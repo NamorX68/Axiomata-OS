@@ -858,6 +858,8 @@ impl Harness {
                 .into_iter()
                 .collect(),
             memory: None,
+            // Glut T37b: making skills, agents and hooks is the owner's, in Glut itself, not a card's.
+            glut_files: None,
         };
         let mut tools =
             setup::toolbox(cwd, &catalog, gate, servers, sandbox, extras, &mut sink).await?;

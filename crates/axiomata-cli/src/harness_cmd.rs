@@ -242,6 +242,8 @@ pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> 
         .into_iter()
         .collect(),
         memory: None,
+        // Glut T37b: making skills, agents and hooks is the owner's, in Glut itself.
+        glut_files: None,
     };
     let mut tools = setup::toolbox(
         &cwd,
