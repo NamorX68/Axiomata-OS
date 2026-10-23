@@ -241,6 +241,7 @@ pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> 
         )
         .into_iter()
         .collect(),
+        memory: None,
     };
     let mut tools = setup::toolbox(
         &cwd,

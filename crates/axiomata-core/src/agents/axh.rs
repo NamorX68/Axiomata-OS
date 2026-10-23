@@ -857,6 +857,7 @@ impl Harness {
             direct: crate::agent_entry::cli_direct_program(rights.run_kind)
                 .into_iter()
                 .collect(),
+            memory: None,
         };
         let mut tools =
             setup::toolbox(cwd, &catalog, gate, servers, sandbox, extras, &mut sink).await?;
