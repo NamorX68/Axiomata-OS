@@ -222,6 +222,9 @@ impl CardHost {
 
 /// The gate's questions as the app sees them: stored where Claude Code's hook stores its own, so the waiting badge and
 /// the app's dialog work as they do (C5).
+/// The most characters of the asking subagent's label an app's question carries.
+const FROM_CHARS: usize = 40;
+
 struct AppAsks {
     db: Arc<Mutex<rusqlite::Connection>>,
     agent_id: i64,
@@ -231,7 +234,12 @@ impl AppAsks {
     fn store(&self, request: &AskRequest) -> Option<i64> {
         let db = self.db.lock().unwrap_or_else(|poison| poison.into_inner());
         // Head and tail, as the pane shows it: a long harmless start must not hide what comes last.
-        let detail = ask_display(&request.target);
+        let mut detail = ask_display(&request.target);
+        // Glut TUI T40: beside others a subagent's ask says whose it is, in the app as in the pane.
+        if let Some(from) = &request.from {
+            let from: String = printable(from).chars().take(FROM_CHARS).collect();
+            detail = format!("⬡ {from} · {detail}");
+        }
         permission_ask::ask(&db, self.agent_id, &printable(&request.tool), &detail).ok()
     }
 
@@ -714,6 +722,7 @@ mod tests {
             tool: "bash".into(),
             target: "wc -l README.md".into(),
             scopes: Vec::new(),
+            from: None,
         }
     }
 
@@ -722,6 +731,21 @@ mod tests {
         permission_ask::open_ask(&db, asks.agent_id)
             .unwrap()
             .map(|ask| ask.id)
+    }
+
+    #[test]
+    fn a_subagents_ask_names_it_in_the_app() {
+        let (asks, dir) = asks();
+        let request = AskRequest {
+            from: Some("find the callers".into()),
+            ..request()
+        };
+        asks.store(&request).unwrap();
+        let db = asks.db.lock().unwrap();
+        let open = permission_ask::open_ask(&db, 9).unwrap().unwrap();
+        assert_eq!(open.detail, "⬡ find the callers · wc -l README.md");
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

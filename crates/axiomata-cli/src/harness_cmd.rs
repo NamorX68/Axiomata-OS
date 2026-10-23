@@ -165,7 +165,7 @@ pub async fn run(core: &std::sync::Arc<AxiomataCore>, action: HarnessAction) -> 
     let inner: Box<dyn EventSink> = if json {
         Box::new(JsonLines)
     } else {
-        Box::new(Readable)
+        Box::new(Readable::default())
     };
     let mut sink = SharedSink::new(inner);
     // Skills (HS6, K2): the app's own `~/.axiomata/skills` (this CLI knows where that is, the harness does not),
@@ -408,17 +408,57 @@ impl EventSink for JsonLines {
 
 /// One line per step, for a person at the terminal. Everything the model wrote goes through [`plain`] first: an
 /// escape sequence in its text would otherwise be the terminal's to act on (a title, a fake prompt, the clipboard).
-pub(crate) struct Readable;
+///
+/// Subagents that run at once (Glut TUI T40) interleave their lines: each is headed by its task's label, which the
+/// parent's `task` call gave.
+#[derive(Default)]
+pub(crate) struct Readable {
+    labels: std::collections::HashMap<String, String>,
+}
+
+impl Readable {
+    /// The label of the subagent an event comes from, when it names its `task` call.
+    fn label_of(&mut self, event: &Event) -> Option<String> {
+        match event {
+            Event::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } if name == "task" => {
+                let label = serde_json::from_str::<serde_json::Value>(arguments)
+                    .ok()
+                    .and_then(|value| value.get("description")?.as_str().map(plain))
+                    .unwrap_or_else(|| "subagent".into());
+                self.labels.insert(id.clone(), preview(&label));
+                None
+            }
+            Event::Sub {
+                task: Some(task), ..
+            } => self.labels.get(task).cloned(),
+            _ => None,
+        }
+    }
+}
 
 impl EventSink for Readable {
     fn emit(&mut self, event: Event) {
+        let label = self.label_of(&event);
+        let headed = |line: String| match &label {
+            Some(label) => {
+                let rest = line.trim_start();
+                let indent = &line[..line.len() - rest.len()];
+                format!("{indent}⬡ {label} · {rest}")
+            }
+            None => line,
+        };
         // Errors go to stderr — stdout carries a command run's reply (HS4) — also from inside a
         // subagent, where they keep their indent (HS8, D8).
         if let Some((indent, message)) = error_of(&event) {
-            eprintln!("{indent}error: {message}");
+            eprintln!("{}", headed(format!("{indent}error: {message}")));
             return;
         }
-        if let Some(line) = render(&event) {
+        if let Some(line) = render(&event).map(headed) {
             let mut out = std::io::stdout().lock();
             let _ = writeln!(out, "{line}");
             let _ = out.flush();
@@ -540,7 +580,7 @@ fn render(event: &Event) -> Option<String> {
         | Event::ReasoningDelta { .. } => return None,
         // A subagent's events, indented by their depth (HS8, D8). Its own finished line reads `↳`, not
         // `■`: two run-looking finished lines would have a reader count the run's end twice.
-        Event::Sub { depth, event } => {
+        Event::Sub { depth, event, .. } => {
             let inner = match &**event {
                 Event::Finished { turns, usage, .. } => format!(
                     "↳ subagent · {turns} turns · {} in / {} out tokens",
@@ -559,7 +599,7 @@ fn render(event: &Event) -> Option<String> {
 fn error_of(event: &Event) -> Option<(String, String)> {
     match event {
         Event::Error { message } => Some((String::new(), plain(message))),
-        Event::Sub { depth, event } => {
+        Event::Sub { depth, event, .. } => {
             let (indent, message) = error_of(event)?;
             Some((format!("{}{indent}", "  ".repeat(*depth as usize)), message))
         }
@@ -595,6 +635,37 @@ mod tests {
         let mut config = Config::default();
         config.agents.providers.insert(id, settings);
         config
+    }
+
+    #[test]
+    fn a_subagents_lines_are_headed_by_its_task_while_others_run_beside_it() {
+        let mut readable = Readable::default();
+        assert_eq!(
+            readable.label_of(&Event::ToolCall {
+                turn: 1,
+                id: "t1".into(),
+                name: "task".into(),
+                arguments: r#"{"description":"find the callers","prompt":"p"}"#.into(),
+            }),
+            None
+        );
+        let sub = |task: Option<&str>| Event::Sub {
+            depth: 1,
+            task: task.map(Into::into),
+            event: Box::new(Event::AssistantText {
+                turn: 1,
+                text: "two".into(),
+            }),
+        };
+        assert_eq!(
+            readable.label_of(&sub(Some("t1"))).as_deref(),
+            Some("find the callers")
+        );
+        assert_eq!(
+            readable.label_of(&sub(None)),
+            None,
+            "a log from before names none"
+        );
     }
 
     #[test]
@@ -668,6 +739,7 @@ mod tests {
         // HS8, D8: the subagent's own finished line is a `↳`, never the run's `■`.
         let finished = Event::Sub {
             depth: 1,
+            task: None,
             event: Box::new(Event::Finished {
                 reason: FinishReason::Answered,
                 turns: 3,
@@ -699,6 +771,7 @@ mod tests {
         // A `Usage` is never printed, wrapped or not.
         let usage = Event::Sub {
             depth: 1,
+            task: None,
             event: Box::new(Event::Usage {
                 turn: 1,
                 input_tokens: 1,
@@ -715,6 +788,7 @@ mod tests {
         assert_eq!(error_of(&error), Some((String::new(), "boom".into())));
         let wrapped = Event::Sub {
             depth: 2,
+            task: None,
             event: Box::new(Event::Error {
                 message: "boom".into(),
             }),
