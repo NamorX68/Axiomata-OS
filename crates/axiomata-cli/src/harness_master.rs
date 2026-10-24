@@ -56,6 +56,8 @@ fn launch(agent: &Agent, folder: PathBuf, config: PathBuf) -> Result<Launch> {
     }
     let mut launch = Launch::owner(folder, None, None);
     launch.servers = Servers::Also(config);
+    // The Studio holds the master in its project's folder: switching to another project is the Studio's (Glut T44).
+    launch.projects = false;
     Ok(launch)
 }
 
@@ -99,6 +101,7 @@ mod tests {
         assert_eq!(made.cwd, folder);
         assert!(matches!(&made.servers, Servers::Also(file) if *file == config));
         assert!(made.owner_trust && made.keep_sessions && made.owner_shell && !made.mode_locked);
+        assert!(!made.projects, "the Studio picks the master's folder");
         assert!(
             launch(&master, folder.clone(), config.with_extension("gone")).is_err(),
             "no file, no start"

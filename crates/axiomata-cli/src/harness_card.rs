@@ -129,6 +129,8 @@ pub async fn card(core: Arc<AxiomataCore>) -> Result<()> {
         keep_lost_turns: true,
         // The channel's event log, which the meter and the Flow tiles read (C6) and `glut watch` follows.
         log: glut_tui::Log::At(channel.dir().join(glut_card::EVENTS_FILE)),
+        // A card's session is its pane alone: its folder is the card's (Glut T44).
+        projects: false,
     };
     let host = Arc::new(CardHost {
         core: Arc::clone(&core),
