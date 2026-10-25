@@ -562,6 +562,8 @@ fn render(event: &Event) -> Option<String> {
             chars_after,
             ..
         } => format!("  ≈ {} · {chars_before} → {chars_after} chars", plain(what)),
+        // Glut T58: keys in a call's result were hidden before the model saw them.
+        Event::Masked { hidden, .. } => format!("  ⊘ keys hidden: {}", hidden.len()),
         // Glut robust (#111, K5): the older steps became a summary.
         Event::Compacted {
             before_tokens,
