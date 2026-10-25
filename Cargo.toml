@@ -89,3 +89,8 @@ sha2 = "0.10"
 # Random bytes for the per-start session secret of an agent's MCP server (`axiomata-ide::session_token`): the OS's
 # generator, no seeding of our own. Already in the tree transitively.
 getrandom = "0.3"
+
+# Glut names axiomata-files by its GitHub repository (for builds without the family beside it); here it is the one
+# checkout beside this tree, the same the workspace builds — never a second copy of its types.
+[patch."https://github.com/NamorX68/Axiomata-Foundation"]
+axiomata-files = { path = "../Axiomata-Foundation/crates/axiomata-files" }
