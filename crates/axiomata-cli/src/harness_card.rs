@@ -131,6 +131,8 @@ pub async fn card(core: Arc<AxiomataCore>) -> Result<()> {
         log: glut_tui::Log::At(channel.dir().join(glut_card::EVENTS_FILE)),
         // A card's session is its pane alone: its folder is the card's (Glut T44).
         projects: false,
+        // The Studio speaks one language so far: the card speaks the owner's own (Glut T48).
+        language: None,
     };
     let host = Arc::new(CardHost {
         core: Arc::clone(&core),
