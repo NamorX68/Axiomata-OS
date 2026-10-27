@@ -582,6 +582,8 @@ fn render(event: &Event) -> Option<String> {
                 "· asked to go on: its task list has items open".to_owned()
             }
             glut::NudgeKind::Announced => "· asked to take the step it announced".to_owned(),
+            glut::NudgeKind::Repeated => "· its last step sent again: not run".to_owned(),
+            glut::NudgeKind::Reading => "· told it has only read for many steps".to_owned(),
         },
         Event::Snapshot { turn, run, .. } => format!(
             "⟲ snapshot before step {turn} · glut undo --run {}",
