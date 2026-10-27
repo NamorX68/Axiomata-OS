@@ -575,6 +575,14 @@ fn render(event: &Event) -> Option<String> {
         ),
         // Glut TUI3b (T10): a message the owner sent while the run worked, taken in before this step.
         Event::Steered { text, .. } => format!("› {}", plain(text)),
+        // Glut's own word to the model (T73): why the run went on.
+        Event::Nudged { kind, .. } => match kind {
+            glut::NudgeKind::Reminder => "· reminded of its task list".to_owned(),
+            glut::NudgeKind::OpenItems => {
+                "· asked to go on: its task list has items open".to_owned()
+            }
+            glut::NudgeKind::Announced => "· asked to take the step it announced".to_owned(),
+        },
         Event::Snapshot { turn, run, .. } => format!(
             "⟲ snapshot before step {turn} · glut undo --run {}",
             plain(run)

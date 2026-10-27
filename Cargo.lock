@@ -2075,6 +2075,7 @@ dependencies = [
  "image",
  "regex",
  "reqwest 0.12.28",
+ "ring",
  "rquickjs",
  "rustix",
  "security-framework",
