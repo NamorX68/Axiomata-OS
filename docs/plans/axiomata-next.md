@@ -43,10 +43,31 @@ briefly and get an answer, or dictate a note while typing something else.
 
 Terminal, Kanban and Studio move to pure Rust, without Tauri and Svelte. The owner is sure this makes sense.
 
-- **Before it:** a larger idea the owner still weighs ("something big; I don't yet know whether it makes sense"). It
-  is to be described when the owner is ready.
+- **Before it:** the owner's larger idea, which is the whole voice part: N1 and N2, then N5 with them. After it comes
+  pure Rust.
 - **Order of building:** N1 and N2 are built as Rust services in the core, not bound to today's Tauri and Svelte
   front end. They then survive the move, and only their surface is drawn anew.
+
+## N5 — a small browser beside the assistant
+
+Kanban card #84 ("Einfacher Browser entwickeln", backlog, 2026-10-12).
+
+A browser that can do little, and is meant to do little:
+
+- an address and search field;
+- back and forward;
+- a simple list of favourites;
+- a button that sends the page to the default browser.
+
+It fits the voice assistant (N2) well. The assistant answers a question ("who played in film X", "how old is the actor
+Y"), and the browser shows what it found ("show me pictures of Y"). The owner can then go on from there by hand, or
+hand the page to the real browser.
+
+To grill:
+- how the assistant and the browser hand each other a page;
+- which engine to use (the system's WebKit; and what it can be once the front end is pure Rust, N3);
+- that a page never reaches Axiomata's own capabilities;
+- where the favourites are kept.
 
 ## N4 — the presentation as a film
 
