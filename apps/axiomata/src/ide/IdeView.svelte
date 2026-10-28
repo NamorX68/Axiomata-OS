@@ -121,6 +121,8 @@
   import { pathAt } from "../editor/syntax/outline";
   import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
   import { invokeBackend, listenBackend } from "../core/backend";
+  import Ground from "../ui/Ground.svelte";
+  import { coverGround } from "../core/cover";
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type SidebarView, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
@@ -935,16 +937,19 @@
     agentStatus.watch(open ? (current?.id ?? null) : null);
   });
   onMount(() => () => agentStatus.watch(null));
+  // Open, the Studio covers the app's ground: the Orbit beneath holds still (core/cover.ts).
+  $effect(() => (open ? coverGround() : undefined));
 </script>
 
 <section
-  class="ide"
+  class="ide ax-glass-scope"
   class:hidden={!open}
   inert={!open}
   aria-label="Studio"
   style:--ax-project-hue={projectHue}
   onkeydowncapture={onViewKeydown}
 >
+  <Ground />
   <header>
     <div class="titles">
       <div class="brand" style:--tree-w="{tree.visible ? tree.width * $uiScale : 0}px">
@@ -1136,6 +1141,7 @@
   </div>
   {#if gitChange && current}
     <GitDiffView
+      plate
       root={projectRoot(current.id)}
       entry={gitChange}
       side={gitChange.side}
@@ -1181,9 +1187,10 @@
     z-index: calc(var(--ax-z-staging) - 1);
     display: flex;
     flex-direction: column;
+    /* Under the ground's blurred edge, the theme's own colour (docs/plans/glass.md, G7). */
     background: var(--ax-bg);
-    background-image: var(--ax-texture-url);
     color: var(--ax-text);
+    /* Its surfaces are glass: `ax-glass-scope` (styles.css, G18). */
   }
 
   /* Hidden, not unmounted — see the header comment. `visibility` keeps every
@@ -1199,8 +1206,8 @@
     justify-content: space-between;
     gap: var(--ax-space-4);
     padding: var(--ax-space-3) var(--ax-space-5);
-    border-bottom: 1px solid var(--ax-border);
-    /* The project's marker colour as a thin top edge; nothing when the project has none (card #70). */
+    /* No line beneath: the header stands on the ground like the tabs, and the plates below are set off by their air
+       and edge (docs/plans/glass.md). The project's marker colour as a thin top edge; nothing when the project has none (card #70). */
     box-shadow: inset 0 calc(3px * var(--ax-ui-scale)) 0 var(--ax-project-hue, transparent);
     flex: 0 0 auto;
   }

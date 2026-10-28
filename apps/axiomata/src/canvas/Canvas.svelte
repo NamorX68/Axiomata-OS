@@ -65,7 +65,9 @@
   });
 </script>
 
-<section class="canvas" class:grid={$showGrid} aria-label="Module canvas" bind:this={section}>
+<!-- A glass scope (docs/plans/glass.md, `.ax-glass-scope`): the tiles' cards, rows and fields take the transparency knob
+     over the ground, like the Studio's. -->
+<section class="canvas ax-glass-scope" class:grid={$showGrid} aria-label="Module canvas" bind:this={section}>
   {#each $guides as g, i (i)}
     <div
       class="guide {g.axis}"

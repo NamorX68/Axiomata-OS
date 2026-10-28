@@ -22,6 +22,16 @@ describe("validateCustomCss", () => {
     expect(r.css).not.toContain('[data-theme="custom"]');
   });
 
+  it("lets a custom theme set the glass palette, but not the colours derived from it", () => {
+    const r = validateCustomCss(":root { --ax-glass-counter: rgba(0, 120, 80, 0.1); --ax-glass-pane-alpha: 0.6 }");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.css).toContain("--ax-glass-counter: rgba(0,120,80,0.1);");
+    expect(errorsOf(":root { --ax-glass-pane: red }")).toEqual([
+      expect.stringMatching(/^:root\|--ax-glass-pane\|not an overridable token/),
+    ]);
+  });
+
   it("rejects forbidden text before parsing", () => {
     expect(errorsOf("@import url(x.css); :root { --ax-accent: red }")[0]).toMatch(/@import/);
     expect(errorsOf(":root { --ax-texture-url: url(javascript:alert(1)) }")[0]).toMatch(/javascript/);

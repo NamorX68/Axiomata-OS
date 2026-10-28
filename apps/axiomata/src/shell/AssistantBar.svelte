@@ -412,6 +412,5 @@
   .source {
     color: var(--ax-text-muted);
     font-size: 0.85em;
-    text-transform: uppercase;
   }
 </style>

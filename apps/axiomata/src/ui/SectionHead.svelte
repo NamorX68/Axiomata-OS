@@ -1,7 +1,7 @@
 <!--
   The head of a section inside a panel or a side bar (`docs/plans/ui-ux-round.md` UX2): a label in the label role
-  (small, uppercase, one tracking everywhere), an optional status mark and count, the section's own quiet actions at
-  the end. Not a button and not a pill — a heading, so it cannot be mistaken for something to press.
+  (small, in sentence case — docs/plans/glass.md G9), an optional status mark and count, the section's own quiet
+  actions at the end. Not a button and not a pill — a heading, so it cannot be mistaken for something to press.
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
@@ -49,8 +49,6 @@
   .label {
     margin: 0;
     font: var(--ax-type-label);
-    letter-spacing: var(--ax-tracking-label);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
     white-space: nowrap;
   }

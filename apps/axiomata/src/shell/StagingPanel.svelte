@@ -46,6 +46,7 @@
 
   import { draggable, type DragDelta } from "../canvas/drag";
   import { resizable, type ResizeDelta } from "../canvas/resize";
+  import { coverGround } from "../core/cover";
   import { getSetting, setSetting } from "../core/persist";
   import { getModule } from "../core/registry";
   import {
@@ -217,13 +218,17 @@
   const liveX = $derived(pos ? pos.x + (moving?.dx ?? 0) : null);
   const liveY = $derived(pos ? pos.y + (moving?.dy ?? 0) : null);
 
+  // A staged panel covers the app's ground, so what moves on it holds still beneath the glass (core/cover.ts).
+  $effect(() => coverGround());
+
   // The entrance grows out of whatever opened the panel (`ui/fromOrigin.ts`). Centred, the panel's resting transform
   // is `translateX(-50%)`, which the flight must keep rather than replace; once dragged (`pos` set) it sits at real
   // `left`/`top` pixels with no transform, so closing plays from wherever it actually is.
+
 </script>
 
 <aside
-  class="panel"
+  class="panel ax-glass-panel ax-glass-scope"
   class:resizing={resizing !== null}
   class:moving={moving !== null}
   class:positioned={pos !== null}
@@ -276,13 +281,7 @@
     height: min(80vh, calc(100vh - calc(64px * var(--ax-ui-scale)) - var(--ax-space-4)));
     width: min(calc(1000px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5)));
     border-radius: var(--ax-radius-lg);
-    /* The panel step of the elevation scale, the same surface as `Window.svelte`'s: a tone, the light edge and a
-       shadow that carries in the dark, with only a hint of the canvas behind. */
-    border: 1px solid var(--ax-border);
-    background: color-mix(in srgb, var(--ax-elev-2) 94%, transparent);
-    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
-    backdrop-filter: blur(var(--ax-tile-glass-blur));
-    box-shadow: var(--ax-shadow-panel);
+    /* A glass panel, the same as `Window.svelte`'s (`.ax-glass-panel` in styles.css). */
   }
   .panel.resizing,
   .panel.moving {

@@ -95,6 +95,7 @@
   import { SignatureHint, type SignaturePort } from "./signatureHint";
   import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
+  import { textClipPath } from "./textClip";
   import FindBar from "./FindBar.svelte";
   import Minimap from "./Minimap.svelte";
   import { lastFind, rememberFind } from "./findShared";
@@ -1742,6 +1743,8 @@
        this position without a scroll event (`fileapp/keepScroll.ts`). -->
   <div
     class="scroller"
+    class:under-sticky={stickyRows.length > 0}
+    style:--sticky-h="{sticky.height}px"
     {...KEEP_SCROLL}
     bind:this={scroller}
     onscroll={() => {
@@ -1812,7 +1815,13 @@
           {/if}
         {/each}
       </div>
-      <div class="content" style:left="{textLeft}px">
+      <!-- Cut where the gutter stands, so text scrolled under it is not there at all: the gutter may be glass, and
+           would otherwise show it (docs/plans/glass.md). -->
+      <div
+        class="content"
+        style:left="{textLeft}px"
+        style:clip-path={textClipPath(scrollLeft, gutterW, textLeft)}
+      >
         {#each view.rows as r (r.row)}
           {#if r.deco.kind}
             <div class="line-bg ln-{r.deco.kind} {r.slide ?? ''}" style:top="{r.row * rowH}px"></div>
@@ -2113,6 +2122,13 @@
     pointer-events: none;
   }
 
+  /* Under the sticky headers the scroller is not there at all, so they can be glass and still hide the text that scrolls
+     on beneath them (docs/plans/glass.md G18). The mask lies on the scroller's own box, which does not move. */
+  .scroller.under-sticky {
+    -webkit-mask-image: linear-gradient(to bottom, transparent var(--sticky-h), #000 var(--sticky-h));
+    mask-image: linear-gradient(to bottom, transparent var(--sticky-h), #000 var(--sticky-h));
+  }
+
   .scroller {
     position: absolute;
     inset: 0;
@@ -2135,7 +2151,9 @@
     height: 100%;
     float: left;
     z-index: 2;
-    background: var(--ax-editor-bg);
+    /* No colour of its own: the text is cut where it stands (`textClipPath`), and the surface beneath already paints
+       the editor's colour — a second layer would darken the strip on glass. */
+    background: transparent;
     cursor: default;
   }
 
@@ -2686,7 +2704,8 @@
     pointer-events: none;
   }
 
-  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. */
+  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. No colour of their own: the
+     scroller is masked out beneath them (`.under-sticky`), so the surface's colour (glass in the Studio) shows, no text. */
   .sticky {
     position: absolute;
     top: 0;
@@ -2694,7 +2713,7 @@
     right: var(--minimap-w);
     z-index: 3;
     overflow: hidden;
-    background: var(--ax-editor-bg);
+    background: transparent;
     box-shadow: var(--ax-sticky-shadow);
   }
 
@@ -2705,7 +2724,7 @@
     height: var(--row);
     padding: 0;
     border: 0;
-    background: var(--ax-editor-bg);
+    background: transparent;
     color: var(--ax-text);
     font: inherit;
     line-height: var(--row);

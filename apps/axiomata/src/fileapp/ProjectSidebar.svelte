@@ -172,7 +172,7 @@
   }
 </script>
 
-<aside class="side" style:width="{prefs.width * $uiScale}px">
+<aside class="side ax-glass-pane" style:width="{prefs.width * $uiScale}px">
   <ProjectBar
     {projects}
     {current}
@@ -278,7 +278,7 @@
     flex-direction: column;
     flex-shrink: 0;
     min-height: 0;
-    background: var(--ax-surface-1);
+    overflow: hidden;
   }
 
   .side-pane {
@@ -318,10 +318,11 @@
   }
 
   /* The sidebar's right edge, dragged for its width. */
+  /* In the air beside the glass plate (docs/plans/glass.md, G8): no line of its own, only the hover shows it. */
   .edge {
     width: var(--ax-space-1);
     flex-shrink: 0;
-    background: var(--ax-border);
+    background: transparent;
     cursor: col-resize;
   }
 

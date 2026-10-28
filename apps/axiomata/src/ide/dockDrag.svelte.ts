@@ -41,6 +41,18 @@ function rectOf(el: Element): Rect {
   return { x: r.left, y: r.top, w: r.width, h: r.height };
 }
 
+/** An element's box with its margin: a group's glass plate floats in air (`.ax-glass-pane`), and a drop in that air
+ *  belongs to the group, not to nothing. */
+function outerRectOf(el: Element): Rect {
+  const r = rectOf(el);
+  const style = getComputedStyle(el);
+  const margin = (value: string): number => Number.parseFloat(value) || 0;
+  const [top, right, bottom, left] = [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft].map(
+    margin,
+  );
+  return { x: r.x - left, y: r.y - top, w: r.w + left + right, h: r.h + top + bottom };
+}
+
 export class DockDrag {
   /** The tab being dragged, once the pointer has moved far enough. */
   draggingTab = $state<string | null>(null);
@@ -107,7 +119,7 @@ export class DockDrag {
       if (!bar || !el.dataset.ideGroup) continue;
       groups.push({
         nodeId: el.dataset.ideGroup,
-        rect: rectOf(el),
+        rect: outerRectOf(el),
         tabBar: rectOf(bar),
         tabs: [...bar.querySelectorAll<HTMLElement>("[data-ide-tab]")]
           .filter((tab) => tab.dataset.ideTab !== draggedId)

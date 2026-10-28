@@ -11,6 +11,7 @@
 <script lang="ts">
   import { get } from "svelte/store";
 
+  import { groundCovered } from "../core/cover";
   import { dayLightAt, type DayLight } from "../core/daylight";
   import { effects } from "../core/effects";
   import { focusMode } from "../core/focusMode";
@@ -88,7 +89,8 @@
     style:--day-alpha="{(DAY_ALPHA * light.strength).toFixed(2)}%"
   ></div>
 {/if}
-{#if $effects.pointerLight && !$focusMode}
+<!-- Under the Studio, a panel or a window the pointer light goes out: it would only move what their glass blurs. -->
+{#if $effects.pointerLight && !$focusMode && !$groundCovered}
   <div class="pointer" aria-hidden="true" bind:this={pointerEl}></div>
 {/if}
 

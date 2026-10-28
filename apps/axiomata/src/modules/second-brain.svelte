@@ -41,6 +41,7 @@
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import { invokeBackend, listenBackend, type WorkspaceGraph } from "../core/backend";
   import { brainActive, brainView, spinOf, travelAt } from "../core/brainView";
+  import { groundCovered } from "../core/cover";
   import { animates, motion, systemReducesMotion } from "../core/motion";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
@@ -122,7 +123,12 @@
    *  instead of a separately-sized piece of UI chrome dropped on top of it. */
   const addAppD = $derived(appNodeRadiusPx(discR) * 2);
 
+  /** A change the Orbit must draw although it holds still under a covering view (core/cover.ts): a resize clears the
+   *  canvas, a rebuild takes effect only on the next frame. */
+  let redraw = true;
+
   function rebuild() {
+    redraw = true;
     if (!renderer || !graph) return;
     const palette = readPalette();
     const model = buildModel(graph, palette);
@@ -482,6 +488,7 @@
     renderer.resize();
     const ro = new ResizeObserver(() => {
       renderer?.resize();
+      redraw = true;
       const r = canvas!.getBoundingClientRect();
       discR = Math.min(r.width, r.height) * ORBIT_FIT;
     });
@@ -489,8 +496,13 @@
     const mo = new MutationObserver(() => rebuild());
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     let raf = 0;
+    // Under the Studio, a panel or a window nobody sees the Orbit, and a panel's glass would blur it again on every
+    // frame it moved (core/cover.ts): it holds still there, drawing again only after a change.
     const tick = (now: number) => {
-      renderer?.frame(now);
+      if (!get(groundCovered) || redraw) {
+        renderer?.frame(now);
+        redraw = false;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -681,8 +693,6 @@
     transform: translateX(-50%);
     margin: 0;
     font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     color: var(--ax-accent);
     pointer-events: none;
     white-space: nowrap;

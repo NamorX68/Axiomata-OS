@@ -16,7 +16,7 @@
    *
    * Appearance follows decisions taken by looking at a preview view in every
    * theme, since deleted — `docs/plans/kanban.md` §6a records *why* each came
-   * out this way: the column body is `--ax-bg`, the desk the cards lie on, and
+   * out this way: the column body is `--ax-lane-bg`, the desk the cards lie on (none on glass), and
    * the card itself asks the theme how it should sit via `--ax-card-*`. Only
    * labels carry colour. Nothing here is framed — the board is frameless,
    * and a column drawn with a border would fight that.
@@ -54,7 +54,7 @@
   import { studioCards } from "../core/studioActivity";
   import { accentColor, themeAreaSwatches } from "../ide/projectAccent";
   import { listProjects } from "../ide/projects";
-  import { glow } from "../ui/glow";
+  import { ring } from "../ui/glow";
   import {
     actorLabel,
     applyFilter,
@@ -1451,9 +1451,11 @@
                 data-tone={card.labels.length > 0 ? labelColorIndex(card.labels[0], LABEL_TOKENS) : undefined}
                 data-project={project ? "" : undefined}
                 style:--card-project={project}
-                use:glow={$studioCards.has(card.id) ||
-                  glowing.has(card.id) ||
-                  (card.origin_of != null && stepAtWork($data?.cards ?? [], card.origin_of, $studioCards))}
+                use:ring={$studioCards.has(card.id) ||
+                glowing.has(card.id) ||
+                (card.origin_of != null && stepAtWork($data?.cards ?? [], card.origin_of, $studioCards))
+                  ? "working"
+                  : null}
                 class:archived={card.archived_at !== null}
                 class:waited={waits.length > 0}
                 class:lifted={dragging?.id === card.id || carrying?.id === card.id}
@@ -1672,8 +1674,6 @@
     justify-content: space-between;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
   }
 
   /* D1: squeeze to --min-col, then scroll sideways. A board that hides a
@@ -1694,8 +1694,8 @@
     min-height: 0;
     flex: 1 1 0;
     min-width: var(--min-col);
-    /* D3, B2: a lane the cards lie on — a tint, rounded, never a frame. */
-    background: color-mix(in srgb, var(--ax-surface-1) 70%, var(--ax-bg));
+    /* D3, B2: a lane the cards lie on — a tint, rounded, never a frame; on glass none at all (docs/plans/glass.md). */
+    background: var(--ax-lane-bg);
     border-radius: var(--ax-radius-lg);
     padding: var(--ax-space-2);
     container: col / inline-size;
@@ -1751,7 +1751,8 @@
     translate: 0 -60%;
     display: inline-flex;
     padding-left: var(--ax-space-2);
-    background: color-mix(in srgb, var(--ax-surface-1) 70%, var(--ax-bg));
+    /* It lies over the column's name: dense, as everything over text is on glass (G14). */
+    background: var(--ax-glass-menu);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--ax-dur-fast) var(--ax-ease);
@@ -1886,13 +1887,6 @@
   }
   .card.archived {
     opacity: 0.55;
-  }
-  /* The glow of a card at work or just done (`ui/glow.ts`): the card's own shadow rule above would outrank the global
-     one, so the card says it again. */
-  .card:global([data-ax-glow]) {
-    border-color: var(--ax-glow);
-    box-shadow: var(--ax-glow-shadow);
-    animation: var(--ax-anim-glow);
   }
   /* G19: the project a card's plan runs in, as a short line along its top in the project's colour. */
   .card[data-project]::before {
@@ -2309,8 +2303,6 @@
     margin: var(--ax-space-3) 0 var(--ax-space-2);
     font-size: var(--ax-font-size-xs);
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
   .fields select {

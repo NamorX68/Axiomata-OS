@@ -646,9 +646,10 @@
        path makes the circle the element's shape for hit testing too. */
     clip-path: circle(50%);
     overflow: hidden;
-    /* No hard edge (owner, UX5): the ground thins out into the Orbit's disc beneath over the outer rim — still solid
-       where the Orbit's hive lies under it — and the graph fades out with it instead of being cut off. */
-    background: radial-gradient(closest-side, var(--ax-bg) 86%, transparent 100%);
+    /* No hard edge (owner, UX5): the ground thins out into the Orbit's disc beneath over the outer rim — dense where
+       the Orbit's hive lies under it, glass by the transparency knob (docs/plans/glass.md) — and the graph fades out
+       with it instead of being cut off. */
+    background: radial-gradient(closest-side, var(--ax-glass-orbit-disc) 86%, transparent 100%);
     cursor: grab;
   }
   /* In the Orbit's container (`container-type: size` there): its own box is the unit, the same one the cloud is sized from. */
@@ -744,8 +745,6 @@
   }
   .label {
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
   .seg {
@@ -915,8 +914,6 @@
     border: 1px solid var(--ax-accent);
     color: var(--ax-accent);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
   .tag.kind {
     background: var(--ax-accent);
@@ -941,8 +938,6 @@
   }
   .meta dt {
     color: var(--ax-text-muted);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     font-size: var(--ax-font-size-xs);
     padding-top: 2px;
   }
@@ -1017,8 +1012,6 @@
   .detail h3 {
     margin: var(--ax-space-3) 0 var(--ax-space-1);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
   .detail h4 {

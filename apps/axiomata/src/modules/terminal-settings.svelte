@@ -451,8 +451,6 @@
   h3 {
     margin: 0 0 var(--ax-space-1);
     font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     color: var(--ax-accent);
   }
 

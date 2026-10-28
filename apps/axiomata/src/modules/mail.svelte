@@ -267,8 +267,6 @@
     font-size: var(--ax-font-size-xs);
     line-height: 1.3;
     color: var(--ax-text-muted);
-    text-transform: uppercase;
-    letter-spacing: var(--ax-tracking-wide);
   }
   .spacer {
     flex: 1 1 auto;
@@ -304,8 +302,6 @@
     font-size: var(--ax-font-size-xs);
     font-weight: 600;
     color: var(--ax-text-muted);
-    text-transform: uppercase;
-    letter-spacing: var(--ax-tracking-wide);
   }
   .section-label:not(:first-child) {
     margin-top: var(--ax-space-1);

@@ -2,7 +2,9 @@
 
 Stand: 2026-10-11, **gegrillt (Runden 1–2, alle Empfehlungen vom Owner angenommen)**. Anlass (Owner): „Die ganze App soll in sich stimmig sein und das
 Design soll State of the Art sein, gerne mit optischen Highlights, die der App einen eigenen, unverwechselbaren
-Wiedererkennungswert bescheren.“ Vorgänger: `docs/plans/editor-look.md` (K1–K14, gilt weiter), der Design-Pass vom
+Wiedererkennungswert bescheren.“ Nachfolger: die Glas-Umstellung (`docs/plans/glass.md`, 2026-10-28) — Glut und
+Akzentregel bleiben, das Glimmen bekommt ab Kartengröße die Gestalt eines Rings, Bereichsköpfe sind in normaler
+Schreibung. Vorgänger: `docs/plans/editor-look.md` (K1–K14, gilt weiter), der Design-Pass vom
 2026-10-07/08 (Legende, Live-Puls, Studio-Kopfzeile).
 
 ## 1. Befund (Screenshots 2026-10-11, 2560×1080, Graphite + Paper + Catppuccin Latte, Browser-Mock)

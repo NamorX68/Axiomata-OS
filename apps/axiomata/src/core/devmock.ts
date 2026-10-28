@@ -2792,6 +2792,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         { family: "Menlo", weights: [400, 700], monospace: true },
         { family: "SF Mono", weights: [300, 400, 500, 600, 700, 800], monospace: true },
       ] as T;
+    case "wallpaper_read":
+      // No background image in the browser check: the theme's own ground.
+      return new ArrayBuffer(0) as T;
+    case "wallpaper_pick":
+      return false as T;
+    case "wallpaper_clear":
+      return undefined as T;
+    case "reduce_transparency":
+      // The browser's own `prefers-reduced-transparency` stands in (`core/glass.ts`).
+      return false as T;
     case "ui_displays":
       // One MacBook-like display at scale 1: browser checks look as before; set "UI size" to try others.
       return [{ x: 0, y: 0, width: 1512, height: 982, scale: 1 }] as T;

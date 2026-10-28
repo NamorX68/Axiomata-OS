@@ -134,8 +134,6 @@
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
     font-weight: 600;
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
   }
 
   .n {

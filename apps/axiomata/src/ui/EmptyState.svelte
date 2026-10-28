@@ -71,7 +71,8 @@
 
   .hollow {
     inset: calc(1.5px * var(--ax-ui-scale));
-    background: var(--ax-elev-1);
+    /* Solid even on glass: the hollow covers the shell, which would otherwise fill the whole hexagon. */
+    background: var(--ax-solid-surface-1);
   }
 
   .ember {

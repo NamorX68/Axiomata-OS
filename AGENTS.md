@@ -25,7 +25,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
   CP-A1 (engines + roles), CP-A2 (the board's agent flow), CP-A3 (the mailbox core), CP-A4 (the MCP server) CP-A5 (per-harness entry + per-session secret) and CP-A6a (start a card), CP-A6b (reviewer, return, take-over) and CP-A6c (limits per session) CP-A7 (the planner, backend + the Studio's Flow mode) and CP-A8a (a plan runs by itself, on an integration line) CP-A8b (take the plan over in one click) and CP-A8c (spend ledger + plan/day limits, escalation after two returns, the owner lifts a card the studio gave up, bounds on proposals) built 2026-10-04/06, CP-A9 (Flow's Agents tab: live tiles + mail) built 2026-10-06, CP-A10 (the graph, tab "Flowansicht") built 2026-10-06 — the build plan CP-A1…A10 is through; open: the Mac tests and UI/UX polish rounds (`docs/plans/a2a.md`); ED7; a Mac-only-code split; #Tags/[[Wikilinks]]
   (card #75). Built since: the ⌘K spotlight, Orbit + 2Brain in one view, and the app-wide UI/UX round "Glut + Hex"
-  UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
+  UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), the whole app on glass
+  (2026-10-28, `docs/plans/glass.md`: a still blurred ground or the owner's picture, three knobs, the living ring), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
   the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness Glut (`glut`, since 2026-10-21 in its own repository `../Axiomata-Glut`; `axh` and `~/.axh` became `glut` and `~/.glut` on 2026-10-23, TUI T43)
   (#37, `docs/plans/harness.md`; HS1–HS8 built), made one to keep a role on in "Glut rund" (2026-10-19,
@@ -99,6 +100,16 @@ skips the calendar/mail/reminders modules' mount-time auto-refresh (each is a bi
 and each module's manual ↻ still runs regardless (`core/devFlags.ts`).
 
 ## Architecture — traps worth knowing before you touch things
+
+- **Never put a worktree or a build folder under `~/Documents`** (owner, 2026-10-28): iCloud syncs it, and a Rust
+  `target/` or a fresh `node_modules` (thousands of files) keeps `fileproviderd` busy for an hour — every read under
+  `~/Documents` slows down, the installed app's vault walk and the vite mock stall. Put a worktree under
+  `~/.claude/worktrees/<name>/` with symlinks `Axiomata-Glut` and `Axiomata-Foundation` beside it (the root
+  `Cargo.toml`'s path dependencies are `../Axiomata-Glut`, `../Axiomata-Foundation`), make its `node_modules` a
+  symlink to the main checkout's (never `npm ci` there — but `npm run build` and `vitest` then need the link's real
+  path in Vite's `server.fs.allow`, not wired in yet), and remove the worktree once its branch is merged. iCloud's
+  "Optimise Mac Storage" also evicts files of a checkout under `~/Documents` (`find . -flags +dataless`): a read then
+  waits for the download, and vitest workers time out.
 
 - **Two crates live in repositories of their own, beside this one** (2026-10-21): Glut — the harness and its program `glut`
   — in `../Axiomata-Glut`, and the guarded file service `axiomata-files` in `../Axiomata-Foundation` (shared with Glut
@@ -220,7 +231,11 @@ from the code itself:
   shape. Movement goes through `core/motion.ts` (Full/Calm/Off, macOS "Reduce motion" = Off), never its own switch.
   Chrome comes from the `ui/` family (UX2): a floating panel is `shell/Window.svelte` or a staged panel, both with
   `ui/PanelHead.svelte` (⌘W via `core/closeStack.ts`); statuses are `ui/StatusMark.svelte` (`ui/status.ts` tones),
-  glowing is `use:glow` — no hand-rolled heads, dots or orange borders. Selected ≠ alive: `--ax-selected-bg`.
+  glowing is `use:glow` (a card-sized thing: `use:ring`) — no hand-rolled heads, dots or orange borders. Selected ≠
+  alive: `--ax-selected-bg`. **Glass** (`docs/plans/glass.md`): never a `backdrop-filter` on a large surface whose
+  content scrolls — the blur lies on the still ground (`ui/Ground.svelte`); a view's surfaces go see-through through
+  `.ax-glass-scope`, a floating panel blurs on a `::before` layer (`.ax-glass-panel`; a filter on the panel itself
+  would trap its fixed menus) and holds the ground still (`core/cover.ts`); anything over text stays solid.
 - **UI scale** (`docs/plans/editor-look.md`, K9–K11): every UI size is `N px × var(--ax-ui-scale)`
   (tokens already are; a size that is no token is written `calc(Npx * var(--ax-ui-scale))`), set by
   `core/uiScale.ts` from the display's real density (`axiomata-macos::display`) or the "UI size"

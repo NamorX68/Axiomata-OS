@@ -70,13 +70,13 @@
     min-height: 0;
   }
 
-  /* A 1 px line between groups (editor-look I1, as in Zed); the grabbable strip is wider
-     than the line, on both sides of it, and lights up on hover. */
+  /* Between the glass plates the air is the line (docs/plans/glass.md, G8); the 1 px strip stays, invisible, for its
+     grabbable area — wider than it, on both sides — which lights up on hover. */
   .divider {
     position: relative;
     z-index: 1;
     flex: 0 0 1px;
-    background: var(--ax-border);
+    background: transparent;
   }
 
   .divider::before {

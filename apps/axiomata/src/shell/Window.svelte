@@ -16,6 +16,7 @@
   import { fade } from "svelte/transition";
 
   import { pushClose } from "../core/closeStack";
+  import { coverGround } from "../core/cover";
   import PanelHead from "../ui/PanelHead.svelte";
   import { fromOrigin } from "../ui/fromOrigin";
 
@@ -49,6 +50,8 @@
   // ⌘W closes the newest dialog (`App.svelte`); the latest `onClose` is the one called. Only a modal one: the docked
   // chat is no dialog, and ⌘W must not close it from under the file window the owner is working in.
   $effect(() => (modal ? pushClose(() => onClose()) : undefined));
+  // A modal window covers the app's ground, so what moves on it holds still beneath the glass (core/cover.ts).
+  $effect(() => (modal ? coverGround() : undefined));
 
   // `!e.defaultPrevented` + calling `preventDefault()` on the way out is
   // the coordination convention `StagingLayer`/`ChatPanel`/`SecondBrainView`
@@ -77,7 +80,7 @@
   <div class="overlay" onclick={onClose} transition:fade|global={{ duration: 160 }}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div
-      class="window"
+      class="window ax-glass-panel ax-glass-scope"
       {style}
       role="dialog"
       aria-modal="true"
@@ -90,7 +93,7 @@
     </div>
   </div>
 {:else}
-  <div class="window" {style} role="dialog" aria-label={title}>
+  <div class="window docked ax-glass-panel ax-glass-scope" {style} role="dialog" aria-label={title}>
     {@render card()}
   </div>
 {/if}
@@ -102,21 +105,26 @@
     z-index: var(--ax-z-dialog);
     display: grid;
     place-items: center;
-    background: var(--ax-overlay);
+    background: var(--ax-glass-overlay);
   }
 
-  /* The panel step of the elevation scale: a tone, the light edge along the top and a shadow that carries in the
-     dark — a hint of glass behind it, but never so much that the canvas shows through the text. */
+  /* A glass panel (docs/plans/glass.md, G3; `.ax-glass-panel` in styles.css): its surfaces see-through by the knob,
+     a real blur of what lies beneath — the ground holds still under it (core/cover.ts). */
   .window {
+    /* Positioned for its glass layer (`.ax-glass-panel`), which would otherwise cover the whole overlay. */
+    position: relative;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-lg);
-    background: color-mix(in srgb, var(--ax-elev-2) 94%, transparent);
-    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
-    backdrop-filter: blur(var(--ax-tile-glass-blur));
-    box-shadow: var(--ax-shadow-panel);
+  }
+
+  /* Docked (the chat), the window covers nothing and the Orbit beside it keeps moving: dense glass, no live blur,
+     which would be computed again on every frame of the Orbit's spin. */
+  .window.docked::before {
+    background: var(--ax-glass-menu);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .body {

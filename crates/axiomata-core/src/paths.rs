@@ -110,6 +110,12 @@ pub fn custom_theme_path() -> PathBuf {
     axiomata_home().join("theme.css")
 }
 
+/// The folder of the owner's background image (`~/.axiomata/wallpaper/`, docs/plans/glass.md): one picked image,
+/// copied in, so the app never reads the original's place again.
+pub fn wallpaper_dir() -> PathBuf {
+    axiomata_home().join("wallpaper")
+}
+
 /// Path to the providers' model catalog (`~/.axiomata/model-catalog.json`), a cache of what each provider offers
 /// (board card #17, `crate::model_catalog`).
 pub fn model_catalog_path() -> PathBuf {

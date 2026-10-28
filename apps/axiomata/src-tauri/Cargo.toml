@@ -37,6 +37,8 @@ tracing-subscriber.workspace = true
 home.workspace = true
 # The vault watch for the Orbit's live ember and agent sparks (`vault_watch.rs`, ui-ux-round G9).
 notify.workspace = true
+# `O_NOFOLLOW` for reading the stored background image (`wallpaper.rs`); already the workspace's own file-flag crate.
+rustix.workspace = true
 axiomata-core = { path = "../../../crates/axiomata-core" }
 axiomata-terminal = { path = "../../../crates/axiomata-terminal" }
 axiomata-files.workspace = true

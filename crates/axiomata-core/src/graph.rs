@@ -15,13 +15,12 @@ use std::io::Read;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::error::AxiomataError;
 use crate::memory::walker::{self, FileEntry};
-use crate::routines::{self, Routine};
+use crate::routines::Routine;
 use crate::skills;
 
 /// Most file nodes returned; beyond that `truncated` is set.
@@ -86,8 +85,9 @@ pub struct WorkspaceGraph {
     pub generated_at: DateTime<Utc>,
 }
 
-/// Builds the graph for `config.workspace_root`. Routines come from `db`.
-pub fn build(config: &Config, db: &Connection) -> Result<WorkspaceGraph, AxiomataError> {
+/// Builds the graph for `config.workspace_root` around the given `routines`. The caller reads them from the
+/// database first, so its lock is not held while the walk reads the whole workspace.
+pub fn build(config: &Config, routines: Vec<Routine>) -> Result<WorkspaceGraph, AxiomataError> {
     let root = &config.workspace_root;
     let scan = walker::scan(config)?;
 
@@ -152,8 +152,6 @@ pub fn build(config: &Config, db: &Connection) -> Result<WorkspaceGraph, Axiomat
             effort: s.effort,
         })
         .collect();
-    let routines = routines::store::list(db)?;
-
     // The router is AGENTS.md now; a workspace not synced since still has only CLAUDE.md.
     let hub = ["AGENTS.md", "CLAUDE.md"]
         .into_iter()
@@ -610,7 +608,7 @@ mod tests {
             ..Config::default()
         };
         let db = crate::db::open_and_migrate_at(&home.join("graph-test.db")).unwrap();
-        let graph = build(&config, &db).unwrap();
+        let graph = build(&config, crate::routines::store::list(&db).unwrap()).unwrap();
         unsafe {
             std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
         }

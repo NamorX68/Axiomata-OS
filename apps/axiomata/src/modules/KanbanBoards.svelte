@@ -192,8 +192,6 @@
   h3 {
     margin: 0;
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
   .error {
