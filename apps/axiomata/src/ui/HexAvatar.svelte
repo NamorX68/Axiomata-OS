@@ -74,7 +74,8 @@
     inset: calc(1.5px * var(--ax-ui-scale));
     display: grid;
     place-items: center;
-    background: var(--ax-elev-3);
+    /* Solid even on glass: the face covers the ring, which would otherwise fill the whole hexagon (docs/plans/glass.md). */
+    background: var(--ax-solid-surface-3);
     color: color-mix(in srgb, var(--ring, var(--ax-text-muted)) 70%, var(--ax-text));
     font-family: var(--ax-font-sans);
     font-weight: 600;
