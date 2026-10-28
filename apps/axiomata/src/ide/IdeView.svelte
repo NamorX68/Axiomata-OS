@@ -1136,6 +1136,7 @@
   </div>
   {#if gitChange && current}
     <GitDiffView
+      plate
       root={projectRoot(current.id)}
       entry={gitChange}
       side={gitChange.side}
@@ -1181,9 +1182,13 @@
     z-index: calc(var(--ax-z-staging) - 1);
     display: flex;
     flex-direction: column;
-    background: var(--ax-bg);
-    background-image: var(--ax-texture-url);
+    /* The ground the panes' glass refracts (docs/plans/glass.md, G7): the theme's texture over the embers. */
+    background: var(--ax-texture-url), var(--ax-glass-backdrop);
     color: var(--ax-text);
+    /* Inside the glass, lines are light, not frames. Only this one: a surface colour stays opaque, because what must
+       cover — the editor's gutter, the terminal, which reports `--ax-surface-1` as its background to a TUI (OSC 11) —
+       reads it; and `--ax-border-strong` stays too, scrollbar thumbs, status marks and empty states fill with it. */
+    --ax-border: var(--ax-glass-edge);
   }
 
   /* Hidden, not unmounted — see the header comment. `visibility` keeps every

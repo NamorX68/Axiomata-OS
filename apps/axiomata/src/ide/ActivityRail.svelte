@@ -100,9 +100,8 @@
     flex-direction: column;
     align-items: center;
     gap: var(--ax-space-4);
+    /* On the ground, not a plate: the rail is the Studio's frame, the panes float beside it (docs/plans/glass.md). */
     padding: var(--ax-space-4) var(--ax-space-2);
-    border-right: 1px solid var(--ax-border);
-    background: var(--ax-surface-1);
   }
 
   .group {

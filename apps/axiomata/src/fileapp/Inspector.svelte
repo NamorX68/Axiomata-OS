@@ -29,7 +29,7 @@
   ];
 </script>
 
-<aside class="inspector" aria-label="Inspector">
+<aside class="inspector ax-glass-pane" aria-label="Inspector">
   <header>
     <div class="tabs" role="tablist" aria-label="Inspector">
       {#each TABS as t (t.id)}
@@ -54,8 +54,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: var(--ax-surface-2);
-    border-left: 1px solid var(--ax-border);
+    overflow: hidden;
   }
 
   header {

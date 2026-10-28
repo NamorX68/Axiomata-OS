@@ -256,6 +256,32 @@ input[type="radio"] {
   opacity: 0.35;
 }
 
+/* Glass (docs/plans/glass.md): a pane is a translucent plate floating over the ground, a 1 px light edge instead of a
+   frame, the air of `--ax-glass-gap` around it so the ground shows. A component that takes it sets no background,
+   border or shadow of its own.
+   The blur lies on a layer behind the content, never on the plate itself: an element with a `backdrop-filter` becomes
+   the containing block of every `position: fixed` inside it, and a context menu or popover placed in window
+   coordinates would land offset and clipped to the plate. `isolation` keeps the layer behind the content only. */
+.ax-glass-pane {
+  position: relative;
+  isolation: isolate;
+  margin: var(--ax-glass-gap);
+  border: 1px solid var(--ax-glass-edge);
+  border-radius: var(--ax-glass-radius);
+  box-shadow: var(--ax-glass-shadow);
+}
+.ax-glass-pane::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--ax-glass-pane);
+  -webkit-backdrop-filter: var(--ax-glass-filter);
+  backdrop-filter: var(--ax-glass-filter);
+  pointer-events: none;
+}
+
 /* The hexagon (U1): the system's shape, for avatars, status marks and empty states. */
 .ax-hex {
   clip-path: var(--ax-hex-clip);

@@ -48,7 +48,7 @@
   });
 </script>
 
-<div class="group" data-ide-group={group.id}>
+<div class="group ax-glass-pane" data-ide-group={group.id}>
   <div class="tabbar" class:areas data-ide-tabbar role="tablist">
     {#each group.tabs as tab (tab.id)}
       {@const agent = tabAgent(tab)}
@@ -138,22 +138,23 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    height: 100%;
+    /* The full height less the air above and below the plate (`.ax-glass-pane`). */
+    height: calc(100% - 2 * var(--ax-glass-gap));
     min-width: 0;
     min-height: 0;
-    background: var(--ax-surface-1);
     overflow: hidden;
   }
 
   /* The tab bar (`docs/plans/ui-ux-round.md` G4, replacing editor-look K7/K14): a calm strip a step below the pane;
      the active tab is the pane's own surface, as if the text it shows grew out of it. The language sits in the file
-     icon only, an agent's tab carries its hex avatar. */
+     icon only, an agent's tab carries its hex avatar. On glass (docs/plans/glass.md) the strip is the plate itself, no
+     band of its own; the active tab stays the pane's dense surface. */
   .tabbar {
     display: flex;
     align-items: flex-end;
     gap: calc(2px * var(--ax-ui-scale));
     padding: var(--ax-space-1) var(--ax-space-2) 0;
-    background: color-mix(in srgb, var(--ax-surface-1) 55%, var(--ax-bg));
+    background: transparent;
     border-bottom: 1px solid var(--ax-border);
     /* The bar is a drop target of its own; it must not shrink away. */
     flex: 0 0 auto;
@@ -220,8 +221,9 @@
     color: var(--ax-text-muted);
   }
 
+  /* No fade from the glass knob: it is a multiplier on alphas (up to 2.2), no element opacity — at its default of 1
+     the tab never faded anyway. */
   .tab.dragging {
-    opacity: var(--ax-tile-glass-opacity);
     cursor: grabbing;
   }
 
@@ -239,7 +241,6 @@
   .tabbar.areas {
     gap: var(--ax-space-4);
     padding: 0 var(--ax-space-4);
-    background: var(--ax-surface-1);
   }
 
   .areas .tab {

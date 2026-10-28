@@ -28,9 +28,12 @@
     onChanged: () => void;
     /** ⏎ on a line: open the working file there. */
     onOpenFile?: (line: number) => void;
+    /** Laid over the Studio's dock: a floating plate like the panes beneath it (docs/plans/glass.md, G8), not flush
+     *  inside a pane of its own. */
+    plate?: boolean;
   }
 
-  let { root, entry, side, version = 0, onClose, onChanged, onOpenFile }: Props = $props();
+  let { root, entry, side, version = 0, onClose, onChanged, onOpenFile, plate = false }: Props = $props();
 
   let loaded = $state.raw<LoadedGitDiff | null>(null);
   let model = $state.raw<DiffModel | null>(null);
@@ -116,7 +119,7 @@
     run(() => (side === "staged" ? gitApi.unstage(root, [entry.path, ...(entry.old_path ? [entry.old_path] : [])]) : gitApi.stage(root, [entry.path])));
 </script>
 
-<section class="git-diff" aria-label="Change of {entry.path}">
+<section class="git-diff" class:plate aria-label="Change of {entry.path}">
   <header>
     <span class="title" title={entry.path}>{entry.path}</span>
     <span class="side">{side === "staged" ? "Staged" : "Changes"}</span>
@@ -170,6 +173,16 @@
     flex-direction: column;
     min-height: 0;
     background: var(--ax-bg);
+  }
+
+  /* Over the dock, a plate like the panes it lies over (docs/plans/glass.md, G8), but dense: it covers them in every
+     mode, and through glass their text would mix with the diff's (G14). */
+  .git-diff.plate {
+    inset: var(--ax-glass-gap);
+    overflow: hidden;
+    border: 1px solid var(--ax-glass-edge);
+    border-radius: var(--ax-glass-radius);
+    box-shadow: var(--ax-glass-shadow);
   }
 
   header {

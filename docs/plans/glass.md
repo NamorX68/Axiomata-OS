@@ -99,7 +99,16 @@ Owners). Halt nur bei GL0 und nach GL2.
   denselben Glasblock (bewusst: jedes Theme bleibt in sich vollständig, wie seine übrigen Tokens).
 - **GL2 — Studio:** schwebende Platten, Leseflächen, Terminal blickdicht (G13), Menüs und der Diff über dem Dock
   dicht (G14). Dabei `ide/PaneGroup.svelte`s gezogenen Reiter (`opacity: var(--ax-tile-glass-opacity)`) vom Regler
-  lösen: der Multiplikator ist keine Element-Deckkraft, bei 100 % verschwindet der Reiter. Danach
+  lösen: der Multiplikator ist keine Element-Deckkraft, bei 100 % verschwindet der Reiter. **Gebaut** 2026-10-28:
+  die Klasse `.ax-glass-pane` (`styles.css`) für Pane-Gruppen, Seitenleiste und Inspektor, die Leiste links auf dem
+  Grund, unsichtbare Trennstriche (die Luft ist die Linie), der Diff als dichte Platte. Zwei Entscheidungen beim Bau:
+  (1) **Leseflächen sind dicht, nicht durchscheinend** — die Zeilennummern-Spalte und die angehefteten Kopfzeilen des
+  Editors liegen über dem scrollenden Text und müssen ihn mit `--ax-editor-bg` verdecken; der Editor bleibt also eine
+  ruhige Platte in seiner Farbe (G5s „dichte Platte“, anders als das Mockup). `--ax-glass-read` bleibt für Leseflächen
+  ohne solche Überlagerungen (GL3: Notes). (2) **Im Studio werden keine Flächenfarben (`--ax-surface-*`)
+  überschrieben**, nur `--ax-card-bg`, `--ax-border`, `--ax-border-strong`: das Terminal liest `--ax-surface-1` als
+  seinen Hintergrund und meldet ihn einer TUI (OSC 11) — durchsichtiges Weiß hätte Glut ein helles Theme gemeldet.
+  Terminal (G13), Editor und Diff bleiben damit von selbst dicht. Danach
   **Leistungstest** in der installierten App (Studio mit laufenden Agent-Panes, Scrollen in Editor und Kanban,
   Zeitmessung im Safari-Web-Inspector, Owner als „Hände“); ruckelt es, wird zuerst die Unschärfe angepasst.
 - **GL3 — Panels:** `Window.svelte`, Staging-Panels, Kanban (Spalten ohne Boden, Kartenplatten), Datei/Notes,
