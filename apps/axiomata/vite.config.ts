@@ -27,6 +27,10 @@ export default defineConfig(async () => ({
     // flag starts unset, whatever the machine has in `.env.local`.
     env: { VITE_AXIOMATA_DISABLE_AUTO_REFRESH: "" },
   },
+  // The CSP's nonce (`core/htmllink.ts`): Vite puts this placeholder on the tags it writes into `index.html`, Tauri
+  // fills a fresh nonce into it on every load and allows it in the policy's `script-src`; a course page framed by the
+  // file viewer takes it for its own scripts. Only for a build — the tests have no `index.html`.
+  html: isVitest ? undefined : { cspNonce: "__TAURI_SCRIPT_NONCE__" },
   // Svelte 5 client builds for component imports under vitest.
   resolve: isVitest ? { conditions: ["browser"] } : undefined,
 

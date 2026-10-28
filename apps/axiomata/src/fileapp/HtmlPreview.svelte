@@ -6,11 +6,22 @@
 
   A click on a relative link inside the page (the next lesson) arrives as a
   message (`core/htmllink.ts`) and is handed to the owner as a file to open,
-  resolved against this page's own path. The page is re-rendered a moment
+  resolved against this page's own path; a web or mail link opens in the browser. The page's scripts run under the
+  app's CSP by the load's nonce (`pageScriptNonce`). The page is re-rendered a moment
   after the source stops changing, not on every keystroke.
 -->
 <script lang="ts">
-  import { PAGE_MESSAGE_SOURCE, resolveRelativeLink, withNavIntercept, ZOOM_MESSAGE_SOURCE } from "../core/htmllink";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+
+  import {
+    PAGE_MESSAGE_SOURCE,
+    EXTERNAL_LINK_INTERVAL_MS,
+    isOpenableExternal,
+    pageScriptNonce,
+    resolveRelativeLink,
+    withNavIntercept,
+    ZOOM_MESSAGE_SOURCE,
+  } from "../core/htmllink";
 
   interface Props {
     /** The page's source. */
@@ -35,7 +46,8 @@
   $effect(() => {
     const source = text;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => (doc = withNavIntercept(source)), doc ? RENDER_DELAY_MS : 0);
+    // The app's nonce for the CSP, so the page's own scripts and the intercept run (`core/htmllink.ts`).
+    timer = setTimeout(() => (doc = withNavIntercept(source, pageScriptNonce())), doc ? RENDER_DELAY_MS : 0);
     return () => clearTimeout(timer);
   });
 
@@ -50,11 +62,24 @@
     sendZoom();
   });
 
+  /** When this page last opened an external link (`EXTERNAL_LINK_INTERVAL_MS`). */
+  let lastExternal = 0;
+
   /** Only this frame's messages: several pages may be open at once. */
   function onMessage(e: MessageEvent): void {
     if (!frame || e.source !== frame.contentWindow) return;
-    const data = e.data as { source?: string; href?: string } | null;
+    const data = e.data as { source?: string; href?: string; external?: boolean } | null;
     if (!data || data.source !== PAGE_MESSAGE_SOURCE || typeof data.href !== "string") return;
+    if (data.external === true) {
+      // Only while the page has the focus (a click went into it), and one at a time: a page's own script could post
+      // these by itself — the parent cannot tell its message from a click's.
+      const now = Date.now();
+      if (document.activeElement !== frame || now - lastExternal < EXTERNAL_LINK_INTERVAL_MS) return;
+      if (!isOpenableExternal(data.href)) return;
+      lastExternal = now;
+      void openUrl(data.href).catch(() => {});
+      return;
+    }
     const target = resolveRelativeLink(rel, data.href);
     if (target !== null) onOpenLink?.(target);
   }
