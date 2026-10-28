@@ -48,7 +48,7 @@
   });
 </script>
 
-<div class="group ax-glass-pane" data-ide-group={group.id}>
+<div class="group" data-ide-group={group.id}>
   <div class="tabbar" class:areas data-ide-tabbar role="tablist">
     {#each group.tabs as tab (tab.id)}
       {@const agent = tabAgent(tab)}
@@ -105,7 +105,7 @@
     {/each}
   </div>
 
-  <div class="body">
+  <div class="body ax-glass-pane">
     <!-- Empty on purpose. The pane itself is rendered once, flat, in the
          view's pane store and moved in here after every layout change
          (`ide/paneStore.ts`) — rendering it in this `{#each}` is what used to
@@ -138,24 +138,23 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    /* The full height less the air above and below the plate (`.ax-glass-pane`). */
-    height: calc(100% - 2 * var(--ax-glass-gap));
+    height: 100%;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
   }
 
-  /* The tab bar (`docs/plans/ui-ux-round.md` G4, replacing editor-look K7/K14): a calm strip a step below the pane;
-     the active tab is the pane's own surface, as if the text it shows grew out of it. The language sits in the file
-     icon only, an agent's tab carries its hex avatar. On glass (docs/plans/glass.md) the strip is the plate itself, no
-     band of its own; the active tab stays the pane's dense surface. */
+  /* The tab bar (`docs/plans/ui-ux-round.md` G4, replacing editor-look K7/K14). On glass (docs/plans/glass.md, owner
+     2026-10-28) the tabs stand free on the ground and the plate begins under them (`.body`): no strip, no line, no
+     frame above the content. The active tab is a small glass pill, the others are their icon and name on the ground.
+     The language sits in the file icon only, an agent's tab carries its hex avatar. Still the drop target of its
+     group, only unseen. */
   .tabbar {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: calc(2px * var(--ax-ui-scale));
-    padding: var(--ax-space-1) var(--ax-space-2) 0;
+    padding: var(--ax-glass-gap) calc(var(--ax-glass-gap) + var(--ax-space-1)) 0;
     background: transparent;
-    border-bottom: 1px solid var(--ax-border);
     /* The bar is a drop target of its own; it must not shrink away. */
     flex: 0 0 auto;
     overflow-x: auto;
@@ -169,7 +168,8 @@
     gap: var(--ax-space-2);
     padding: var(--ax-space-1) var(--ax-space-1) var(--ax-space-1) var(--ax-space-3);
     min-height: var(--ax-hit-min);
-    border-radius: var(--ax-radius-md) var(--ax-radius-md) 0 0;
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-md);
     color: var(--ax-text-muted);
     font: var(--ax-type-body);
     font-weight: 500;
@@ -187,28 +187,17 @@
   }
 
   .tab:hover {
-    color: var(--ax-text);
-  }
-
-  .tab.active {
-    margin-bottom: -1px;
-    padding-bottom: calc(var(--ax-space-1) + 1px);
     background: var(--ax-surface-1);
     color: var(--ax-text);
-    box-shadow: inset 0 1px 0 var(--ax-edge-light);
   }
 
-  /* A quiet line along the top of the active tab: where the eye finds it, without the accent (selected ≠ alive). */
-  .tab.active::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: var(--ax-space-3);
-    right: var(--ax-space-3);
-    height: calc(2px * var(--ax-ui-scale));
-    border-radius: calc(2px * var(--ax-ui-scale));
-    background: var(--ax-text);
-    opacity: 0.45;
+  /* The active tab: a glass pill of its own, the plate's edge and light — selected, without the accent (selected ≠
+     alive). */
+  .tab.active {
+    border-color: var(--ax-glass-edge);
+    background: var(--ax-surface-2);
+    color: var(--ax-text);
+    box-shadow: var(--ax-glass-light);
   }
 
   /* An agent at work: its name takes the glow's colour (its avatar glows beside it). */
@@ -245,22 +234,28 @@
 
   .areas .tab {
     padding: 0;
+    border: 0;
     border-radius: 0;
     font: var(--ax-type-label);
   }
 
+  .areas .tab:hover,
   .areas .tab.active {
-    margin-bottom: 0;
-    padding-bottom: 0;
     background: none;
     box-shadow: none;
   }
 
+  /* An area head's mark: a quiet line under the active one. */
   .areas .tab.active::before {
-    top: auto;
+    content: "";
+    position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
+    height: calc(2px * var(--ax-ui-scale));
+    border-radius: calc(2px * var(--ax-ui-scale));
+    background: var(--ax-text);
+    opacity: 0.45;
   }
 
   .close {
@@ -288,10 +283,12 @@
     color: var(--ax-text);
   }
 
+  /* The glass plate (`.ax-glass-pane`), under the tabs: the content is cut to its rounded corners. */
   .body {
     position: relative;
     flex: 1 1 auto;
     min-height: 0;
+    overflow: hidden;
   }
 
   .slot {
