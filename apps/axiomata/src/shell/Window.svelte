@@ -50,8 +50,9 @@
   // ⌘W closes the newest dialog (`App.svelte`); the latest `onClose` is the one called. Only a modal one: the docked
   // chat is no dialog, and ⌘W must not close it from under the file window the owner is working in.
   $effect(() => (modal ? pushClose(() => onClose()) : undefined));
-  // A modal window covers the app's ground, so what moves on it holds still beneath the glass (core/cover.ts).
-  $effect(() => (modal ? coverGround() : undefined));
+  // A window covers the app's ground — the docked chat too, it lies over the Orbit — so what moves on it holds still
+  // beneath the glass (core/cover.ts).
+  $effect(() => coverGround());
 
   // `!e.defaultPrevented` + calling `preventDefault()` on the way out is
   // the coordination convention `StagingLayer`/`ChatPanel`/`SecondBrainView`
@@ -93,7 +94,7 @@
     </div>
   </div>
 {:else}
-  <div class="window docked ax-glass-panel ax-glass-scope" {style} role="dialog" aria-label={title}>
+  <div class="window ax-glass-panel ax-glass-scope" {style} role="dialog" aria-label={title}>
     {@render card()}
   </div>
 {/if}
@@ -117,14 +118,6 @@
     flex-direction: column;
     overflow: hidden;
     border-radius: var(--ax-radius-lg);
-  }
-
-  /* Docked (the chat), the window covers nothing and the Orbit beside it keeps moving: dense glass, no live blur,
-     which would be computed again on every frame of the Orbit's spin. */
-  .window.docked::before {
-    background: var(--ax-glass-menu);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
 
   .body {
