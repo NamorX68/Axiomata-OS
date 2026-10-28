@@ -8,6 +8,9 @@
  */
 
 [data-theme="steampunk"] {
+  /* The glass ground (docs/plans/glass.md, G7): a copper counter-light beside the brass embers. */
+  --ax-glass-counter: rgba(184, 115, 51, 0.09);
+
   --ax-color-scheme: dark;
 
   --ax-bg: #110d0a;

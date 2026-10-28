@@ -3278,6 +3278,15 @@ pub async fn installed_fonts() -> Result<Vec<InstalledFont>, String> {
     .map_err(|err| format!("font lookup failed: {err}"))
 }
 
+/// Whether macOS asks to reduce transparency (`docs/plans/glass.md`, G12): the glass then turns dense. Asked at the
+/// start and whenever the window comes back to the front, where a change in System Settings shows.
+#[tauri::command]
+pub async fn reduce_transparency() -> Result<bool, String> {
+    tokio::task::spawn_blocking(axiomata_macos::accessibility::reduces_transparency)
+        .await
+        .map_err(|err| format!("accessibility lookup failed: {err}"))
+}
+
 /// One display as the UI scale sees it (`docs/plans/editor-look.md`, LK0, K9):
 /// where it is, in points of the global display space (the webview's
 /// `screenX`/`screenY`), and the UI scale its real density asks for.

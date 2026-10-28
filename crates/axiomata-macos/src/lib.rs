@@ -12,7 +12,11 @@
 //!
 //! And recurring calendar events through EventKit, which the calendar module's MCP tool cannot create (board card
 //! #77) — the one module that does take a dependency, the objc2 EventKit bindings.
+//!
+//! And the display's accessibility options the UI follows, today "Reduce transparency" for the glass
+//! (`docs/plans/glass.md`, G12).
 
+pub mod accessibility;
 pub mod calendar;
 pub mod clipboard;
 pub mod display;

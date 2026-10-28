@@ -36,6 +36,7 @@
   import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
+  import { systemReducesTransparency } from "../core/glass";
   import { KEYBOARD_SETTINGS, isKeyboardSetting, keyboardSetting, platform, platformLabel } from "../core/keys";
   import { UI_SIZE_MAX, UI_SIZE_MIN, uiScaleAuto, uiSize } from "../core/uiScale";
   import { THEMES, applyTheme } from "../core/themes";
@@ -602,14 +603,25 @@
         <section>
           <h3>Transparency</h3>
           <label class="row">
-            <span class="label">Window transparency</span>
-            <input type="range" min="0" max="100" step="5" bind:value={$windowTransparency} />
+            <span class="label">Glass</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              disabled={$systemReducesTransparency}
+              bind:value={$windowTransparency}
+            />
             <span class="readout">{$windowTransparency}%</span>
           </label>
           <p class="hint">
-            How see-through windows, dialogs and dragged tiles look — 0% an opaque surface,
-            100% fully transparent, 50% the unchanged default look of the theme.
+            How see-through the glass looks — panes, panels, dialogs and dragged tiles. 0% a solid surface, 100% fully
+            transparent, 50% the theme's own look. Menus stay dense either way, and macOS "Reduce transparency" makes
+            all of it solid.
           </p>
+          {#if $systemReducesTransparency}
+            <p class="hint">macOS "Reduce transparency" is on: the glass is solid now.</p>
+          {/if}
         </section>
 
         <section>

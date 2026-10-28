@@ -8,6 +8,9 @@
  */
 
 [data-theme="forest"] {
+  /* The glass ground (docs/plans/glass.md, G7): a green counter-light, the forest under the embers. */
+  --ax-glass-counter: rgba(127, 208, 122, 0.07);
+
   --ax-color-scheme: dark;
 
   --ax-bg: #08100c;

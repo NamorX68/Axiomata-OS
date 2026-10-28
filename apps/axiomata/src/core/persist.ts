@@ -332,24 +332,8 @@ export async function initPersistence(): Promise<void> {
   keyboardSetting.subscribe((v) => {
     if (!first) setSetting("keyboard", v);
   });
-  // Unlike showGrid/snapEdges (read reactively wherever they're rendered),
-  // this setting needs an actual DOM side effect on every change, not just
-  // persistence — an inline style on `documentElement` is the one thing
-  // that reliably beats every theme's own `[data-theme]` rule for
-  // `--ax-tile-glass-bg` regardless of which theme is active, and survives
-  // a theme switch untouched (`applyTheme` never touches
-  // `documentElement.style`). The immediate fire on subscribing (same
-  // "materialises on first boot" Svelte behaviour `activeTheme` relies on
-  // above) applies the just-loaded value right away, not just future changes.
+  // Its effect on the glass is `glass.ts`'s; only its persistence is here.
   windowTransparency.subscribe((v) => {
-    // `v` is "how transparent" (0 opaque – 100 fully see-through); the CSS
-    // multiplier runs the other way (higher = more of the theme's own
-    // alpha = *less* see-through) and up to 2×, not 1×, so the opaque end
-    // of the slider can actually reach a solid window, not just "this
-    // theme's normal look" at best. See `stores.ts`'s `windowTransparency`
-    // doc comment for the full reasoning; `rgba()`'s alpha clamps to 1 on
-    // its own once the multiplier pushes a theme's base alpha above it.
-    document.documentElement.style.setProperty("--ax-tile-glass-opacity", String((100 - v) / 50));
     if (!first) setSetting("windowTransparency", v);
   });
   first = false;

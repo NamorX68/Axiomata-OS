@@ -359,6 +359,7 @@ pub fn run() {
             commands::clipboard_read,
             commands::installed_fonts,
             commands::ui_displays,
+            commands::reduce_transparency,
             commands::clipboard_write,
             commands::ide_agent_discard_hunk,
             commands::ide_agent_last_subject,

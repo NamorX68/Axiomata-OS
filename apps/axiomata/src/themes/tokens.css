@@ -106,6 +106,19 @@
      unchanged from before this token existed. */
   --ax-tile-glass-opacity: 1;
 
+  /* Glass (docs/plans/glass.md): panes and panels are translucent plates with a light edge instead of a frame, over a
+     ground they refract. The same knob as the tiles' (`core/glass.ts`, G5); the blur is not scaled with the UI. */
+  --ax-glass-opacity: var(--ax-tile-glass-opacity);
+  --ax-glass-blur: 24px;
+  --ax-glass-blur-panel: 28px;
+  --ax-glass-filter: blur(var(--ax-glass-blur)) saturate(var(--ax-glass-saturate));
+  --ax-glass-filter-panel: blur(var(--ax-glass-blur-panel)) saturate(var(--ax-glass-saturate));
+  /* Floating plates (G8): the air between the Studio's panes shows the ground, and with it the glass. */
+  --ax-glass-gap: calc(3px * var(--ax-ui-scale));
+  --ax-glass-radius: var(--ax-radius-lg);
+  /* Cards, notices and plan entries share one plate (Kanban, Studio). */
+  --ax-glass-plate-radius: calc(12px * var(--ax-ui-scale));
+
   /* The three bundled UI faces (U3/G1, `core/uiFont.ts`); `data-ui-font` on <html> picks one as `--ax-font-sans`. */
   --ax-font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --ax-font-geist: "Geist Variable", var(--ax-font-system);
@@ -226,6 +239,41 @@
   --ax-label-5: #c0a13f;
   --ax-label-6: #5aa8a8;
 
+  /* Glass, palette half (docs/plans/glass.md §3): the dark default, derived from the theme's own surface; light
+     themes redefine edge, light, shadows, plates and the alphas (frosted glass, G6). A theme may give the ground its
+     own counter-light (G7). Menus and popovers stay dense whatever the knob says, or their text mixes with what lies
+     beneath (G14); a plate laid over panes (the Studio's diff) takes the menu's density for the same reason. */
+  --ax-glass-tint: var(--ax-surface-2);
+  --ax-glass-pane-alpha: 0.46;
+  --ax-glass-panel-alpha: 0.5;
+  --ax-glass-menu-alpha: 0.88;
+  --ax-glass-saturate: 160%;
+  --ax-glass-pane: rgb(from var(--ax-glass-tint) r g b / calc(var(--ax-glass-pane-alpha) * var(--ax-glass-opacity)));
+  --ax-glass-panel: rgb(from var(--ax-glass-tint) r g b / calc(var(--ax-glass-panel-alpha) * var(--ax-glass-opacity)));
+  --ax-glass-menu: rgb(
+    from var(--ax-glass-tint) r g b /
+      max(var(--ax-glass-menu-alpha), calc(var(--ax-glass-menu-alpha) * var(--ax-glass-opacity)))
+  );
+  /* Editor, diff and notes: a calm plate over the glass, never a hole of solid colour. */
+  --ax-glass-read: rgba(0, 0, 0, 0.2);
+  --ax-glass-edge: rgba(255, 255, 255, 0.075);
+  --ax-glass-light: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --ax-glass-shadow: var(--ax-glass-light), 0 10px 40px rgba(0, 0, 0, 0.35);
+  --ax-glass-shadow-panel: var(--ax-glass-light), 0 30px 80px rgba(0, 0, 0, 0.55);
+  --ax-glass-shadow-plate: var(--ax-glass-light), 0 6px 18px rgba(0, 0, 0, 0.22);
+  --ax-glass-plate: rgba(255, 255, 255, 0.04);
+  --ax-glass-plate-hover: rgba(255, 255, 255, 0.065);
+  /* The ground the glass refracts (G7, G10): the glow as two embers — strong low on the left, faint high on the
+     right — and a cool counter-light in the middle, under the theme's own texture. It does not wander: where
+     something works, the rings say (G11). */
+  --ax-glass-ember: color-mix(in srgb, var(--ax-glow) 22%, transparent);
+  --ax-glass-ember-far: color-mix(in srgb, var(--ax-glow) 8%, transparent);
+  --ax-glass-counter: rgba(90, 100, 140, 0.06);
+  --ax-glass-backdrop:
+    radial-gradient(1400px 800px at 12% 115%, var(--ax-glass-ember), transparent 62%),
+    radial-gradient(1100px 700px at 92% -12%, var(--ax-glass-ember-far), transparent 60%),
+    radial-gradient(900px 900px at 55% 50%, var(--ax-glass-counter), transparent 70%), var(--ax-bg);
+
   /* Elevation (U1 §3): the ground, a tile, a panel, a popover. Each step is a tone *and* a 1-px light edge along the
      top — the glass edge carries depth where a shadow cannot (dark themes); light themes redefine the edge. */
   --ax-elev-0: var(--ax-bg);
@@ -340,4 +388,14 @@
   --ax-anim-glow: none;
   --ax-anim-orbit: none;
   --ax-anim-nudge: none;
+}
+
+/* macOS "Reduce transparency" (`core/glass.ts`, G12): the glass turns solid and loses its blur, whatever the knob. */
+[data-transparency="reduced"] {
+  --ax-glass-pane: var(--ax-glass-tint);
+  --ax-glass-panel: var(--ax-glass-tint);
+  --ax-glass-menu: var(--ax-glass-tint);
+  --ax-glass-filter: none;
+  --ax-glass-filter-panel: none;
+  --ax-tile-glass-blur: 0px;
 }
