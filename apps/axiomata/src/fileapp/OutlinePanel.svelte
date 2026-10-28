@@ -148,8 +148,9 @@
     flex-direction: column;
     min-height: 0;
     height: 100%;
+    /* The line on top is the boundary to the tree; no fill of its own, so on glass both halves of the sidebar show the
+       same ground (docs/plans/glass.md). */
     border-top: 1px solid var(--ax-border);
-    background: var(--ax-surface-1);
   }
 
   header {
