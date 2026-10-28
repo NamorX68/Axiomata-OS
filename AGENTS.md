@@ -101,6 +101,14 @@ and each module's manual ↻ still runs regardless (`core/devFlags.ts`).
 
 ## Architecture — traps worth knowing before you touch things
 
+- **Never put a worktree or a build folder under `~/Documents`** (owner, 2026-10-28): iCloud syncs it, and a Rust
+  `target/` or a fresh `node_modules` (thousands of files) keeps `fileproviderd` busy for an hour — every read under
+  `~/Documents` slows down, the installed app's vault walk and the vite mock stall. Put a worktree under
+  `~/.claude/worktrees/<name>/` with symlinks `Axiomata-Glut` and `Axiomata-Foundation` beside it (the root
+  `Cargo.toml`'s path dependencies are `../Axiomata-Glut`, `../Axiomata-Foundation`), make its `node_modules` a
+  symlink to the main checkout's (never `npm ci` there; Vite's `server.fs.allow` covers the symlinked path), and
+  remove the worktree once its branch is merged.
+
 - **Two crates live in repositories of their own, beside this one** (2026-10-21): Glut — the harness and its program `glut`
   — in `../Axiomata-Glut`, and the guarded file service `axiomata-files` in `../Axiomata-Foundation` (shared with Glut
   and, later, the Studio as an app of its own). Both are path dependencies in the root `Cargo.toml`, so they must be
