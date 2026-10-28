@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brain-Ansichten Mock</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root {
+    --ax-ground: #0b0b0f;
+    --ax-ground-2: #14141a;
+    --ax-glass: rgba(28, 28, 36, 0.55);
+    --ax-glass-strong: rgba(22, 22, 30, 0.78);
+    --ax-glass-edge: rgba(255, 255, 255, 0.08);
+    --ax-text: #e9e7e4;
+    --ax-text-dim: #9a98a3;
+    --ax-text-faint: #64626c;
+    --ax-glow: #ff7a1a;
+    --ax-glow-soft: rgba(255, 122, 26, 0.22);
+    --ax-selected-bg: rgba(255, 255, 255, 0.07);
+    --ax-radius: 14px;
+    --ax-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--ax-ground);
+    color: var(--ax-text);
+    font: 13px/1.45 var(--ax-font);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* The blurred backdrop the glass panels float over. */
+  .backdrop {
+    position: fixed; inset: -10%;
+    background:
+      radial-gradient(40% 35% at 22% 30%, rgba(120, 70, 200, 0.16), transparent 70%),
+      radial-gradient(35% 40% at 78% 70%, rgba(40, 140, 170, 0.14), transparent 70%),
+      radial-gradient(25% 25% at 60% 20%, rgba(255, 122, 26, 0.07), transparent 70%),
+      linear-gradient(160deg, var(--ax-ground-2), var(--ax-ground));
+    filter: blur(30px);
+    z-index: 0;
+  }
+  .app {
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: 300px 1fr; gap: 14px;
+    height: 100vh; padding: 14px;
+  }
+  .glass {
+    background: var(--ax-glass);
+    border: 1px solid var(--ax-glass-edge);
+    border-radius: var(--ax-radius);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    backdrop-filter: blur(22px) saturate(140%);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  aside { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .head { padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+  .head h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
+  .head small { color: var(--ax-text-dim); display: block; font-size: 11px; }
+  nav { padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+  nav button {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 10px; color: var(--ax-text-dim);
+  }
+  nav button:hover { background: rgba(255, 255, 255, 0.04); color: var(--ax-text); }
+  nav button[aria-selected="true"] { background: var(--ax-selected-bg); color: var(--ax-text); }
+  nav button[aria-selected="true"] .hexi { fill: var(--ax-glow); }
+  nav .hexi { fill: #3a3944; transition: fill .2s; }
+  nav b { font-weight: 600; font-size: 13px; display: block; }
+  nav span.sub { font-size: 11px; color: var(--ax-text-faint); }
+  nav kbd { margin-left: auto; font: 10px var(--ax-font); color: var(--ax-text-faint);
+    border: 1px solid var(--ax-glass-edge); border-radius: 4px; padding: 0 5px; }
+  .caption { padding: 14px 16px; flex: 1; min-height: 0; overflow: auto; }
+  .caption h2 { margin: 0 0 2px; font-size: 16px; font-weight: 600; }
+  .caption .kind { color: var(--ax-text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .caption p { margin: 10px 0 0; color: var(--ax-text-dim); }
+  .caption p strong { color: var(--ax-text); font-weight: 600; }
+  .legend { padding: 12px 16px; font-size: 11px; color: var(--ax-text-dim); }
+  .agebar { height: 8px; border-radius: 4px; margin: 6px 0 2px;
+    background: linear-gradient(90deg, hsl(215 45% 18%), hsl(215 65% 42%), hsl(215 75% 66%)); }
+  .agebar-l { display: flex; justify-content: space-between; color: var(--ax-text-faint); }
+  .ember-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ax-glow);
+    box-shadow: 0 0 8px var(--ax-glow); margin-right: 6px; vertical-align: middle; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; }
+  .chips i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  main { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+  #stage { position: absolute; inset: 0; }
+  #stage svg, #stage canvas { display: block; }
+  .stage-title { position: absolute; left: 18px; top: 14px; z-index: 2; padding: 6px 12px; font-size: 12px; color: var(--ax-text-dim); }
+  .tip {
+    position: fixed; pointer-events: none; z-index: 10; padding: 7px 10px; font-size: 12px;
+    background: var(--ax-glass-strong); border: 1px solid var(--ax-glass-edge); border-radius: 9px;
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); opacity: 0; transition: opacity .12s;
+    max-width: 260px;
+  }
+  .tip .t-area { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .tip .t-meta { color: var(--ax-text-dim); font-size: 11px; }
+  .controls { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 3;
+    display: flex; align-items: center; gap: 12px; padding: 8px 14px; width: min(560px, 80%); }
+  .controls button { all: unset; cursor: pointer; width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center; background: rgba(255, 255, 255, 0.06); color: var(--ax-text); font-size: 11px; }
+  .controls input { flex: 1; accent-color: var(--ax-glow); }
+  .controls .date { font-variant-numeric: tabular-nums; color: var(--ax-text-dim); min-width: 150px; text-align: right; font-size: 12px; }
+  @keyframes ember { 0%, 100% { stroke-opacity: .95; } 50% { stroke-opacity: .25; } }
+  .ember { stroke: var(--ax-glow); stroke-width: 1.6; animation: ember 2.4s ease-in-out infinite;
+    filter: drop-shadow(0 0 3px rgba(255, 122, 26, .8)); }
+  .axis text { fill: var(--ax-text-faint); font: 10px var(--ax-font); }
+  .axis line, .axis path { stroke: rgba(255, 255, 255, 0.08); }
+  @media (prefers-reduced-motion: reduce) { .ember { animation: none; } }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<div class="app">
+  <aside>
+    <div class="glass head">
+      <svg width="26" height="26" viewBox="-13 -13 26 26"><polygon points="0,-12 10.4,-6 10.4,6 0,12 -10.4,6 -10.4,-6" fill="none" stroke="#ff7a1a" stroke-width="1.6"/><polygon points="0,-5 4.3,-2.5 4.3,2.5 0,5 -4.3,2.5 -4.3,-2.5" fill="#ff7a1a"/></svg>
+      <div><h1>Second Brain · Ansichten</h1><small>Mock mit Beispieldaten — 6 Alternativen</small></div>
+    </div>
+    <nav class="glass" id="nav" role="tablist"></nav>
+    <div class="glass caption" id="caption"></div>
+    <div class="glass legend" id="legend"></div>
+  </aside>
+  <main class="glass">
+    <div id="stage"></div>
+  </main>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// Fake vault: seeded so every reload shows the same vault.
+// ---------------------------------------------------------------------------
+const rng = d3.randomLcg(0.4207);
+const rand = (a = 0, b = 1) => a + (b - a) * rng();
+const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+
+const SPAN_DAYS = 730; // two years of history
+const RECENT_DAYS = 21; // "alive": touched within three weeks
+const NOW = new Date(2026, 9, 29);
+const EMBER = "#ff7a1a";
+
+// Hues are spread so no area sits on the ember orange (~25deg).
+const AREAS = [
+  { id: "inbox", name: "Inbox", hue: 200, share: 0.07, start: 120, recency: 3.2,
+    words: ["Idee", "Link", "Notiz", "Screenshot", "Gedanke", "Artikel", "Zitat", "Frage"] },
+  { id: "ki", name: "KI", hue: 275, share: 0.15, start: 610, recency: 1.4,
+    words: ["Prompt-Muster", "Agenten", "RAG", "Embeddings", "Claude", "Kontextfenster", "Evals", "MCP", "Fine-Tuning", "Tokenkosten"] },
+  { id: "dev", name: "Entwicklung", hue: 148, share: 0.16, start: 720, recency: 1.1,
+    words: ["Rust", "Tauri", "Svelte", "tree-sitter", "Git-Workflow", "Tests", "Glut", "Axiomata", "Async", "SQLite"] },
+  { id: "work", name: "Arbeit", hue: 218, share: 0.12, start: 700, recency: 0.9,
+    words: ["Meeting", "Projekt", "Kunde", "Angebot", "Retro", "Roadmap", "Protokoll", "Ziele"] },
+  { id: "me", name: "Persönlich", hue: 335, share: 0.09, start: 730, recency: 0.8,
+    words: ["Tagebuch", "Reise", "Gesundheit", "Familie", "Wohnung", "Finanzen", "Rezepte"] },
+  { id: "photo", name: "Fotografie", hue: 52, share: 0.07, start: 690, recency: 0.7,
+    words: ["Objektiv", "Lightroom", "Street", "Landschaft", "Film", "Licht", "Komposition"] },
+  { id: "learn", name: "Learning", hue: 175, share: 0.1, start: 540, recency: 1.2,
+    words: ["Kurs", "Buch", "Zettel", "Lernkarte", "Vortrag", "Paper", "Mathe"] },
+  { id: "soc", name: "Gesellschaft", hue: 0, share: 0.06, start: 650, recency: 0.8,
+    words: ["Politik", "Klima", "Medien", "Ethik", "Wirtschaft", "Stadt"] },
+  { id: "sys", name: "System & Werkzeuge", hue: 238, share: 0.08, start: 480, recency: 1.0,
+    words: ["Setup", "Shell", "Neovim", "Backup", "Obsidian", "Dotfiles", "Shortcuts"] },
+  { id: "kanban", name: "Kanban", hue: 112, share: 0.05, start: 300, recency: 1.6,
+    words: ["Board", "Karte", "Sprint", "Backlog", "Review"] },
+  { id: "mail", name: "Mail", hue: 300, share: 0.05, start: 260, recency: 1.5,
+    words: ["Digest", "Thema", "Newsletter", "Antwort", "Termin"] },
+];
+AREAS.forEach((a, i) => { a.i = i; });
+
+// Which areas tend to link to each other (beyond their own notes).
+const AFFINITY = { inbox: ["ki", "dev", "work", "learn", "me"], ki: ["dev", "learn", "sys", "soc"],
+  dev: ["ki", "sys", "work", "kanban"], work: ["dev", "mail", "kanban"], me: ["photo", "soc"],
+  photo: ["me", "learn"], learn: ["ki", "dev", "soc"], soc: ["ki", "me"], sys: ["dev", "ki"],
+  kanban: ["dev", "work"], mail: ["work", "inbox"] };
+
+const SUFFIX = ["", "", "", " – Notizen", " – Überblick", " v2", " – Fragen", " – Entwurf", " – Lektion", " im Alltag"];
+const TOTAL = 252;
+const NOTES = [];
+const usedTitles = new Set();
+AREAS.forEach((a) => {
+  const count = Math.round(a.share * TOTAL);
+  for (let k = 0; k < count; k++) {
+    // Areas started at different times; within one, newer notes are more frequent.
+    const age = Math.max(0, Math.round(a.start * Math.pow(rng(), a.recency)));
+    let title = pick(a.words) + pick(SUFFIX);
+    let n = 2;
+    while (usedTitles.has(title)) title = `${pick(a.words)} ${n++}`;
+    usedTitles.add(title);
+    NOTES.push({ a: a.i, area: a, age, title, deg: 0 });
+  }
+});
+NOTES.sort((x, y) => y.age - x.age); // oldest first
+NOTES.forEach((n, i) => { n.i = i; n.created = SPAN_DAYS - n.age; n.recent = n.age < RECENT_DAYS; });
+
+const byArea = AREAS.map((a) => NOTES.filter((n) => n.a === a.i));
+const LINKS = [];
+const linkKey = new Set();
+NOTES.forEach((src) => {
+  const k = Math.floor(rand(0, 3.2));
+  for (let j = 0; j < k; j++) {
+    const sameArea = rng() < 0.68;
+    const areaId = sameArea ? src.area.id : pick(AFFINITY[src.area.id]);
+    const pool = byArea[AREAS.findIndex((a) => a.id === areaId)].filter((n) => n.i !== src.i);
+    if (!pool.length) continue;
+    // Prefer linking to a note that already existed when this one was written.
+    const older = pool.filter((n) => n.created <= src.created);
+    const tgt = pick(older.length ? older : pool);
+    const key = Math.min(src.i, tgt.i) + "-" + Math.max(src.i, tgt.i);
+    if (linkKey.has(key)) continue;
+    linkKey.add(key);
+    LINKS.push({ s: src.i, t: tgt.i, born: Math.max(src.created, tgt.created) });
+    src.deg++; tgt.deg++;
+  }
+});
+
+// Older notes sink into their area's hue; new ones are bright.
+function ageT(age) { return Math.min(1, age / SPAN_DAYS); }
+function noteColor(note, age = note.age) {
+  const t = Math.pow(ageT(age), 0.65);
+  return `hsl(${note.area.hue} ${72 - 28 * t}% ${68 - 46 * t}%)`;
+}
+function areaColor(a, l = 62, alpha = 1) { return `hsl(${a.hue} 62% ${l}% / ${alpha})`; }
+
+const MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+function dateOfDay(day) { return new Date(NOW.getTime() - (SPAN_DAYS - day) * 864e5); }
+function fmtDate(d) { return `${d.getDate()}. ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
+function fmtAge(age) {
+  if (age < 1) return "heute";
+  if (age < 31) return `vor ${age} Tagen`;
+  if (age < 365) return `vor ${Math.round(age / 30.4)} Monaten`;
+  return `vor ${(age / 365).toFixed(1).replace(".", ",")} Jahren`;
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+const tip = document.getElementById("tip");
+function showTip(ev, html) {
+  tip.innerHTML = html;
+  tip.style.opacity = 1;
+  const x = Math.min(ev.clientX + 14, innerWidth - 280);
+  tip.style.left = x + "px";
+  tip.style.top = ev.clientY + 14 + "px";
+}
+function hideTip() { tip.style.opacity = 0; }
+function noteTip(n) {
+  return `<div class="t-area" style="color:${areaColor(n.area, 68)}">${n.area.name}</div>
+    <div>${n.title}</div><div class="t-meta">${fmtAge(n.age)} · ${n.deg} Links${n.recent ? ' · <span style="color:' + EMBER + '">lebt</span>' : ""}</div>`;
+}
+function makeCanvas(el, w, h) {
+  const c = document.createElement("canvas");
+  const dpr = window.devicePixelRatio || 1;
+  c.width = w * dpr; c.height = h * dpr;
+  c.style.width = w + "px"; c.style.height = h + "px";
+  el.appendChild(c);
+  const g = c.getContext("2d");
+  g.scale(dpr, dpr);
+  return { c, g };
+}
+function hexPath(g, x, y, r) {
+  g.beginPath();
+  for (let k = 0; k < 6; k++) {
+    const a = Math.PI / 3 * k - Math.PI / 2;
+    const px = x + r * Math.cos(a), py = y + r * Math.sin(a);
+    k ? g.lineTo(px, py) : g.moveTo(px, py);
+  }
+  g.closePath();
+}
+function hexPoints(r) {
+  return d3.range(6).map((k) => {
+    const a = Math.PI / 3 * k - Math.PI / 2;
+    return [r * Math.cos(a), r * Math.sin(a)].map((v) => v.toFixed(2)).join(",");
+  }).join(" ");
+}
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------------------------------------------------------------------------
+// View 1 — Sternkarte: force graph, each area pulled to its own constellation.
+// ---------------------------------------------------------------------------
+function mountStars(el, w, h) {
+  const { c, g } = makeCanvas(el, w, h);
+  const nodes = NOTES.map((n) => ({ n, x: w / 2 + rand(-20, 20), y: h / 2 + rand(-20, 20), r: 1.8 + Math.sqrt(n.deg) * 1.4, ph: rand(0, 6.28) }));
+  const links = LINKS.map((l) => ({ source: l.s, target: l.t, same: NOTES[l.s].a === NOTES[l.t].a }));
+  const centers = AREAS.map((a, i) => {
+    const ang = (i / AREAS.length) * Math.PI * 2 - Math.PI / 2;
+    return { x: w / 2 + Math.cos(ang) * w * 0.32, y: h / 2 + Math.sin(ang) * h * 0.33 };
+  });
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).distance((l) => (l.same ? 16 : 70)).strength((l) => (l.same ? 0.3 : 0.015)))
+    .force("charge", d3.forceManyBody().strength(-16))
+    .force("x", d3.forceX((d) => centers[d.n.a].x).strength(0.08))
+    .force("y", d3.forceY((d) => centers[d.n.a].y).strength(0.08))
+    .force("collide", d3.forceCollide((d) => d.r + 1.6))
+    .alphaDecay(0.018)
+    .stop();
+  const dust = d3.range(320).map(() => [rand(0, w), rand(0, h), rand(0.2, 1.1), rand(0.05, 0.25)]);
+  let hover = null, raf;
+  const neighbours = (d) => new Set(links.filter((l) => l.source === d || l.target === d).flatMap((l) => [l.source, l.target]));
+  let near = new Set();
+
+  function draw(t) {
+    if (sim.alpha() > sim.alphaMin()) sim.tick();
+    g.clearRect(0, 0, w, h);
+    for (const [x, y, r, a] of dust) { g.fillStyle = `rgba(255,255,255,${a})`; g.fillRect(x, y, r, r); }
+    g.lineWidth = 0.7;
+    for (const l of links) {
+      const lit = hover && (l.source === hover || l.target === hover);
+      g.strokeStyle = lit ? "rgba(255,255,255,0.75)"
+        : l.same ? areaColor(l.source.n.area, 60, hover ? 0.05 : 0.16) : `rgba(255,255,255,${hover ? 0.03 : 0.07})`;
+      g.beginPath(); g.moveTo(l.source.x, l.source.y); g.lineTo(l.target.x, l.target.y); g.stroke();
+    }
+    for (const d of nodes) {
+      const dim = hover && !near.has(d);
+      if (d.n.recent) {
+        const tw = reduceMotion ? 0.7 : 0.55 + 0.45 * Math.sin(t * 0.003 + d.ph);
+        const gr = g.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r * 5);
+        gr.addColorStop(0, `rgba(255,122,26,${0.55 * tw})`); gr.addColorStop(1, "rgba(255,122,26,0)");
+        g.fillStyle = gr; g.beginPath(); g.arc(d.x, d.y, d.r * 5, 0, 7); g.fill();
+      }
+      g.globalAlpha = dim ? 0.25 : 1;
+      g.fillStyle = noteColor(d.n);
+      g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill();
+      if (d.n.recent) { g.strokeStyle = EMBER; g.lineWidth = 1; g.stroke(); }
+      g.globalAlpha = 1;
+    }
+    // Constellation names at the live centroid of each area.
+    g.font = "600 11px " + getComputedStyle(document.body).fontFamily;
+    g.textAlign = "center";
+    AREAS.forEach((a) => {
+      const pts = nodes.filter((d) => d.n.a === a.i);
+      const cx = d3.mean(pts, (d) => d.x), top = d3.min(pts, (d) => d.y);
+      g.fillStyle = areaColor(a, 72, 0.85);
+      g.fillText(a.name.toUpperCase(), cx, top - 10);
+    });
+    if (hover) { g.fillStyle = "#fff"; g.font = "12px " + getComputedStyle(document.body).fontFamily; g.fillText(hover.n.title, hover.x, hover.y - hover.r - 6); }
+    raf = requestAnimationFrame(draw);
+  }
+  raf = requestAnimationFrame(draw);
+  c.addEventListener("mousemove", (ev) => {
+    const r = c.getBoundingClientRect();
+    hover = sim.find(ev.clientX - r.left, ev.clientY - r.top, 14) || null;
+    near = hover ? neighbours(hover) : new Set();
+    hover ? showTip(ev, noteTip(hover.n)) : hideTip();
+  });
+  c.addEventListener("mouseleave", () => { hover = null; hideTip(); });
+  return () => cancelAnimationFrame(raf);
+}
+
+// ---------------------------------------------------------------------------
+// View 2 — Zellen: circle packing, click an area to zoom into it.
+// ---------------------------------------------------------------------------
+function mountCells(el, w, h) {
+  const S = Math.min(w, h) - 40;
+  const root = d3.hierarchy({ children: AREAS.map((a) => ({ area: a, children: byArea[a.i].map((n) => ({ note: n })) })) })
+    .sum((d) => (d.note ? 1 + d.note.deg : 0))
+    .sort((a, b) => b.value - a.value);
+  d3.pack().size([S, S]).padding((d) => (d.depth === 0 ? 16 : 2.2))(root);
+  const svg = d3.select(el).append("svg").attr("width", w).attr("height", h);
+  const defs = svg.append("defs");
+  AREAS.forEach((a) => {
+    const gr = defs.append("radialGradient").attr("id", "cell-" + a.id);
+    gr.append("stop").attr("offset", "0%").attr("stop-color", areaColor(a, 40, 0.05));
+    gr.append("stop").attr("offset", "100%").attr("stop-color", areaColor(a, 45, 0.2));
+  });
+  const ox = (w - S) / 2, oy = (h - S) / 2;
+  const world = svg.append("g").attr("transform", `translate(${ox},${oy})`);
+  const areas = root.children;
+  world.selectAll("circle.area").data(areas).join("circle").attr("class", "area")
+    .attr("cx", (d) => d.x).attr("cy", (d) => d.y).attr("r", 0)
+    .attr("fill", (d) => `url(#cell-${d.data.area.id})`).attr("stroke", (d) => areaColor(d.data.area, 60, 0.55)).attr("stroke-width", 1)
+    .style("cursor", "zoom-in")
+    .on("click", (ev, d) => { ev.stopPropagation(); zoomTo(d); })
+    .transition().duration(900).ease(d3.easeCubicOut).attr("r", (d) => d.r);
+  const leaves = root.leaves();
+  world.selectAll("circle.note").data(leaves).join("circle")
+    .attr("class", (d) => "note" + (d.data.note.recent ? " ember" : ""))
+    .attr("cx", (d) => d.x).attr("cy", (d) => d.y).attr("r", 0)
+    .attr("fill", (d) => noteColor(d.data.note))
+    .on("mousemove", (ev, d) => showTip(ev, noteTip(d.data.note)))
+    .on("mouseleave", hideTip)
+    .on("click", (ev, d) => { ev.stopPropagation(); zoomTo(d.parent); })
+    .transition().delay((d) => 300 + d.data.note.created * 0.9).duration(500).attr("r", (d) => d.r);
+  const labels = world.selectAll("text.area").data(areas).join("text").attr("class", "area")
+    .attr("x", (d) => d.x).attr("y", (d) => d.y - d.r + 15).attr("text-anchor", "middle")
+    .attr("fill", (d) => areaColor(d.data.area, 75)).attr("font-size", 11).attr("font-weight", 600)
+    .attr("letter-spacing", "0.08em").attr("paint-order", "stroke").attr("stroke", "rgba(10,10,14,0.85)").attr("stroke-width", 3)
+    .style("pointer-events", "none").text((d) => d.data.area.name.toUpperCase()).attr("opacity", 0);
+  labels.transition().delay(800).duration(600).attr("opacity", 1);
+  function zoomTo(d) {
+    const k = d === root ? 1 : (S / (2 * d.r)) * 0.92;
+    const tx = w / 2 - (d === root ? S / 2 : d.x) * k;
+    const ty = h / 2 - (d === root ? S / 2 : d.y) * k;
+    world.transition().duration(750).ease(d3.easeCubicInOut).attr("transform", `translate(${tx},${ty}) scale(${k})`);
+    labels.transition().duration(750).attr("font-size", 11 / k).attr("stroke-width", 3 / k).attr("y", (a) => a.y - a.r + 15 / k);
+  }
+  svg.on("click", () => zoomTo(root));
+  return () => {};
+}
+
+// ---------------------------------------------------------------------------
+// View 3 — Bündel: hierarchical edge bundling on a ring ordered area → age.
+// ---------------------------------------------------------------------------
+function mountBundle(el, w, h) {
+  const R = Math.min(w, h) / 2 - 118;
+  const root = d3.hierarchy({ children: AREAS.map((a) => ({ area: a, children: byArea[a.i].map((n) => ({ note: n })) })) });
+  d3.cluster().size([2 * Math.PI, R])(root);
+  const leafOf = new Map(root.leaves().map((l) => [l.data.note.i, l]));
+  const svg = d3.select(el).append("svg").attr("width", w).attr("height", h);
+  const gRoot = svg.append("g").attr("transform", `translate(${w / 2},${h / 2})`);
+  const line = d3.lineRadial().curve(d3.curveBundle.beta(0.82)).radius((d) => d.y).angle((d) => d.x);
+  const pos = (a, r) => [Math.sin(a) * r, -Math.cos(a) * r];
+
+  // Area arcs and names on the outside of the ring.
+  const arc = d3.arc().innerRadius(R + 14).outerRadius(R + 19).cornerRadius(2);
+  root.children.forEach((ar) => {
+    const xs = ar.leaves().map((l) => l.x);
+    const a0 = d3.min(xs) - 0.01, a1 = d3.max(xs) + 0.01, mid = (a0 + a1) / 2;
+    gRoot.append("path").attr("d", arc({ startAngle: a0, endAngle: a1 })).attr("fill", areaColor(ar.data.area, 58, 0.8));
+    const [x, y] = pos(mid, R + 32);
+    const deg = (mid * 180) / Math.PI - 90;
+    const flip = mid > Math.PI;
+    gRoot.append("text").attr("transform", `translate(${x},${y}) rotate(${flip ? deg + 180 : deg})`)
+      .attr("text-anchor", flip ? "end" : "start").attr("dy", "0.35em")
+      .attr("fill", areaColor(ar.data.area, 74)).attr("font-size", 11).attr("font-weight", 600).attr("letter-spacing", "0.06em")
+      .text(ar.data.area.name.toUpperCase());
+  });
+
+  const fresh = (e) => SPAN_DAYS - e.l.born < 10; // only links from the last ten days glow
+  const edges = LINKS.map((l) => ({ l, s: leafOf.get(l.s), t: leafOf.get(l.t) }));
+  const paths = gRoot.append("g").attr("fill", "none").selectAll("path").data(edges).join("path")
+    .attr("d", (e) => line(e.s.path(e.t)))
+    .attr("stroke", (e) => (fresh(e) ? EMBER : areaColor(e.s.data.note.area, 62)))
+    .attr("stroke-opacity", 0).attr("stroke-width", 1)
+    .style("mix-blend-mode", "screen");
+  paths.transition().delay((e, i) => i * 4).duration(800)
+    .attr("stroke-opacity", (e) => (fresh(e) ? 0.6 : 0.26));
+
+  const dots = gRoot.append("g").selectAll("g").data(root.leaves()).join("g")
+    .attr("transform", (d) => `translate(${pos(d.x, d.y + 5)})`);
+  dots.append("circle").attr("r", (d) => 2 + Math.min(2.5, d.data.note.deg * 0.5))
+    .attr("fill", (d) => noteColor(d.data.note)).attr("class", (d) => (d.data.note.recent ? "ember" : null));
+  dots.append("circle").attr("r", 7).attr("fill", "transparent").style("cursor", "pointer")
+    .on("mouseenter", (ev, d) => {
+      const id = d.data.note.i;
+      paths.attr("stroke-opacity", (e) => (e.l.s === id || e.l.t === id ? 0.95 : 0.04))
+        .attr("stroke-width", (e) => (e.l.s === id || e.l.t === id ? 1.8 : 1));
+      showTip(ev, noteTip(d.data.note));
+    })
+    .on("mousemove", (ev, d) => showTip(ev, noteTip(d.data.note)))
+    .on("mouseleave", () => {
+      paths.attr("stroke-width", 1).attr("stroke-opacity", (e) => (fresh(e) ? 0.6 : 0.26));
+      hideTip();
+    });
+  // Centre hexagon: the vault itself.
+  gRoot.append("polygon").attr("points", hexPoints(16)).attr("fill", "none").attr("stroke", "rgba(255,255,255,0.18)");
+  return () => {};
+}
+
+// ---------------------------------------------------------------------------
+// View 4 — Bänder: chord diagram of links between areas, each note a hex outside.
+// ---------------------------------------------------------------------------
+function mountChord(el, w, h) {
+  const R = Math.min(w, h) / 2 - 140;
+  const N = AREAS.length;
+  const m = d3.range(N).map(() => new Array(N).fill(0));
+  const recentPair = d3.range(N).map(() => new Array(N).fill(0));
+  LINKS.forEach((l) => {
+    const a = NOTES[l.s].a, b = NOTES[l.t].a;
+    m[a][b]++; if (a !== b) m[b][a]++;
+    if (SPAN_DAYS - l.born < RECENT_DAYS) { recentPair[a][b]++; recentPair[b][a]++; }
+  });
+  const chords = d3.chord().padAngle(0.035).sortSubgroups(d3.descending)(m);
+  const svg = d3.select(el).append("svg").attr("width", w).attr("height", h);
+  const gRoot = svg.append("g").attr("transform", `translate(${w / 2},${h / 2})`);
+  const arc = d3.arc().innerRadius(R).outerRadius(R + 12).cornerRadius(2);
+  const ribbon = d3.ribbon().radius(R - 3);
+
+  const ribbons = gRoot.append("g").selectAll("path").data(chords).join("path")
+    .attr("d", ribbon)
+    .attr("fill", (d) => areaColor(AREAS[d.source.index], 55, 0.5))
+    .attr("stroke", (d) => (recentPair[d.source.index][d.target.index] >= 2 ? EMBER : "none"))
+    .attr("stroke-opacity", 0.55).attr("stroke-width", 0.8)
+    .attr("opacity", 0)
+    .on("mousemove", (ev, d) => {
+      const a = AREAS[d.source.index], b = AREAS[d.target.index];
+      const n = d.source.index === d.target.index ? m[d.source.index][d.source.index] : m[d.source.index][d.target.index];
+      showTip(ev, `<div>${a.name} ${a === b ? "intern" : "↔ " + b.name}</div><div class="t-meta">${n} Links, ${recentPair[d.source.index][d.target.index]} in den letzten ${RECENT_DAYS} Tagen</div>`);
+    })
+    .on("mouseleave", hideTip);
+  ribbons.transition().delay((d, i) => 400 + i * 18).duration(700).attr("opacity", 1);
+
+  const groups = gRoot.append("g").selectAll("g").data(chords.groups).join("g");
+  groups.append("path").attr("fill", (d) => areaColor(AREAS[d.index], 58))
+    .transition().duration(900).ease(d3.easeCubicOut)
+    .attrTween("d", (d) => { const i = d3.interpolate(d.startAngle, d.endAngle); return (t) => arc({ ...d, endAngle: i(t) }); });
+  groups.on("mouseenter", (ev, g) => ribbons.transition().duration(200)
+      .attr("opacity", (d) => (d.source.index === g.index || d.target.index === g.index ? 1 : 0.08)))
+    .on("mouseleave", () => ribbons.transition().duration(200).attr("opacity", 1));
+
+  // Every note of an area as a tiny hex beyond its arc, oldest at the arc's start.
+  chords.groups.forEach((gr) => {
+    const notes = byArea[gr.index];
+    const span = gr.endAngle - gr.startAngle;
+    const perRow = Math.max(1, Math.floor((span * (R + 24)) / 7));
+    notes.forEach((n, k) => {
+      const row = Math.floor(k / perRow), col = k % perRow;
+      const a = gr.startAngle + ((col + 0.5) / perRow) * span;
+      const r = R + 24 + row * 7;
+      gRoot.append("polygon").attr("points", hexPoints(2.8))
+        .attr("transform", `translate(${Math.sin(a) * r},${-Math.cos(a) * r})`)
+        .attr("fill", noteColor(n)).attr("class", n.recent ? "ember" : null)
+        .attr("opacity", 0).on("mousemove", (ev) => showTip(ev, noteTip(n))).on("mouseleave", hideTip)
+        .transition().delay(900 + n.created * 1.2).duration(300).attr("opacity", 1);
+    });
+    const mid = (gr.startAngle + gr.endAngle) / 2;
+    const rows = Math.ceil(notes.length / perRow);
+    const lr = R + 36 + rows * 7;
+    const flip = mid > Math.PI;
+    const deg = (mid * 180) / Math.PI - 90;
+    gRoot.append("text").attr("transform", `translate(${Math.sin(mid) * lr},${-Math.cos(mid) * lr}) rotate(${flip ? deg + 180 : deg})`)
+      .attr("text-anchor", flip ? "end" : "start").attr("dy", "0.35em")
+      .attr("fill", areaColor(AREAS[gr.index], 74)).attr("font-size", 11).attr("font-weight", 600).attr("letter-spacing", "0.06em")
+      .text(AREAS[gr.index].name.toUpperCase());
+  });
+  return () => {};
+}
+
+// ---------------------------------------------------------------------------
+// View 5 — Strom: streamgraph of new notes per month and area.
+// ---------------------------------------------------------------------------
+function mountStream(el, w, h) {
+  const M = 24;
+  const months = d3.range(M).map((mi) => {
+    const row = { mi };
+    AREAS.forEach((a) => { row[a.id] = 0; });
+    return row;
+  });
+  NOTES.forEach((n) => { months[Math.min(M - 1, Math.floor((n.created / SPAN_DAYS) * M))][n.area.id]++; });
+  const stack = d3.stack().keys(AREAS.map((a) => a.id)).offset(d3.stackOffsetWiggle).order(d3.stackOrderInsideOut)(months);
+  const margin = { l: 40, r: 70, t: 70, b: 50 };
+  const x = d3.scaleLinear().domain([0, M - 1]).range([margin.l, w - margin.r]);
+  const y = d3.scaleLinear().domain([d3.min(stack, (s) => d3.min(s, (d) => d[0])), d3.max(stack, (s) => d3.max(s, (d) => d[1]))])
+    .range([h - margin.b, margin.t]);
+  const area = d3.area().curve(d3.curveBasis).x((d) => x(d.data.mi)).y0((d) => y(d[0])).y1((d) => y(d[1]));
+  const svg = d3.select(el).append("svg").attr("width", w).attr("height", h);
+  const defs = svg.append("defs");
+  AREAS.forEach((a) => {
+    // Left (old) dark, right (new) bright: age along the time axis.
+    const gr = defs.append("linearGradient").attr("id", "st-" + a.id).attr("gradientUnits", "userSpaceOnUse")
+      .attr("x1", margin.l).attr("x2", w - margin.r);
+    gr.append("stop").attr("offset", "0%").attr("stop-color", `hsl(${a.hue} 45% 20%)`);
+    gr.append("stop").attr("offset", "70%").attr("stop-color", `hsl(${a.hue} 58% 40%)`);
+    gr.append("stop").attr("offset", "100%").attr("stop-color", `hsl(${a.hue} 72% 64%)`);
+  });
+  const clip = defs.append("clipPath").attr("id", "st-clip").append("rect").attr("x", 0).attr("y", 0).attr("height", h).attr("width", 0);
+  clip.transition().duration(reduceMotion ? 0 : 2200).ease(d3.easeCubicInOut).attr("width", w);
+  const layers = svg.append("g").attr("clip-path", "url(#st-clip)").selectAll("path").data(stack).join("path")
+    .attr("d", area).attr("fill", (d) => `url(#st-${d.key})`).attr("stroke", "rgba(10,10,14,0.6)").attr("stroke-width", 0.6)
+    .on("mousemove", (ev, s) => {
+      const a = AREAS.find((ar) => ar.id === s.key);
+      const total = byArea[a.i].length;
+      const last = s[M - 1].data[s.key];
+      layers.attr("opacity", (o) => (o === s ? 1 : 0.35));
+      showTip(ev, `<div class="t-area" style="color:${areaColor(a, 68)}">${a.name}</div><div>${total} Notizen</div><div class="t-meta">${last} neu im letzten Monat</div>`);
+    })
+    .on("mouseleave", () => { layers.attr("opacity", 1); hideTip(); });
+  // Labels at each layer's thickest month.
+  svg.append("g").style("pointer-events", "none").selectAll("text").data(stack).join("text")
+    .each(function (s) {
+      const best = d3.greatestIndex(s, (d) => d[1] - d[0]);
+      const d = s[best];
+      d3.select(this).attr("x", x(best)).attr("y", y((d[0] + d[1]) / 2)).attr("dy", "0.35em")
+        .attr("visibility", d[1] - d[0] < 3 ? "hidden" : null);
+    })
+    .attr("text-anchor", "middle").attr("fill", "rgba(255,255,255,0.85)").attr("font-size", 10).attr("font-weight", 600)
+    .attr("letter-spacing", "0.06em").text((s) => AREAS.find((a) => a.id === s.key).name.toUpperCase())
+    .attr("opacity", 0).transition().delay(1800).duration(600).attr("opacity", 1);
+  const ax = d3.axisBottom(x).tickValues(d3.range(0, M, 3)).tickSize(0).tickPadding(10)
+    .tickFormat((mi) => { const d = dateOfDay(((mi + 0.5) / M) * SPAN_DAYS); return `${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`; });
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${h - margin.b + 12})`).call(ax);
+  // "Now" — the one living edge of the stream.
+  const nx = x(M - 1);
+  svg.append("line").attr("x1", nx).attr("x2", nx).attr("y1", margin.t - 20).attr("y2", h - margin.b + 6)
+    .attr("stroke", EMBER).attr("stroke-width", 1.4).attr("class", "ember");
+  svg.append("text").attr("x", nx).attr("y", margin.t - 28).attr("text-anchor", "middle").attr("fill", EMBER)
+    .attr("font-size", 11).attr("font-weight", 600).text("jetzt");
+  return () => {};
+}
+
+// ---------------------------------------------------------------------------
+// View 6 — Wachstum: Gource-like replay; notes sprout as hexes in sunflower spirals.
+// ---------------------------------------------------------------------------
+function mountGrowth(el, w, h) {
+  const { c, g } = makeCanvas(el, w, h);
+  const cx = w / 2, cy = h / 2 - 20;
+  const centers = AREAS.map((a, i) => {
+    const ang = (i / AREAS.length) * Math.PI * 2 - Math.PI / 2;
+    return { x: cx + Math.cos(ang) * w * 0.33, y: cy + Math.sin(ang) * h * 0.3 };
+  });
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  const spot = new Map();
+  AREAS.forEach((a) => {
+    byArea[a.i].forEach((n, k) => { // oldest first, so the oldest sit at the heart
+      const r = 7.6 * Math.sqrt(k + 0.5), th = k * GOLDEN;
+      spot.set(n.i, { x: centers[a.i].x + r * Math.cos(th), y: centers[a.i].y + r * Math.sin(th) });
+    });
+  });
+  const firstDay = AREAS.map((a) => d3.min(byArea[a.i], (n) => n.created));
+
+  // Controls overlay.
+  const ctl = document.createElement("div");
+  ctl.className = "glass controls";
+  ctl.innerHTML = `<button title="Abspielen/Pause">❚❚</button><input type="range" min="0" max="${SPAN_DAYS}" value="0" step="1"><span class="date"></span>`;
+  el.appendChild(ctl);
+  const btn = ctl.querySelector("button"), slider = ctl.querySelector("input"), dateEl = ctl.querySelector(".date");
+  let T = 0, playing = !reduceMotion, last = performance.now(), raf, hover = null;
+  if (reduceMotion) T = SPAN_DAYS;
+  const DAYS_PER_MS = SPAN_DAYS / 22000; // the whole history in 22 s
+  btn.onclick = () => { playing = !playing; btn.textContent = playing ? "❚❚" : "▶"; if (playing && T >= SPAN_DAYS) T = 0; };
+  slider.oninput = () => { T = +slider.value; };
+
+  function draw(now) {
+    const dt = now - last; last = now;
+    if (playing) { T += dt * DAYS_PER_MS; if (T > SPAN_DAYS + 120) T = 0; }
+    const day = Math.min(T, SPAN_DAYS);
+    slider.value = day;
+    const visible = NOTES.filter((n) => n.created <= day);
+    dateEl.textContent = `${fmtDate(dateOfDay(day))} · ${visible.length} Notizen`;
+    g.clearRect(0, 0, w, h);
+    // Branches from the vault core to each area that exists yet.
+    AREAS.forEach((a, i) => {
+      if (firstDay[i] > day) return;
+      const grow = Math.min(1, (day - firstDay[i]) / 25);
+      const ex = cx + (centers[i].x - cx) * grow, ey = cy + (centers[i].y - cy) * grow;
+      g.strokeStyle = areaColor(a, 55, 0.28); g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(cx, cy);
+      g.quadraticCurveTo((cx + ex) / 2 + (ey - cy) * 0.15, (cy + ey) / 2 - (ex - cx) * 0.15, ex, ey); g.stroke();
+    });
+    // Links appear once both ends exist; a fresh one flashes ember.
+    for (const l of LINKS) {
+      if (l.born > day) continue;
+      const p = spot.get(l.s), q = spot.get(l.t);
+      const fresh = day - l.born < 10;
+      g.strokeStyle = fresh ? `rgba(255,122,26,${0.9 - (day - l.born) / 12})` : "rgba(255,255,255,0.06)";
+      g.lineWidth = fresh ? 1.3 : 0.6;
+      g.beginPath(); g.moveTo(p.x, p.y);
+      g.quadraticCurveTo((p.x + q.x) / 2 + (q.y - p.y) * 0.2, (p.y + q.y) / 2 - (q.x - p.x) * 0.2, q.x, q.y); g.stroke();
+    }
+    for (const n of visible) {
+      const p = spot.get(n.i);
+      const rel = day - n.created; // the note's age at the replay's moment
+      const pop = Math.min(1, rel / 4 + 0.15);
+      if (rel < RECENT_DAYS) {
+        const k = 1 - rel / RECENT_DAYS;
+        const gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, 18);
+        gr.addColorStop(0, `rgba(255,122,26,${0.5 * k})`); gr.addColorStop(1, "rgba(255,122,26,0)");
+        g.fillStyle = gr; g.beginPath(); g.arc(p.x, p.y, 18, 0, 7); g.fill();
+      }
+      hexPath(g, p.x, p.y, 3.9 * pop);
+      g.fillStyle = noteColor(n, rel);
+      g.fill();
+      if (rel < RECENT_DAYS) { g.strokeStyle = EMBER; g.lineWidth = 1; g.stroke(); }
+    }
+    // Core hex and area names.
+    hexPath(g, cx, cy, 13); g.strokeStyle = "rgba(255,255,255,0.25)"; g.lineWidth = 1.2; g.stroke();
+    g.font = "600 11px " + getComputedStyle(document.body).fontFamily; g.textAlign = "center";
+    AREAS.forEach((a, i) => {
+      if (firstDay[i] > day) return;
+      const cnt = byArea[i].filter((n) => n.created <= day).length;
+      const rad = 7.6 * Math.sqrt(cnt) + 14;
+      g.fillStyle = areaColor(a, 74, 0.9);
+      g.fillText(a.name.toUpperCase(), centers[i].x, centers[i].y - rad);
+    });
+    if (hover && hover.created <= day) {
+      const p = spot.get(hover.i);
+      hexPath(g, p.x, p.y, 6); g.strokeStyle = "#fff"; g.lineWidth = 1.2; g.stroke();
+    }
+    raf = requestAnimationFrame(draw);
+  }
+  raf = requestAnimationFrame(draw);
+  c.addEventListener("mousemove", (ev) => {
+    const r = c.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    let best = null, bd = 64;
+    for (const n of NOTES) {
+      if (n.created > T) continue;
+      const p = spot.get(n.i), d = (p.x - mx) ** 2 + (p.y - my) ** 2;
+      if (d < bd) { bd = d; best = n; }
+    }
+    hover = best;
+    best ? showTip(ev, noteTip(best)) : hideTip();
+  });
+  c.addEventListener("mouseleave", () => { hover = null; hideTip(); });
+  return () => cancelAnimationFrame(raf);
+}
+
+// ---------------------------------------------------------------------------
+// Switcher
+// ---------------------------------------------------------------------------
+const VIEWS = [
+  { id: "stars", name: "Sternkarte", sub: "Kraftgraph mit Sternbildern", kind: "Force-Graph · Bereichs-Gravitation", mount: mountStars,
+    shows: "Jede Notiz ist ein Stern, jeder Bereich ein Sternbild, Links sind Fäden. Größe = Anzahl Links; Hover zeigt die Nachbarschaft.",
+    plus: "Brückennotizen zwischen Bereichen und isolierte Notizen fallen sofort auf; wirkt lebendig, fast wie der Orbit in flach.",
+    minus: "Das Layout ist nicht stabil (jeder Lauf etwas anders) und wird ab ~1000 Notizen zum Knäuel; Alter nur über die Farbe." },
+  { id: "cells", name: "Zellen", sub: "Circle Packing mit Zoom", kind: "Circle Packing · semantischer Zoom", mount: mountCells,
+    shows: "Bereiche als Zellen, Notizen als Bläschen darin; Fläche = 1 + Links. Klick auf eine Zelle zoomt hinein, Klick daneben zurück.",
+    plus: "Mengen und Zugehörigkeit auf einen Blick, Zoom wie bei der Karte, aber ohne Grenzarbeit; stabil und schnell zu rechnen.",
+    minus: "Links sind unsichtbar, Kreise verschenken Fläche; nah an der Ringe-Ansicht, eher Ergänzung als neue Erkenntnis." },
+  { id: "bundle", name: "Bündel", sub: "Hierarchical Edge Bundling", kind: "Ring · gebündelte Kanten", mount: mountBundle,
+    shows: "Alle Notizen auf einem Ring, sortiert nach Bereich und darin nach Alter; Links laufen als gebündelte Kurven durch die Mitte.",
+    plus: "Zeigt die Querbezüge zwischen Bereichen als klare Ströme, bleibt bei jeder Größe ruhig und stabil; Hover hebt eine Notiz mit allen Links hervor.",
+    minus: "Einzelne Notizen sind klein, Titel nur bei Hover; der Ring sagt nichts über Nähe innerhalb eines Bereichs." },
+  { id: "chord", name: "Bänder", sub: "Chord-Diagramm der Bereiche", kind: "Chord · Waben-Kranz", mount: mountChord,
+    shows: "Bandbreite = Links zwischen zwei Bereichen (Schleifen = interne Links). Außen jede Notiz als Wabe, älteste am Bogenanfang.",
+    plus: "Beantwortet sofort »welche Bereiche reden miteinander?«; orange Kanten markieren Bänder mit frischen Links.",
+    minus: "Stark verdichtet, einzelne Links verschwinden; über ~15 Bereiche wird der Kreis eng." },
+  { id: "stream", name: "Strom", sub: "Streamgraph des Wachstums", kind: "Streamgraph · Zeitachse", mount: mountStream,
+    shows: "Neue Notizen pro Monat und Bereich über zwei Jahre, als fließende Schichten; links alt und dunkel, rechts neu und hell.",
+    plus: "Die Zeit wird Hauptachse: Phasen, wechselnde Interessen und eingeschlafene Bereiche sieht man sofort.",
+    minus: "Keine einzelnen Notizen, keine Links — eher Statistik als Navigation; gut als schmales Band über einer anderen Ansicht." },
+  { id: "growth", name: "Wachstum", sub: "Gource-artige Wiedergabe", kind: "Zeitraffer · Waben-Spiralen", mount: mountGrowth,
+    shows: "Der Vault wächst im Zeitraffer: Bereiche sprießen aus dem Kern, Notizen keimen als Waben in Sonnenblumen-Spiralen (älteste innen), neue Links blitzen auf.",
+    plus: "Erzählt die Geschichte des Vaults, verbindet Alter, Ort und Links und passt zu Glut + Hex; Schieber zum Zurückspulen.",
+    minus: "Zum Anschauen gedacht, weniger zum Suchen; als Dauer-Ansicht zu unruhig (eher Leerlauf-Bild oder Rückblick)." },
+];
+
+const nav = document.getElementById("nav");
+const stage = document.getElementById("stage");
+const caption = document.getElementById("caption");
+let current = 0, cleanup = () => {};
+
+VIEWS.forEach((v, i) => {
+  const b = document.createElement("button");
+  b.setAttribute("role", "tab");
+  b.innerHTML = `<svg width="22" height="22" viewBox="-11 -11 22 22"><polygon class="hexi" points="${hexPoints(10)}"/>
+    <text text-anchor="middle" dy="0.35em" font-size="9" font-weight="700" fill="#0b0b0f">${i + 1}</text></svg>
+    <div><b>${v.name}</b><span class="sub">${v.sub}</span></div><kbd>${i + 1}</kbd>`;
+  b.onclick = () => show(i);
+  nav.appendChild(b);
+});
+
+document.getElementById("legend").innerHTML = `
+  <div>Alter einer Notiz (im Farbton ihres Bereichs)</div>
+  <div class="agebar"></div><div class="agebar-l"><span>2 Jahre</span><span>heute</span></div>
+  <div style="margin-top:8px"><span class="ember-dot"></span>lebt: in den letzten ${RECENT_DAYS} Tagen angelegt</div>
+  <div class="chips">${AREAS.map((a) => `<span><i style="background:${areaColor(a, 58)}"></i>${a.name}</span>`).join("")}</div>
+  <div style="margin-top:8px;color:var(--ax-text-faint)">${NOTES.length} Notizen · ${LINKS.length} Links · ${AREAS.length} Bereiche</div>`;
+
+function show(i) {
+  current = i;
+  cleanup();
+  hideTip();
+  stage.innerHTML = "";
+  [...nav.children].forEach((b, k) => b.setAttribute("aria-selected", k === i));
+  const v = VIEWS[i];
+  caption.innerHTML = `<div class="kind">${v.kind}</div><h2>${i + 1} · ${v.name}</h2>
+    <p><strong>Zeigt:</strong> ${v.shows}</p><p><strong>Stärke:</strong> ${v.plus}</p><p><strong>Schwäche:</strong> ${v.minus}</p>`;
+  const r = stage.getBoundingClientRect();
+  cleanup = v.mount(stage, Math.floor(r.width), Math.floor(r.height)) || (() => {});
+  try { history.replaceState(null, "", "#" + v.id); } catch (e) { /* file:// may refuse */ }
+}
+
+addEventListener("keydown", (ev) => {
+  const n = +ev.key;
+  if (n >= 1 && n <= VIEWS.length) show(n - 1);
+});
+let resizeTimer;
+addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => show(current), 200); });
+const start = VIEWS.findIndex((v) => "#" + v.id === location.hash);
+show(start >= 0 ? start : 0);
+</script>
+</body>
+</html>
