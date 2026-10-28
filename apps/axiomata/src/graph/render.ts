@@ -7,6 +7,7 @@
 
 import type { Shine } from "../core/brainView";
 import {
+  agedRgb,
   buildHive,
   coastSpin,
   dragTurn,
@@ -17,7 +18,7 @@ import {
   type HiveCell,
   type Rgb,
 } from "./hive";
-import { APP_RING, approachAngle, EXPANDED_GROUP_RING, orbitRestAngle } from "./layout";
+import { APP_RING, approachAngle, bornOf, EXPANDED_GROUP_RING, orbitRestAngle } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 import { cellKey, NEIGHBOURS, pixelToAxial } from "./territory";
 
@@ -902,7 +903,8 @@ export class GraphRenderer {
 
   /**
    * The honeycomb sphere (`graph/hive.ts`, UX4 W1/W2, G7) in place of the particle cloud: every note a cell in its
-   * area's colour, glowing where it was touched today and cooled toward ash where nothing moved for weeks; the spare
+   * area's colour — the one its icon has on the ring —, with an ember where it was touched today and darker the longer
+   * nothing moved; the spare
    * cells dark and unsettled. Under "metal" each front cell is lit by its tilt, with a highlight; "twinkle" lets each
    * breathe; "calm" holds still — and so does every light while the motion is not Full (`options.pulse`).
    */
@@ -977,13 +979,21 @@ export class GraphRenderer {
         ctx.scale(Math.max(Math.abs(nz), 0.12), 1);
         this.hexagonPath(size * (front ? 0.92 : 0.7));
         ctx.globalAlpha = front ? (tone.settled ? 1 : 0.55) : 0.13;
-        if (front && tone.blur) {
-          // On a light ground a shine only looks dirty: a tighter, tinted shadow there.
-          ctx.shadowBlur = (this.lightScheme ? 6 : 14) * tone.heat;
-          ctx.shadowColor = this.glowColor;
-        }
         ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
         ctx.fill();
+        if (front && tone.heat > GraphRenderer.EMBER_FROM) {
+          // A fresh note's glow: an ember in the middle of its cell, which itself keeps its area's colour.
+          ctx.beginPath();
+          ctx.arc(0, 0, size * 0.22, 0, TWO_PI);
+          ctx.globalAlpha = Math.min(1, 0.35 + tone.heat);
+          if (tone.blur) {
+            // On a light ground a shine only looks dirty: a tighter shadow there.
+            ctx.shadowBlur = (this.lightScheme ? 6 : 14) * tone.heat;
+            ctx.shadowColor = this.glowColor;
+          }
+          ctx.fillStyle = this.glowColor;
+          ctx.fill();
+        }
         ctx.restore();
         // Only a front cell of a note that exists can be pointed at (`hitCell`).
         this.hivePickable[i] = node && front && tone.settled ? 1 : 0;
@@ -1018,7 +1028,7 @@ export class GraphRenderer {
     const files = model.nodes.filter((n) => n.kind === "file");
     const signature = files.map((n) => `${n.id}\u0001${n.area ?? ""}`).join("\u0002");
     const kept = this.hive?.signature === signature ? this.hive.cells : null;
-    const cells = kept ?? buildHive(files.map((n) => ({ id: n.id, area: n.area })));
+    const cells = kept ?? buildHive(files.map((n) => ({ id: n.id, area: n.area, born: bornOf(n) })));
     const nodes = cells.map((c) => (c.fileId ? (model.byId.get(c.fileId) ?? null) : null));
     this.hive = { model, signature, cells, nodes };
     this.cellPos.clear();
@@ -1028,19 +1038,16 @@ export class GraphRenderer {
   /**
    * Each note's colour before the shimmer, its heat, whether it is settled and whether it gets the glow's blur — for
    * the hive's cells (`null` = an unsettled one) and the map's fields alike — worked out at most once a second (and at
-   * once after a change of colours, of the list, the time travel or a landed spark), not in every frame. `cooling` is
-   * how far an old note fades toward ash (1 = all the way): a map keeps more of its countries' colours. `tint` mixes
-   * the heat into the colour itself — the hive's cells; a map's field keeps its country's colour and shows its heat
-   * as an ember core instead, or a fresh note would read as another country.
+   * once after a change of colours, of the list, the time travel or a landed spark), not in every frame. A note keeps
+   * its area's colour, the one its icon has on the ring: age only darkens it (`agedRgb`), and its heat is drawn as an
+   * ember on top. `cooling` is how far an old note darkens (1 = all the way): a map keeps more of its countries' light.
    */
-  private noteTones(nodes: readonly (GraphNode | null)[], cooling = 1, tint = true): HiveTone[] {
+  private noteTones(nodes: readonly (GraphNode | null)[], cooling = 1): HiveTone[] {
     const now = Date.now();
-    const key = `${this.surfaceColor}|${this.mutedColor}|${this.glowColor}|${this.timeCutoff}|${cooling}|${tint}`;
+    const key = `${this.surfaceColor}|${this.mutedColor}|${this.timeCutoff}|${cooling}`;
     const fresh = now - this.toneAt < GraphRenderer.TONE_TTL_MS;
     if (this.toneList === nodes && key === this.toneKey && fresh) return this.tones;
     const surface = this.rgb(this.surfaceColor);
-    const ash = mixRgb(this.rgb(this.mutedColor), surface, 0.55);
-    const ember = this.rgb(this.glowColor);
     const unsettled = mixRgb(surface, this.rgb(this.mutedColor), 0.12);
     const cutoff = this.timeCutoff;
     const tones: HiveTone[] = nodes.map((node) => {
@@ -1050,8 +1057,7 @@ export class GraphRenderer {
       if (!node || !settled) return { col: unsettled, heat: 0, settled: false, blur: false };
       const touched = cutoff === null ? (node.modified ? Date.parse(node.modified) : null) : born;
       const glow = emberOf(touched, cutoff ?? now);
-      const col = mixRgb(mixRgb(this.rgb(node.color), ash, glow.ash * cooling), ember, tint ? glow.heat : 0);
-      return { col, heat: glow.heat, settled: true, blur: false };
+      return { col: agedRgb(this.rgb(node.color), glow.ash * cooling), heat: glow.heat, settled: true, blur: false };
     });
     tones
       .filter((tone) => tone.heat > 0.2)
@@ -1355,10 +1361,10 @@ export class GraphRenderer {
   private static readonly NAMES_FROM = 2.4;
   /** Up to this zoom the countries carry their names; they fade out on the way there. */
   private static readonly COUNTRIES_UNTIL = 2.8;
-  /** How far an old note fades toward ash on the map: half way, so every country keeps its colour. */
+  /** How far an old note darkens on the map: half way, so every country keeps its light. */
   private static readonly MAP_COOLING = 0.5;
-  /** The least heat (0…1) a field shows as an ember core. */
-  private static readonly MAP_EMBER_FROM = 0.05;
+  /** The least heat (0…1) a field or cell shows as an ember core. */
+  private static readonly EMBER_FROM = 0.05;
   /** How fast a field breathes on the map (radians per second) — slower than the hive's 1.7, a map is read. */
   private static readonly MAP_BREATH = 0.8;
   /** How fast the metal's light wanders across the map (radians per second). */
@@ -1414,7 +1420,7 @@ export class GraphRenderer {
 
   /**
    * The territory map (UX5, G16): every note a field in its country's colour — glowing where it was touched today,
-   * cooled toward ash where nothing moved for weeks, lit by the shimmer (G7) — with a border where countries meet or
+   * darker where nothing moved for weeks, lit by the shimmer (G7) — with a border where countries meet or
    * the land ends. The zoom decides what else there is (semantic zoom): from afar the countries' names, closer the
    * links as roads, close up every field's name. Skills ring the map. In the time travel a note not yet born has no
    * field: the countries grow.
@@ -1423,7 +1429,7 @@ export class GraphRenderer {
     const { ctx, width, height } = this;
     const model = this.model!;
     const notes = this.mapNotes(model);
-    const tones = this.noteTones(notes, GraphRenderer.MAP_COOLING, false);
+    const tones = this.noteTones(notes, GraphRenderer.MAP_COOLING);
     const s = this.hexCellRadius();
     const zoom = this.view.zoom;
     const hl = this.highlight;
@@ -1475,7 +1481,7 @@ export class GraphRenderer {
       ctx.globalAlpha = alpha;
       ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
       ctx.fill();
-      if (tone.heat > GraphRenderer.MAP_EMBER_FROM) {
+      if (tone.heat > GraphRenderer.EMBER_FROM) {
         // A fresh note's glow: an ember in the middle of its field, as bright as the note is fresh.
         ctx.beginPath();
         ctx.arc(0, 0, s * 0.13, 0, TWO_PI);

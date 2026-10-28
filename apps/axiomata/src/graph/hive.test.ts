@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AGE_DARKENING,
+  agedRgb,
   buildHive,
   coastSpin,
   dragTurn,
@@ -12,6 +14,7 @@ import {
   MIN_CELLS,
   mixRgb,
   nearestCell,
+  sphereNeighbours,
   STILL_MS,
   travelSpan,
   type HiveFile,
@@ -55,6 +58,110 @@ describe("buildHive", () => {
     const [w, m] = [centre("Work"), centre("Mail")];
     const dot = (w[0] * m[0] + w[1] * m[1] + w[2] * m[2]) / (Math.hypot(...w) * Math.hypot(...m));
     expect(dot).toBeLessThan(0.5);
+  });
+});
+
+/** Whether the cells at `indices` form one patch over the lattice's neighbours. */
+function connected(indices: number[], neighbours: number[][]): boolean {
+  const mine = new Set(indices);
+  const start = indices[0];
+  if (start === undefined) return true;
+  const seen = new Set([start]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const at = queue.pop()!;
+    for (const j of neighbours[at] ?? []) {
+      if (mine.has(j) && !seen.has(j)) {
+        seen.add(j);
+        queue.push(j);
+      }
+    }
+  }
+  return seen.size === mine.size;
+}
+
+describe("sphereNeighbours", () => {
+  it("gives every cell at least its six nearest, and neighbourhood goes both ways", () => {
+    const points = fibonacciSphere(400);
+    const near = sphereNeighbours(points);
+    near.forEach((list, i) => {
+      expect(list.length).toBeGreaterThanOrEqual(6);
+      for (const j of list) expect(near[j]).toContain(i);
+    });
+  });
+
+  it("finds the same nearest cells as a search over the whole ball", () => {
+    const points = fibonacciSphere(300);
+    const near = sphereNeighbours(points);
+    const d = (a: number, b: number) => Math.hypot(...points[a]!.map((v, k) => v - points[b]![k]!));
+    for (const i of [0, 7, 150, 299]) {
+      const brute = points
+        .map((_, j) => j)
+        .filter((j) => j !== i)
+        .sort((a, b) => d(i, a) - d(i, b))
+        .slice(0, 6);
+      for (const j of brute) expect(near[i]).toContain(j);
+    }
+  });
+});
+
+describe("buildHive regions", () => {
+  const vault: HiveFile[] = [
+    ...files("Work", 70),
+    ...files("Mail", 45),
+    ...files("Learning", 30),
+    ...files("KI", 12),
+    ...files("Photos", 4),
+  ];
+
+  it("lays each area's cells side by side as one patch, so an area's colour lies together", () => {
+    const hive = buildHive(vault);
+    const near = sphereNeighbours(hive.map((c) => c.p));
+    for (const area of ["Work", "Mail", "Learning", "KI", "Photos"]) {
+      const mine = hive.flatMap((c, i) => (c.fileId?.startsWith(`${area}/`) ? [i] : []));
+      expect(mine.length).toBeGreaterThan(0);
+      expect(connected(mine, near)).toBe(true);
+    }
+  });
+
+  it("puts an area's oldest note at its heart and the youngest on its coast", () => {
+    const aged = files("Work", 50).map((f, i) => ({ ...f, born: Date.UTC(2026, 0, 1 + i) }));
+    const hive = buildHive([...aged, ...files("Mail", 40)]);
+    const cells = hive.filter((c) => c.fileId?.startsWith("Work/"));
+    const centre = cells.reduce((s, c) => [s[0] + c.p[0], s[1] + c.p[1], s[2] + c.p[2]], [0, 0, 0]);
+    const off = (id: string) => {
+      const p = hive.find((c) => c.fileId === id)!.p;
+      return -(p[0] * centre[0] + p[1] * centre[1] + p[2] * centre[2]) / Math.hypot(...centre);
+    };
+    expect(off(aged[0]!.id)).toBeLessThan(off(aged[49]!.id));
+  });
+});
+
+describe("agedRgb", () => {
+  const hueOf = ([r, g, b]: [number, number, number]) => {
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  };
+  const green: [number, number, number] = [96, 200, 110];
+
+  it("leaves a fresh note its area's colour", () => {
+    expect(agedRgb(green, 0)).toEqual(green);
+  });
+
+  it("darkens an older note, more the older it is, but keeps the area's hue", () => {
+    const week = agedRgb(green, 0.2);
+    const month = agedRgb(green, 0.85);
+    expect(Math.max(...week)).toBeLessThan(Math.max(...green));
+    expect(Math.max(...month)).toBeLessThan(Math.max(...week));
+    expect(hueOf(week)).toBeCloseTo(hueOf(green), 6);
+    expect(hueOf(month)).toBeCloseTo(hueOf(green), 6);
+  });
+
+  it("never darkens past its floor, even beyond full ash", () => {
+    expect(agedRgb(green, 5)).toEqual(green.map((c) => c * (1 - AGE_DARKENING)));
   });
 });
 

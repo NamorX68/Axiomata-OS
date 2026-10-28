@@ -262,8 +262,8 @@ export const MAP_EDGE = 0.8;
 /** The ring the skills sit on around the map — inside the lens's faded rim (`SecondBrainView`'s `LENS_FADE`, 0.9). */
 export const MAP_SKILLS = 0.87;
 
-/** A note's birth for the map (G17): its `created`, else its last change, else unknown. */
-function bornOf(n: GraphNode): number | null {
+/** A note's birth for the map and the hive (G17): its `created`, else its last change, else unknown. */
+export function bornOf(n: GraphNode): number | null {
   const at = Date.parse(n.created ?? n.modified ?? "");
   return Number.isNaN(at) ? null : at;
 }
