@@ -1451,11 +1451,22 @@ fn scan_apps(roots: &[PathBuf], max: usize) -> InstalledAppsResult {
 /// The workspace as a graph for the particle view: files (with area, title,
 /// size, mtime), wiki/relative links, skills, routines, the CLAUDE.md hub.
 /// Walks the workspace and reads Markdown heads; takes the DB lock only for
-/// the routine list.
+/// the routine list. Off the main thread: a walk over a vault that iCloud is
+/// busy with can take seconds, and on the main thread it froze the whole app.
 #[tauri::command]
-pub fn get_workspace_graph(state: State<'_, CoreState>) -> Result<WorkspaceGraph, String> {
-    let db = state.db_lock();
-    graph::build(&read_config(&state.config), &db).map_err(|err| err.to_string())
+pub async fn get_workspace_graph(state: State<'_, CoreState>) -> Result<WorkspaceGraph, String> {
+    let db = std::sync::Arc::clone(&state.db);
+    let config = read_config(&state.config);
+    tauri::async_runtime::spawn_blocking(move || {
+        let routines = {
+            let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+            axiomata_core::routines::store::list(&db)?
+        };
+        graph::build(&config, routines)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(|err| err.to_string())
 }
 
 /// Renders the mounted-module manifest into `~/.axiomata/module-context.md`

@@ -944,8 +944,10 @@ async fn import_obsidian(
 
 /// Prints a summary of the workspace graph.
 fn graph_summary(core: &AxiomataCore) -> Result<()> {
-    let db = core.db_lock();
-    let g = axiomata_core::graph::build(&read_config(core), &db).context("building the graph")?;
+    let routines =
+        axiomata_core::routines::store::list(&core.db_lock()).context("listing the routines")?;
+    let g =
+        axiomata_core::graph::build(&read_config(core), routines).context("building the graph")?;
     println!(
         "workspace: {}  hub: {}",
         g.workspace_root,
