@@ -566,7 +566,8 @@ merge/precedence machinery with it.
 
 `~/.axiomata/axiomata.db`, one SQLite file, 36 migrations (`axiomata-core/src/db/migrations`, the IDE's in
 `axiomata-ide/src/*.sql`). Drawn from the live schema on 2026-10-28; **update it in the commit that changes the
-schema**. Solid lines are foreign keys SQLite enforces; dotted ones are references the code keeps by id without a
+schema**. Readable views with every column, drawn with archify, are in the vault under
+`Entwicklung/Axiomata-OS/Diagramme/` ("2026-10-28 Datenmodell – …": an overview and one per area). Solid lines are foreign keys SQLite enforces; dotted ones are references the code keeps by id without a
 constraint (an agent, a plan or a card that may be gone). Columns are the ones that tie tables together or that a
 reader needs; the full list is the migration.
 
