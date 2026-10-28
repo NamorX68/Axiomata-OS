@@ -255,10 +255,11 @@
   --ax-glass-pane: rgb(from var(--ax-glass-tint) r g b / calc(var(--ax-glass-pane-alpha) * var(--ax-glass-opacity)));
   --ax-glass-panel: rgb(from var(--ax-glass-tint) r g b / calc(var(--ax-glass-panel-alpha) * var(--ax-glass-opacity)));
   /* The dimming behind a glass dialog: the theme's own overlay at 60 % in the theme's look, so the frosted panel has
-     something to show (the mockup's 0.38 on a dark theme's 0.6–0.66); denser toward the knob's solid end, never below
-     a third of the theme's own toward the clear end, so a dialog over a bright picture keeps its scrim. */
+     something to show (the mockup's 0.38 on a dark theme's 0.6–0.66). Toward the knob's solid end it grows back to
+     the theme's own overlay and no further — beyond it the app behind the Settings, where the knob is moved, went
+     black; toward the clear end never below a third of it, so a dialog over a bright picture keeps its scrim. */
   --ax-glass-overlay: rgb(
-    from var(--ax-overlay) r g b / max(calc(alpha / 3), min(1, calc(alpha * 0.6 * var(--ax-glass-opacity))))
+    from var(--ax-overlay) r g b / min(alpha, max(calc(alpha / 3), calc(alpha * 0.6 * var(--ax-glass-opacity))))
   );
   --ax-glass-menu: rgb(
     from var(--ax-glass-tint) r g b /
