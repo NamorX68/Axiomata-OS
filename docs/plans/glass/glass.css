@@ -1,0 +1,106 @@
+/* Glass layer for the mockup: only surfaces, light and depth change — never the arrangement. */
+
+:root {
+  --g-pane: rgba(22, 22, 28, 0.46);
+  --g-pane-strong: rgba(20, 20, 26, 0.5);
+  --g-blur: blur(24px) saturate(160%);
+  --g-edge: rgba(255, 255, 255, 0.075);
+  --g-light: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --g-plate: rgba(255, 255, 255, 0.04);
+  --g-plate-hover: rgba(255, 255, 255, 0.065);
+  /* The backdrop the glass refracts: the hex mesh over two faint embers, Glut's own light. */
+  --g-backdrop:
+    radial-gradient(1400px 800px at 12% 115%, rgba(255, 122, 26, 0.22), transparent 62%),
+    radial-gradient(1100px 700px at 92% -12%, rgba(255, 170, 90, 0.08), transparent 60%),
+    radial-gradient(900px 900px at 55% 50%, rgba(90, 100, 140, 0.06), transparent 70%),
+    #040405;
+}
+
+/* ---------- Studio ---------- */
+section.ide {
+  background: var(--ax-texture-url), var(--g-backdrop) !important;
+  --ax-surface-1: rgba(255, 255, 255, 0.025);
+  --ax-surface-2: rgba(255, 255, 255, 0.045);
+  --ax-surface-3: rgba(255, 255, 255, 0.07);
+  --ax-card-bg: var(--g-plate);
+  --ax-border: var(--g-edge);
+  --ax-border-strong: rgba(255, 255, 255, 0.12);
+}
+section.ide aside.side,
+section.ide div.group {
+  background: var(--g-pane) !important;
+  backdrop-filter: var(--g-blur);
+  -webkit-backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-edge) !important;
+  box-shadow: var(--g-light), 0 10px 40px rgba(0, 0, 0, 0.35);
+  border-radius: 14px;
+  margin: 3px;
+}
+section.ide li.card,
+section.ide .notice {
+  background: var(--g-plate) !important;
+  border-color: var(--g-edge) !important;
+  box-shadow: var(--g-light);
+  border-radius: 12px;
+}
+section.ide div.modes {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid var(--g-edge);
+  box-shadow: var(--g-light);
+}
+
+/* ---------- Floating panels: Kanban, file / note ---------- */
+aside.panel {
+  background: var(--g-pane-strong) !important;
+  backdrop-filter: blur(28px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(170%) !important;
+  border: 1px solid var(--g-edge) !important;
+  box-shadow: var(--g-light), 0 30px 80px rgba(0, 0, 0, 0.55) !important;
+  --ax-surface-1: rgba(255, 255, 255, 0.025);
+  --ax-surface-2: rgba(255, 255, 255, 0.045);
+  --ax-surface-3: rgba(255, 255, 255, 0.07);
+  --ax-border: var(--g-edge);
+}
+
+/* Kanban: lanes without a floor, the cards are the glass. */
+aside.panel section.col {
+  background: transparent !important;
+}
+aside.panel article.card {
+  background: var(--g-plate) !important;
+  border: 1px solid var(--g-edge) !important;
+  box-shadow: var(--g-light), 0 6px 18px rgba(0, 0, 0, 0.22) !important;
+  border-radius: 12px !important;
+}
+aside.panel article.card:hover {
+  background: var(--g-plate-hover) !important;
+}
+
+/* File / note: the page shows through, the text stays on a calm plate. */
+aside.panel div.file-editor,
+aside.panel div.surface {
+  background: rgba(0, 0, 0, 0.18) !important;
+}
+
+/* The dimming behind a floating panel lets the Orbit through, so the glass has something to show. */
+:root {
+  --ax-overlay: rgba(0, 0, 0, 0.38) !important;
+}
+
+/* Menus and popovers float over glass: they need denser glass, or their text mixes with what lies beneath. */
+[role="menu"],
+[role="listbox"],
+section.ide .menu {
+  background: rgba(24, 24, 30, 0.88) !important;
+  backdrop-filter: blur(28px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(170%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 18px 48px rgba(0, 0, 0, 0.55) !important;
+  border-radius: 12px !important;
+}
+
+/* The editor's and the diff's surfaces sit on the glass too: a calm dark plate, not a hole of solid black. */
+section.ide section.git-diff,
+section.ide div.surface {
+  background: rgba(0, 0, 0, 0.22) !important;
+}

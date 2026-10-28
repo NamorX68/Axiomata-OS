@@ -1,0 +1,128 @@
+/* Variant 2 ("Liquid") on top of glass.css: sheen, grain, living rings on the tiles, quieter titles.
+   Still only surfaces and light — the arrangement stays as it is. */
+
+@property --g-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+:root {
+  /* A film grain: frosted glass reads as a material, not as a flat tint. */
+  --g-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* Light falling on the top of a pane, fading within its first lines. */
+  --g-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 140px);
+}
+
+/* ---------- Panes and panels: sheen + grain ---------- */
+section.ide aside.side,
+section.ide div.group,
+aside.panel {
+  background-image: var(--g-sheen), var(--g-grain) !important;
+}
+
+/* ---------- Titles: sentence case instead of spaced capitals ---------- */
+section.ide .areas .tab,
+section.ide .label,
+section.ide h2,
+section.ide .starts-label,
+section.ide .master-kind {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 600 !important;
+}
+section.ide .areas .tab.active::before {
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ax-accent) !important;
+  box-shadow: 0 0 10px var(--ax-accent);
+}
+
+/* ---------- Mode switch (Editor / Canvas / Flow) and the rail ---------- */
+section.ide div.modes {
+  border-radius: 999px !important;
+  padding: 3px !important;
+  backdrop-filter: blur(16px);
+}
+section.ide div.modes button {
+  border-radius: 999px !important;
+}
+section.ide nav[aria-label="Views"] {
+  background: transparent !important;
+}
+section.ide nav[aria-label="Views"] [aria-selected="true"] {
+  background: rgba(255, 255, 255, 0.07) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  border-radius: 10px !important;
+}
+
+/* ---------- Tiles: agents and masters ---------- */
+section.ide .master,
+section.ide li.card {
+  position: relative;
+  background:
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--harness, #ffffff) 16%, transparent), transparent 70%),
+    rgba(255, 255, 255, 0.035) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-top: 1px solid color-mix(in srgb, var(--harness, #ffffff) 55%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+  border-radius: 14px !important;
+  animation: none !important;
+}
+/* A working tile carries a slow ring of Glut light around its edge; a waiting one a steady amber ring. */
+section.ide .master.working::after,
+section.ide li.card.working::after,
+aside.panel article.card[data-ax-glow]::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--g-angle), transparent 0deg, #ff7a1a 60deg, #ffb26b 90deg, transparent 150deg,
+      transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: g-spin 3.2s linear infinite;
+  pointer-events: none;
+  filter: drop-shadow(0 0 6px rgba(255, 122, 26, 0.7));
+}
+section.ide li.card.working,
+section.ide .master.working {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 28px rgba(255, 122, 26, 0.18),
+    0 8px 24px rgba(0, 0, 0, 0.3) !important;
+}
+section.ide li.card.waiting,
+section.ide .master.waiting {
+  border-color: rgba(230, 180, 95, 0.55) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 0 1px rgba(230, 180, 95, 0.25),
+    0 0 22px rgba(230, 180, 95, 0.14) !important;
+}
+@keyframes g-spin {
+  to {
+    --g-angle: 360deg;
+  }
+}
+
+/* ---------- Kanban: cards lift into the light ---------- */
+aside.panel article.card {
+  background: var(--g-sheen), rgba(255, 255, 255, 0.04) !important;
+  transition: translate 160ms ease, box-shadow 160ms ease, background-color 160ms ease !important;
+}
+aside.panel article.card:hover {
+  translate: 0 -2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 14px 30px rgba(0, 0, 0, 0.4) !important;
+}
+aside.panel section.col .count {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px !important;
+  padding: 0 7px !important;
+}
+
+/* The Git sections' heads (To push, Staged, Changes) in the same quiet sentence case. */
+section.ide aside.side .title {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 600 !important;
+}

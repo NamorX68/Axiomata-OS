@@ -1,0 +1,75 @@
+/* GL0: frosted glass for the light themes (Paper, Latte) on top of glass.css — white glass, a darker hairline,
+   a white light edge on top, softer shadows. Still only surfaces and light; the arrangement stays. */
+
+[data-theme="paper"],
+[data-theme="catppuccin-latte"] {
+  --g-pane: color-mix(in srgb, var(--ax-surface-2) 56%, transparent);
+  --g-pane-strong: color-mix(in srgb, var(--ax-surface-2) 68%, transparent);
+  --g-blur: blur(24px) saturate(140%);
+  --g-edge: color-mix(in srgb, var(--ax-text) 10%, transparent);
+  --g-light: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --g-plate: rgba(255, 255, 255, 0.55);
+  --g-plate-hover: rgba(255, 255, 255, 0.78);
+  /* The same embers in the theme's accent, on the theme's own ground: light glass needs colour behind it to read as glass. */
+  --g-backdrop:
+    radial-gradient(1400px 800px at 12% 115%, color-mix(in srgb, var(--ax-accent) 48%, transparent), transparent 62%),
+    radial-gradient(1100px 700px at 92% -12%, color-mix(in srgb, var(--ax-accent) 22%, transparent), transparent 60%),
+    radial-gradient(900px 900px at 55% 50%, rgba(110, 125, 175, 0.16), transparent 70%),
+    var(--ax-bg);
+}
+
+[data-theme="paper"] section.ide,
+[data-theme="catppuccin-latte"] section.ide {
+  --ax-surface-1: rgba(255, 255, 255, 0.3);
+  --ax-surface-2: rgba(255, 255, 255, 0.5);
+  --ax-surface-3: color-mix(in srgb, var(--ax-text) 6%, transparent);
+  --ax-border-strong: color-mix(in srgb, var(--ax-text) 16%, transparent);
+}
+
+[data-theme="paper"] section.ide aside.side,
+[data-theme="paper"] section.ide div.group,
+[data-theme="catppuccin-latte"] section.ide aside.side,
+[data-theme="catppuccin-latte"] section.ide div.group {
+  box-shadow: var(--g-light), 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 30px rgba(40, 30, 20, 0.1);
+}
+
+[data-theme="paper"] aside.panel,
+[data-theme="catppuccin-latte"] aside.panel {
+  box-shadow: var(--g-light), 0 2px 4px rgba(0, 0, 0, 0.05), 0 24px 60px rgba(40, 30, 20, 0.16) !important;
+  --ax-surface-1: rgba(255, 255, 255, 0.3);
+  --ax-surface-2: rgba(255, 255, 255, 0.5);
+  --ax-surface-3: color-mix(in srgb, var(--ax-text) 6%, transparent);
+}
+
+[data-theme="paper"] aside.panel article.card,
+[data-theme="catppuccin-latte"] aside.panel article.card {
+  box-shadow: var(--g-light), 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 16px rgba(40, 30, 20, 0.08) !important;
+}
+
+/* Reading surfaces: a calm near-white sheet, not a dark plate. */
+[data-theme="paper"] aside.panel div.file-editor,
+[data-theme="paper"] aside.panel div.surface,
+[data-theme="paper"] section.ide section.git-diff,
+[data-theme="paper"] section.ide div.surface,
+[data-theme="catppuccin-latte"] aside.panel div.file-editor,
+[data-theme="catppuccin-latte"] aside.panel div.surface,
+[data-theme="catppuccin-latte"] section.ide section.git-diff,
+[data-theme="catppuccin-latte"] section.ide div.surface {
+  background: rgba(255, 255, 255, 0.55) !important;
+}
+
+[data-theme="paper"] [role="menu"],
+[data-theme="paper"] [role="listbox"],
+[data-theme="paper"] section.ide .menu,
+[data-theme="catppuccin-latte"] [role="menu"],
+[data-theme="catppuccin-latte"] [role="listbox"],
+[data-theme="catppuccin-latte"] section.ide .menu {
+  background: color-mix(in srgb, var(--ax-surface-2) 92%, transparent) !important;
+  border-color: color-mix(in srgb, var(--ax-text) 12%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 18px 48px rgba(40, 30, 20, 0.18) !important;
+}
+
+[data-theme="paper"],
+[data-theme="catppuccin-latte"] {
+  --ax-overlay: rgba(46, 40, 32, 0.18) !important;
+}
