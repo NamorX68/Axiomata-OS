@@ -50,9 +50,8 @@ body {
   font-size: var(--ax-font-size-base);
   line-height: var(--ax-line-height);
   color: var(--ax-text);
+  /* The texture or the owner's image lies on the ground (`ui/Ground.svelte`), over this colour. */
   background-color: var(--ax-bg);
-  background-image: var(--ax-texture-url);
-  background-repeat: repeat;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -307,6 +306,9 @@ input[type="radio"] {
   --ax-surface-1: var(--ax-solid-surface-1);
   --ax-surface-2: var(--ax-solid-surface-2);
   --ax-surface-3: var(--ax-solid-surface-3);
+  --ax-elev-1: var(--ax-solid-surface-1);
+  --ax-elev-2: var(--ax-solid-surface-2);
+  --ax-elev-3: var(--ax-solid-surface-3);
 }
 
 /* The hexagon (U1): the system's shape, for avatars, status marks and empty states. */

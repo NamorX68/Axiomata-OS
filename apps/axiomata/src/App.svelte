@@ -4,6 +4,7 @@
   import { get } from "svelte/store";
 
   import Canvas from "./canvas/Canvas.svelte";
+  import Ground from "./ui/Ground.svelte";
   import {
     type ClaudeLoginStatus,
     type ConfigView,
@@ -238,6 +239,7 @@ import { emit, on } from "./core/bus";
 
 <svelte:window onkeydown={onWindowKeydown} />
 
+<Ground fixed />
 <Ambient />
 <Dock />
 <Ignition />

@@ -648,7 +648,7 @@
     overflow: hidden;
     /* No hard edge (owner, UX5): the ground thins out into the Orbit's disc beneath over the outer rim — still solid
        where the Orbit's hive lies under it — and the graph fades out with it instead of being cut off. */
-    background: radial-gradient(closest-side, var(--ax-bg) 86%, transparent 100%);
+    background: radial-gradient(closest-side, var(--ax-glass-surface-1) 86%, transparent 100%);
     cursor: grab;
   }
   /* In the Orbit's container (`container-type: size` there): its own box is the unit, the same one the cloud is sized from. */

@@ -367,7 +367,7 @@
   /* What a file editor stands on around its surface: the app's ground, and nothing in the Studio's glass. */
   --ax-editor-frame-bg: var(--ax-bg);
   /* The editor on glass (the Studio's `--ax-editor-bg`): its own colour, made see-through by the transparency knob.
-     Its gutter cuts the text instead of covering it, and its sticky headers stay solid (`EditorSurface.svelte`). */
+     Its gutter cuts the text and its sticky headers mask it, instead of covering it (`EditorSurface.svelte`). */
   --ax-glass-editor-alpha: 0.5;
   --ax-glass-editor: rgb(
     from var(--ax-editor-bg) r g b / min(1, calc(var(--ax-glass-editor-alpha) * var(--ax-glass-opacity)))

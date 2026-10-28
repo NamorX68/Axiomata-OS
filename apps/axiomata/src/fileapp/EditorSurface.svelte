@@ -1743,6 +1743,8 @@
        this position without a scroll event (`fileapp/keepScroll.ts`). -->
   <div
     class="scroller"
+    class:under-sticky={stickyRows.length > 0}
+    style:--sticky-h="{sticky.height}px"
     {...KEEP_SCROLL}
     bind:this={scroller}
     onscroll={() => {
@@ -2118,6 +2120,13 @@
     visibility: hidden;
     white-space: pre;
     pointer-events: none;
+  }
+
+  /* Under the sticky headers the scroller is not there at all, so they can be glass and still hide the text that scrolls
+     on beneath them (docs/plans/glass.md G18). The mask lies on the scroller's own box, which does not move. */
+  .scroller.under-sticky {
+    -webkit-mask-image: linear-gradient(to bottom, transparent var(--sticky-h), #000 var(--sticky-h));
+    mask-image: linear-gradient(to bottom, transparent var(--sticky-h), #000 var(--sticky-h));
   }
 
   .scroller {
@@ -2693,8 +2702,8 @@
     pointer-events: none;
   }
 
-  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. Solid even on glass: the text
-     scrolls on under them, and a header is a band, not a window (docs/plans/glass.md). */
+  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. The editor's own colour, glass
+     in the Studio: the scroller is masked out beneath them (`.under-sticky`), so no text shows through. */
   .sticky {
     position: absolute;
     top: 0;
@@ -2702,7 +2711,7 @@
     right: var(--minimap-w);
     z-index: 3;
     overflow: hidden;
-    background: var(--ax-solid-editor-bg);
+    background: var(--ax-editor-bg);
     box-shadow: var(--ax-sticky-shadow);
   }
 
@@ -2713,7 +2722,7 @@
     height: var(--row);
     padding: 0;
     border: 0;
-    background: var(--ax-solid-editor-bg);
+    background: transparent;
     color: var(--ax-text);
     font: inherit;
     line-height: var(--row);

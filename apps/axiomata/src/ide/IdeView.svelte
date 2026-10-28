@@ -121,7 +121,7 @@
   import { pathAt } from "../editor/syntax/outline";
   import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
   import { invokeBackend, listenBackend } from "../core/backend";
-  import { wallpaper } from "../core/wallpaper";
+  import Ground from "../ui/Ground.svelte";
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type SidebarView, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
@@ -946,7 +946,7 @@
   style:--ax-project-hue={projectHue}
   onkeydowncapture={onViewKeydown}
 >
-  <div class="ground" class:image={$wallpaper !== null} aria-hidden="true"></div>
+  <Ground />
   <header>
     <div class="titles">
       <div class="brand" style:--tree-w="{tree.visible ? tree.width * $uiScale : 0}px">
@@ -1197,43 +1197,12 @@
     --ax-surface-1: var(--ax-glass-surface-1);
     --ax-surface-2: var(--ax-glass-surface-2);
     --ax-surface-3: var(--ax-glass-surface-3);
+    /* The elevation steps are the surfaces resolved at the root: their glass is set here as well. */
+    --ax-elev-1: var(--ax-glass-surface-1);
+    --ax-elev-2: var(--ax-glass-surface-2);
+    --ax-elev-3: var(--ax-glass-surface-3);
     --ax-editor-bg: var(--ax-glass-editor);
     --ax-editor-frame-bg: transparent;
-  }
-
-  /* The ground the glass shows (docs/plans/glass.md, G15–G16): the theme's texture or the owner's image, blurred once
-     as a still layer. Every translucent surface over it reads as frosted without a blur of its own, which would be
-     computed again on every frame something inside it scrolls. The blurred layer overhangs the box, so its edge does
-     not fade in from the window's sides. */
-  .ground {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    overflow: hidden;
-    pointer-events: none;
-  }
-
-  /* The theme's texture three times over: each theme draws it at a whisper (about 3 %) for the canvas, which behind
-     clear glass would be no ground at all; stacked, it is about 9 %, in every theme at once. Painted once, like the
-     blur, so the extra layers cost nothing while working. */
-  .ground::before {
-    content: "";
-    position: absolute;
-    inset: calc(-2 * var(--ax-ground-blur));
-    background: var(--ax-texture-url), var(--ax-texture-url), var(--ax-texture-url), var(--ax-glass-backdrop);
-    filter: blur(var(--ax-ground-blur));
-  }
-
-  .ground.image::before {
-    background: var(--ax-wallpaper) center / cover no-repeat, var(--ax-bg);
-  }
-
-  /* Over a picture, a veil of the theme's ground: text stays readable whatever the image is. */
-  .ground.image::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: var(--ax-ground-scrim);
   }
 
   /* Hidden, not unmounted — see the header comment. `visibility` keeps every
