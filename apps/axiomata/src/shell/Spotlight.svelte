@@ -13,12 +13,16 @@
 
   import type { SearchHit } from "../core/backend";
   import { busy, send } from "../core/chat";
+  import { coverGround } from "../core/cover";
   import { toast } from "../core/toast";
   import { GROUP_LABEL, rankItems, type SpotlightSources } from "../core/spotlight";
   import { withContentHits, type SpotlightAction } from "../core/spotlightItems";
   import { loadInstantSources, runSpotlightAction, searchFileContents } from "../core/spotlightRun";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
+
+  // Open, it covers the app's ground: what moves on it holds still beneath its glass (core/cover.ts).
+  $effect(() => (open ? coverGround() : undefined));
 
   /** A query shorter than this is not sent to the full-text search. */
   const MIN_CONTENT_QUERY = 2;
@@ -218,7 +222,7 @@
     justify-content: center;
     align-items: flex-start;
     padding-top: 22vh;
-    background: var(--ax-overlay);
+    background: var(--ax-glass-overlay);
   }
   .spot {
     width: min(calc(640px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-4)));
@@ -231,7 +235,10 @@
     padding: 0 calc(22px * var(--ax-ui-scale));
     border: 1px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-pill);
-    background: var(--ax-surface-1);
+    /* Dense glass, like every menu (docs/plans/glass.md, G14): it lies over whatever the app shows. */
+    background: var(--ax-glass-menu);
+    -webkit-backdrop-filter: var(--ax-glass-filter-panel);
+    backdrop-filter: var(--ax-glass-filter-panel);
     color: var(--ax-text);
     font: inherit;
     font-size: var(--ax-font-size-lg);
@@ -250,7 +257,9 @@
     list-style: none;
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-lg);
-    background: var(--ax-surface-1);
+    background: var(--ax-glass-menu);
+    -webkit-backdrop-filter: var(--ax-glass-filter-panel);
+    backdrop-filter: var(--ax-glass-filter-panel);
     box-shadow: var(--ax-shadow-pop);
   }
   .busy {

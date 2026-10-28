@@ -2151,7 +2151,9 @@
     height: 100%;
     float: left;
     z-index: 2;
-    background: var(--ax-editor-bg);
+    /* No colour of its own: the text is cut where it stands (`textClipPath`), and the surface beneath already paints
+       the editor's colour — a second layer would darken the strip on glass. */
+    background: transparent;
     cursor: default;
   }
 

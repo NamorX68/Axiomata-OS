@@ -285,11 +285,52 @@ input[type="radio"] {
   pointer-events: none;
 }
 
-/* What must cover takes the theme's solid surfaces back, which the Studio made translucent for its panes
-   (`IdeView.svelte`): whatever lies over text or over a pane — the editor's find bar, rename field, completion with its
+/* A glass scope (docs/plans/glass.md, G18): the Studio, a floating window, a staged panel. Lines are light, not
+   frames, and the surfaces — lists, cards, bars, the editor — are the theme's own made see-through by the transparency
+   knob, so the frosted ground shows through them. The terminal reports its colour from the root (OSC 11) and has a
+   transparency of its own; `--ax-border-strong` stays, scrollbar thumbs, status marks and empty states fill with it.
+   The elevation steps are the surfaces resolved at the root, so their glass is set here as well. */
+.ax-glass-scope {
+  --ax-border: var(--ax-glass-edge);
+  --ax-surface-1: var(--ax-glass-surface-1);
+  --ax-surface-2: var(--ax-glass-surface-2);
+  --ax-surface-3: var(--ax-glass-surface-3);
+  --ax-elev-1: var(--ax-glass-surface-1);
+  --ax-elev-2: var(--ax-glass-surface-2);
+  --ax-elev-3: var(--ax-glass-surface-3);
+  --ax-editor-bg: var(--ax-glass-editor);
+  --ax-editor-frame-bg: transparent;
+  /* A Kanban on glass (G3): lanes without a floor, the cards are the glass. */
+  --ax-lane-bg: transparent;
+  --ax-card-bg: var(--ax-glass-surface-2);
+}
+
+/* A floating glass panel (G3): a window or a staged panel over the app. Unlike a Studio pane it lies over things that
+   are sharp — tiles, the Orbit — so it blurs them for real; the ground and its Orbit hold still beneath it
+   (`core/cover.ts`), so the blur is computed once, not on every frame. On a layer behind the content, like a pane's
+   glass, so a fixed menu inside is not pulled into the panel's box. The panel must be positioned and sets its own
+   radius: the layer lies on the nearest positioned box. */
+.ax-glass-panel {
+  isolation: isolate;
+  border: 1px solid var(--ax-glass-edge);
+  box-shadow: var(--ax-glass-shadow-panel);
+}
+.ax-glass-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--ax-glass-panel);
+  -webkit-backdrop-filter: var(--ax-glass-filter-panel);
+  backdrop-filter: var(--ax-glass-filter-panel);
+  pointer-events: none;
+}
+
+/* What must cover takes the theme's solid surfaces back, which a glass scope made translucent: whatever lies over text or over a pane — the editor's find bar, rename field, completion with its
    docs, code actions, marked text while composing, a diff's Vi bar, the terminal and its banners, a menu, a list of
    suggestions, a dialog, a tooltip, a popover, a drag ghost. The editor's own chrome around the text stays glass. */
-.ide
+.ax-glass-scope
   :is(
     .terminal,
     .find-bar,

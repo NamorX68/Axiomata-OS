@@ -16,7 +16,7 @@
    *
    * Appearance follows decisions taken by looking at a preview view in every
    * theme, since deleted — `docs/plans/kanban.md` §6a records *why* each came
-   * out this way: the column body is `--ax-bg`, the desk the cards lie on, and
+   * out this way: the column body is `--ax-lane-bg`, the desk the cards lie on (none on glass), and
    * the card itself asks the theme how it should sit via `--ax-card-*`. Only
    * labels carry colour. Nothing here is framed — the board is frameless,
    * and a column drawn with a border would fight that.
@@ -1694,8 +1694,8 @@
     min-height: 0;
     flex: 1 1 0;
     min-width: var(--min-col);
-    /* D3, B2: a lane the cards lie on — a tint, rounded, never a frame. */
-    background: color-mix(in srgb, var(--ax-surface-1) 70%, var(--ax-bg));
+    /* D3, B2: a lane the cards lie on — a tint, rounded, never a frame; on glass none at all (docs/plans/glass.md). */
+    background: var(--ax-lane-bg);
     border-radius: var(--ax-radius-lg);
     padding: var(--ax-space-2);
     container: col / inline-size;
@@ -1751,7 +1751,8 @@
     translate: 0 -60%;
     display: inline-flex;
     padding-left: var(--ax-space-2);
-    background: color-mix(in srgb, var(--ax-surface-1) 70%, var(--ax-bg));
+    /* It lies over the column's name: dense, as everything over text is on glass (G14). */
+    background: var(--ax-glass-menu);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--ax-dur-fast) var(--ax-ease);

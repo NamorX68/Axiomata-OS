@@ -69,6 +69,7 @@ export const ALLOWED_TOKENS: readonly string[] = [
   "--ax-glass-editor-alpha",
   "--ax-ground-scrim",
   "--ax-ground-texture",
+  "--ax-lane-bg",
   "--ax-glass-backdrop",
   "--ax-font-display",
   "--ax-font-sans",

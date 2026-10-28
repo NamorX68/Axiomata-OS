@@ -147,7 +147,13 @@ Owners). Halt nur bei GL0 und nach GL2.
   Datenbank, solange iCloud bremste stand die App (`3ce35b4`).
 - **GL2b — Grund, Regler, Hintergrundbild, Editor auf Glas (G15–G18):** gebaut 2026-10-28.
 - **GL3 — Panels:** `Window.svelte`, Staging-Panels, Kanban (Spalten ohne Boden, Kartenplatten), Datei/Notes,
-  Spotlight, Einstellungen; der Orbit-Grund (G10).
+  Spotlight, Einstellungen; der Orbit-Grund (G10). **Gebaut** 2026-10-28: eine gemeinsame Glas-Klasse für Studio,
+  Fenster und Panels (`.ax-glass-scope` in `styles.css`), schwebende Panels mit echter Unschärfe (`.ax-glass-panel`),
+  Spotlight auf dichtem Glas, eine leichtere Abdunkelung hinter Dialogen (`--ax-glass-overlay`). Damit die echte
+  Unschärfe nicht ruckelt, hält der Grund still, solange etwas ihn abdeckt (`core/cover.ts`): Orbit zeichnet unter
+  Studio, Panel, modalem Fenster oder Spotlight nur nach einer Änderung neu, das Mauslicht geht aus. Der angedockte
+  Chat deckt nichts ab und bekommt dichtes Glas ohne Echtzeit-Unschärfe. Nebenbei: Orbit zeichnete bisher auch unter
+  dem geöffneten Studio jeden Frame.
 - **GL4 — Lebende Ringe:** `use:glow` wird ab Kartengröße zum Ring (G11), Harness-Licht oben in den Agent-Kacheln.
 - **GL5 — Titel + Doku:** normale Schreibung app-weit (G9); `docs/architecture.md` §7, AGENTS.md (Glas-Regel neben
   der Akzentregel), Querverweis in `ui-ux-round.md`.

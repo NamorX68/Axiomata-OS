@@ -122,6 +122,7 @@
   import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
   import { invokeBackend, listenBackend } from "../core/backend";
   import Ground from "../ui/Ground.svelte";
+  import { coverGround } from "../core/cover";
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type SidebarView, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
@@ -936,10 +937,12 @@
     agentStatus.watch(open ? (current?.id ?? null) : null);
   });
   onMount(() => () => agentStatus.watch(null));
+  // Open, the Studio covers the app's ground: the Orbit beneath holds still (core/cover.ts).
+  $effect(() => (open ? coverGround() : undefined));
 </script>
 
 <section
-  class="ide"
+  class="ide ax-glass-scope"
   class:hidden={!open}
   inert={!open}
   aria-label="Studio"
@@ -1187,22 +1190,7 @@
     /* Under the ground's blurred edge, the theme's own colour (docs/plans/glass.md, G7). */
     background: var(--ax-bg);
     color: var(--ax-text);
-    /* Inside the glass, lines are light, not frames, and a pane's surfaces — its lists, cards, bars and the editor —
-       are see-through by the transparency knob, so the frosted ground shows through them (G18). What must cover
-       stays solid: a menu, popover or text overlay takes the root's surfaces back (`styles.css`), the editor masks its text
-       under its sticky headers, and the terminal reports its colour from the root (OSC 11) and has a
-       transparency of its own. `--ax-border-strong` stays: scrollbar thumbs, status marks and empty states fill with
-       it. */
-    --ax-border: var(--ax-glass-edge);
-    --ax-surface-1: var(--ax-glass-surface-1);
-    --ax-surface-2: var(--ax-glass-surface-2);
-    --ax-surface-3: var(--ax-glass-surface-3);
-    /* The elevation steps are the surfaces resolved at the root: their glass is set here as well. */
-    --ax-elev-1: var(--ax-glass-surface-1);
-    --ax-elev-2: var(--ax-glass-surface-2);
-    --ax-elev-3: var(--ax-glass-surface-3);
-    --ax-editor-bg: var(--ax-glass-editor);
-    --ax-editor-frame-bg: transparent;
+    /* Its surfaces are glass: `ax-glass-scope` (styles.css, G18). */
   }
 
   /* Hidden, not unmounted — see the header comment. `visibility` keeps every
