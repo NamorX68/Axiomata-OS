@@ -273,7 +273,13 @@
      of the theme's ground keeps text readable whatever the picture is. */
   --ax-glass-backdrop: var(--ax-bg);
   --ax-ground-blur: 20px;
+  /* The texture on the ground: a dark theme's hex lines three times over (about 9 % instead of 3 %); a theme whose
+     texture is noise sets it once (stacked and blurred, noise turns into a grey veil). */
+  --ax-ground-texture: var(--ax-texture-url), var(--ax-texture-url), var(--ax-texture-url);
   --ax-ground-scrim: rgb(from var(--ax-bg) r g b / 0.35);
+  /* The Orbit's disc over the ground: dense enough for the graph's labels, thinned by the transparency knob; solid
+     at the knob's solid end and with reduced transparency, in the ground's own colour, so its fade has no edge. */
+  --ax-glass-orbit-disc: rgb(from var(--ax-bg) r g b / min(1, calc(0.8 * var(--ax-glass-opacity))));
   /* What a pane's own lists, cards and bars are painted with inside the glass (the Studio's `--ax-surface-*`): the
      theme's own surfaces, made see-through by the transparency knob, so the frosted ground shows through them. An
      alpha below 0.4 never turns solid at the knob's solid end (`SOLID_GLASS` in `core/glass.ts`). */

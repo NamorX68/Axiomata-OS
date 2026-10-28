@@ -1189,8 +1189,8 @@
     color: var(--ax-text);
     /* Inside the glass, lines are light, not frames, and a pane's surfaces — its lists, cards, bars and the editor —
        are see-through by the transparency knob, so the frosted ground shows through them (G18). What must cover
-       stays solid: a menu, popover or text overlay takes the root's surfaces back (`styles.css`), the editor's sticky
-       headers keep its solid colour, and the terminal reports its colour from the root (OSC 11) and has a
+       stays solid: a menu, popover or text overlay takes the root's surfaces back (`styles.css`), the editor masks its text
+       under its sticky headers, and the terminal reports its colour from the root (OSC 11) and has a
        transparency of its own. `--ax-border-strong` stays: scrollbar thumbs, status marks and empty states fill with
        it. */
     --ax-border: var(--ax-glass-edge);

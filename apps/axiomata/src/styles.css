@@ -50,8 +50,11 @@ body {
   font-size: var(--ax-font-size-base);
   line-height: var(--ax-line-height);
   color: var(--ax-text);
-  /* The texture or the owner's image lies on the ground (`ui/Ground.svelte`), over this colour. */
   background-color: var(--ax-bg);
+  /* Crisp, as the pointer light (`Ambient.svelte`) lights exactly these lines; an owner's picture covers it
+     (`ui/Ground.svelte`). */
+  background-image: var(--ax-texture-url);
+  background-repeat: repeat;
   -webkit-font-smoothing: antialiased;
 }
 

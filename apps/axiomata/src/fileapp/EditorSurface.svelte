@@ -2702,8 +2702,8 @@
     pointer-events: none;
   }
 
-  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. The editor's own colour, glass
-     in the Studio: the scroller is masked out beneath them (`.under-sticky`), so no text shows through. */
+  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. No colour of their own: the
+     scroller is masked out beneath them (`.under-sticky`), so the surface's colour (glass in the Studio) shows, no text. */
   .sticky {
     position: absolute;
     top: 0;
@@ -2711,7 +2711,7 @@
     right: var(--minimap-w);
     z-index: 3;
     overflow: hidden;
-    background: var(--ax-editor-bg);
+    background: transparent;
     box-shadow: var(--ax-sticky-shadow);
   }
 

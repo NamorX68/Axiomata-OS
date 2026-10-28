@@ -22,19 +22,24 @@
     pointer-events: none;
   }
 
+  /* Under the app the theme's ground is the body's own, crisp (`styles.css`): only a picture lies here. */
   .ground.fixed {
     position: fixed;
   }
 
-  /* The theme's texture three times over: each theme draws it at a whisper (about 3 %) for the canvas, which behind
-     clear glass would be no ground at all; stacked, it is about 9 %, in every theme at once. Painted once, like the
-     blur, so the extra layers cost nothing while working. The blurred layer overhangs the box, so its edge does not
+  .ground.fixed:not(.image) {
+    display: none;
+  }
+
+  /* The theme's texture as the ground draws it (`--ax-ground-texture`): a dark theme's lines three times over, which
+     at a whisper each (about 3 %) would be no ground behind clear glass. Painted once, like the blur, so the extra
+     layers cost nothing while working. The blurred layer overhangs the box, so its edge does not
      fade in from the window's sides. */
   .ground::before {
     content: "";
     position: absolute;
     inset: calc(-2 * var(--ax-ground-blur));
-    background: var(--ax-texture-url), var(--ax-texture-url), var(--ax-texture-url), var(--ax-glass-backdrop);
+    background: var(--ax-ground-texture), var(--ax-glass-backdrop);
     filter: blur(var(--ax-ground-blur));
   }
 
