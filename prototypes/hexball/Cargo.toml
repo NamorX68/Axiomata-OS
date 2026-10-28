@@ -1,0 +1,11 @@
+[package]
+name = "hexball"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+parley = "0.6"
+pollster = "1.0.1"
+vello = "0.11.0"
+winit = "0.30.13"

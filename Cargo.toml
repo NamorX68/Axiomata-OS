@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "apps/axiomata/src-tauri"]
+# Prototypes stand alone (`prototypes/`, each its own crate): never built with the workspace.
+exclude = ["prototypes"]
 
 [workspace.package]
 edition = "2024"

@@ -2,7 +2,7 @@
 
 Status: **stack decided and validated by prototype** (2026-10-16); migration not
 started yet — current real work is the M7 harness, the migration follows.
-Prototype: `~/.axiomata/prototypes/hexball` (disposable, never in this repo).
+Prototype: `prototypes/hexball` (its own crate, outside the workspace; moved into the repo 2026-10-28, owner).
 
 ## 1. The decision: vello + wgpu
 
@@ -141,5 +141,5 @@ regardless of whether that ambition ever happens.
 - No rewrite of the Rust engines — they are the stable ground the migration
   stands on.
 - No big-bang cutover; the Tauri app keeps working until P5.
-- No prototype code ever enters this repo (the `~/.axiomata/prototypes/`
-  rule stays in force).
+- Prototype code stays in `prototypes/` (owner, 2026-10-28; until then `~/.axiomata/prototypes/`): each prototype is a
+  crate of its own, excluded from the workspace (`Cargo.toml`), and never a dependency of the app.
