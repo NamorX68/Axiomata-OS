@@ -1213,11 +1213,14 @@
     pointer-events: none;
   }
 
+  /* The theme's texture three times over: each theme draws it at a whisper (about 3 %) for the canvas, which behind
+     clear glass would be no ground at all; stacked, it is about 9 %, in every theme at once. Painted once, like the
+     blur, so the extra layers cost nothing while working. */
   .ground::before {
     content: "";
     position: absolute;
     inset: calc(-2 * var(--ax-ground-blur));
-    background: var(--ax-texture-url), var(--ax-glass-backdrop);
+    background: var(--ax-texture-url), var(--ax-texture-url), var(--ax-texture-url), var(--ax-glass-backdrop);
     filter: blur(var(--ax-ground-blur));
   }
 
