@@ -41,6 +41,46 @@
   /** A group of areas (the Flow layout's Planning, Agents, Flow view) reads as section heads, not as tabs (G4). */
   const areas = $derived(group.tabs.length > 0 && group.tabs.every(isAreaTab));
 
+  let tabbarEl = $state<HTMLElement | undefined>();
+  let bodyEl = $state<HTMLElement | undefined>();
+  /** Where the active tab stands over the plate, in px from the plate's left edge: the plate's top edge is cut there,
+   *  so tab and plate read as one outline (docs/plans/glass.md). `null` for a group of areas or no active tab. */
+  let notch = $state<{ x: number; w: number } | null>(null);
+
+  function measureNotch(): void {
+    const tab = areas ? null : tabbarEl?.querySelector<HTMLElement>(".tab.active");
+    if (!tab || !bodyEl) {
+      notch = null;
+      return;
+    }
+    const t = tab.getBoundingClientRect();
+    const b = bodyEl.getBoundingClientRect();
+    notch = { x: t.left - b.left, w: t.width };
+  }
+
+  // Again whenever the active tab, the tabs or the sizes change, and while the bar scrolls sideways.
+  $effect(() => {
+    void group.active;
+    void group.tabs.length;
+    const bar = tabbarEl;
+    const body = bodyEl;
+    if (!bar || !body) return;
+    let frame = requestAnimationFrame(measureNotch);
+    const again = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measureNotch);
+    };
+    const ro = new ResizeObserver(again);
+    ro.observe(bar);
+    ro.observe(body);
+    bar.addEventListener("scroll", again, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+      bar.removeEventListener("scroll", again);
+    };
+  });
+
   /** The drop highlight for this group, or `null` when the drag is elsewhere. */
   const highlight = $derived.by(() => {
     const target = dock.hint();
@@ -49,7 +89,7 @@
 </script>
 
 <div class="group" data-ide-group={group.id}>
-  <div class="tabbar" class:areas data-ide-tabbar role="tablist">
+  <div class="tabbar" class:areas data-ide-tabbar role="tablist" bind:this={tabbarEl}>
     {#each group.tabs as tab (tab.id)}
       {@const agent = tabAgent(tab)}
       {@const view = tabStatus(agent)}
@@ -105,7 +145,13 @@
     {/each}
   </div>
 
-  <div class="body ax-glass-pane">
+  <div
+    class="body ax-glass-pane"
+    class:notched={notch !== null}
+    style:--notch-x={notch ? `${notch.x}px` : undefined}
+    style:--notch-w={notch ? `${notch.w}px` : undefined}
+    bind:this={bodyEl}
+  >
     <!-- Empty on purpose. The pane itself is rendered once, flat, in the
          view's pane store and moved in here after every layout change
          (`ide/paneStore.ts`) — rendering it in this `{#each}` is what used to
@@ -145,15 +191,17 @@
   }
 
   /* The tab bar (`docs/plans/ui-ux-round.md` G4, replacing editor-look K7/K14). On glass (docs/plans/glass.md, owner
-     2026-10-28) the tabs stand free on the ground and the plate begins under them (`.body`): no strip, no line, no
-     frame above the content. The active tab is a small glass pill, the others are their icon and name on the ground.
-     The language sits in the file icon only, an agent's tab carries its hex avatar. Still the drop target of its
-     group, only unseen. */
+     2026-10-28) the tabs stand on the ground above the plate (`.body`): no strip, no line. The active tab grows out of
+     the plate as a folder tab — one outline with it, curved shoulders where it meets the plate's top edge, which is
+     cut beneath it (`.notched`); the others are their icon and name on the ground. The language sits in the file icon
+     only, an agent's tab carries its hex avatar. Still the drop target of its group, only unseen. The bar starts past
+     the plate's rounded corner, so a shoulder never meets the curve. */
   .tabbar {
+    --shoulder: var(--ax-radius-md);
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: calc(2px * var(--ax-ui-scale));
-    padding: var(--ax-glass-gap) calc(var(--ax-glass-gap) + var(--ax-space-1)) 0;
+    padding: var(--ax-glass-gap) var(--ax-glass-gap) 0 calc(var(--ax-glass-gap) + var(--ax-glass-radius));
     background: transparent;
     /* The bar is a drop target of its own; it must not shrink away. */
     flex: 0 0 auto;
@@ -166,10 +214,10 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-1) var(--ax-space-1) var(--ax-space-3);
-    min-height: var(--ax-hit-min);
+    padding: var(--ax-space-2) var(--ax-space-2) var(--ax-space-2) var(--ax-space-4);
+    min-height: calc(var(--ax-hit-min) + 6px * var(--ax-ui-scale));
     border: 1px solid transparent;
-    border-radius: var(--ax-radius-md);
+    border-radius: var(--ax-radius-md) var(--ax-radius-md) 0 0;
     color: var(--ax-text-muted);
     font: var(--ax-type-body);
     font-weight: 500;
@@ -191,13 +239,48 @@
     color: var(--ax-text);
   }
 
-  /* The active tab: a glass pill of its own, the plate's edge and light — selected, without the accent (selected ≠
-     alive). */
-  .tab.active {
+  /* The active tab: the plate's own glass and edge, open at the bottom and a pixel over the plate's cut edge, so the
+     two are one surface — selected, without the accent (selected ≠ alive). */
+  .tabbar:not(.areas) .tab.active {
+    z-index: 1;
+    margin-bottom: -1px;
     border-color: var(--ax-glass-edge);
-    background: var(--ax-surface-2);
+    border-bottom-color: transparent;
+    background: var(--ax-glass-pane);
     color: var(--ax-text);
     box-shadow: var(--ax-glass-light);
+  }
+
+  /* Its shoulders: a concave curve on each side, from the tab's side down into the plate's top edge — a quarter
+     circle cut out of a square of the plate's glass, its rim the edge. */
+  .tabbar:not(.areas) .tab.active::before,
+  .tabbar:not(.areas) .tab.active::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    width: var(--shoulder);
+    height: var(--shoulder);
+    pointer-events: none;
+  }
+  .tabbar:not(.areas) .tab.active::before {
+    left: calc(-1 * var(--shoulder) - 1px);
+    background: radial-gradient(
+      circle at 0 0,
+      transparent calc(var(--shoulder) - 1px),
+      var(--ax-glass-edge) calc(var(--shoulder) - 1px),
+      var(--ax-glass-edge) var(--shoulder),
+      var(--ax-glass-pane) calc(var(--shoulder) + 0.5px)
+    );
+  }
+  .tabbar:not(.areas) .tab.active::after {
+    right: calc(-1 * var(--shoulder) - 1px);
+    background: radial-gradient(
+      circle at 100% 0,
+      transparent calc(var(--shoulder) - 1px),
+      var(--ax-glass-edge) calc(var(--shoulder) - 1px),
+      var(--ax-glass-edge) var(--shoulder),
+      var(--ax-glass-pane) calc(var(--shoulder) + 0.5px)
+    );
   }
 
   /* An agent at work: its name takes the glow's colour (its avatar glows beside it). */
@@ -283,12 +366,42 @@
     color: var(--ax-text);
   }
 
-  /* The glass plate (`.ax-glass-pane`), under the tabs: the content is cut to its rounded corners. */
+  /* The glass plate (`.ax-glass-pane`), under the tabs: the content is cut to its rounded corners. It sits right
+     under the tab bar, and its edge is drawn on its glass layer instead of as a border, so the layer can be cut
+     where the active tab stands. */
   .body {
     position: relative;
     flex: 1 1 auto;
     min-height: 0;
+    margin-top: 0;
     overflow: hidden;
+    border: 0;
+  }
+  .body::before {
+    box-shadow:
+      inset 0 0 0 1px var(--ax-glass-edge),
+      var(--ax-glass-light);
+  }
+
+  /* Under the active tab and its shoulders the plate's top row is cut out of its glass layer: no edge runs through
+     the folder tab, which covers that row with the same glass. */
+  .body.notched::before {
+    --cut-from: calc(var(--notch-x) - var(--ax-radius-md) - 1px);
+    --cut-to: calc(var(--notch-x) + var(--notch-w) + var(--ax-radius-md) + 1px);
+    --cut-mask:
+      linear-gradient(#000 0 0),
+      linear-gradient(
+          to right,
+          transparent var(--cut-from),
+          #000 var(--cut-from),
+          #000 var(--cut-to),
+          transparent var(--cut-to)
+        )
+        0 0 / 100% 1px no-repeat;
+    -webkit-mask: var(--cut-mask);
+    mask: var(--cut-mask);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
   }
 
   .slot {
