@@ -154,6 +154,11 @@ Owners). Halt nur bei GL0 und nach GL2.
   Studio, Panel, modalem Fenster oder Spotlight nur nach einer Änderung neu, das Mauslicht geht aus. Der angedockte
   Chat deckt nichts ab und bekommt dichtes Glas ohne Echtzeit-Unschärfe. Nebenbei: Orbit zeichnete bisher auch unter
   dem geöffneten Studio jeden Frame.
-- **GL4 — Lebende Ringe:** `use:glow` wird ab Kartengröße zum Ring (G11), Harness-Licht oben in den Agent-Kacheln.
+- **GL4 — Lebende Ringe:** `use:glow` wird ab Kartengröße zum Ring (G11), Harness-Licht oben in den Agent-Kacheln. **Gebaut** 2026-10-28: `use:ring` (`ui/glow.ts`), eine globale Regel auf `::after` (`styles.css`) — die
+  Karte selbst trägt keine Ring-Stile, weil ihre eigenen Rahmen- und Schattenregeln eine globale überstimmen.
+  Arbeitet: Glutbogen läuft um die Kante (`--ax-anim-ring`, 3,2 s, Calm/Off/Fokus still); wartet: ruhiger
+  Bernsteinrand. Auf den Agent-Kacheln im Studio, Kanban-Karten in Arbeit (auch kurz nach dem Fertigwerden) und
+  laufenden Skills; Master-Kacheln tragen das weiche Harness-Licht statt des 3-px-Balkens. Kleine Dinge (Abzeichen)
+  behalten `use:glow`.
 - **GL5 — Titel + Doku:** normale Schreibung app-weit (G9); `docs/architecture.md` §7, AGENTS.md (Glas-Regel neben
   der Akzentregel), Querverweis in `ui-ux-round.md`.

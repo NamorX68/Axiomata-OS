@@ -16,6 +16,30 @@ function apply(node: HTMLElement, on: boolean | undefined): void {
   else node.removeAttribute(ATTR);
 }
 
+/** What a card-sized thing is doing, for its ring: working, waiting for the owner, or neither. */
+export type RingState = "working" | "waiting" | null | undefined;
+
+const RING_ATTR = "data-ax-ring";
+
+function applyRing(node: HTMLElement, state: RingState): void {
+  if (state) node.setAttribute(RING_ATTR, state);
+  else node.removeAttribute(RING_ATTR);
+}
+
+/**
+ * `use:ring={state}` — the glow's form from card size up (`docs/plans/glass.md`, G11): working, a slow ring of Glut
+ * light runs round the edge; waiting for the owner, a steady amber ring. One global rule (`[data-ax-ring]` in
+ * `styles.css`), stilled by Calm and Off. The element must be positioned; small things (dots, tabs, chips) keep
+ * `use:glow`.
+ */
+export const ring: Action<HTMLElement, RingState> = (node, state) => {
+  applyRing(node, state);
+  return {
+    update: (next) => applyRing(node, next),
+    destroy: () => node.removeAttribute(RING_ATTR),
+  };
+};
+
 /** Glows while `on` is true. */
 export const glow: Action<HTMLElement, boolean | undefined> = (node, on) => {
   apply(node, on);

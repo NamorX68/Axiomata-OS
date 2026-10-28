@@ -34,6 +34,7 @@
   import IconButton from "../ui/IconButton.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
   import HexAvatar from "../ui/HexAvatar.svelte";
+  import { ring, type RingState } from "../ui/glow";
 
   const statuses = agentStatus.statuses;
 
@@ -186,6 +187,11 @@
     form.role = role.name;
     form.name = agentNameFor(role.name, agents.map((a) => a.name));
   }
+
+  /** The ring of an agent tile (G11): working or waiting for the owner; anything else has none. */
+  function ringOf(tone: string | undefined): RingState {
+    return tone === "working" || tone === "waiting" ? tone : null;
+  }
 </script>
 
 <div class="panel">
@@ -202,6 +208,7 @@
           <div class="master-tile" style:--harness="var(--ax-harness-{harness})">
           <button
             class="master {card?.status.tone ?? ''}"
+            use:ring={ringOf(card?.status.tone)}
             type="button"
             title={harness === "opencode"
               ? "Opencode as you run it yourself — your settings, your models, in the project folder; no team tools"
@@ -297,7 +304,11 @@
       <ul class="cards">
         {#each listed as agent (agent.id)}
           {@const card = cardOf(agent, $statuses.byAgent.get(agent.id), openAgentIds.has(agent.id), $statuses.checkedAt)}
-          <li class="card {card.status.tone}" style:--harness="var(--ax-harness-{agent.harness})">
+          <li
+            class="card {card.status.tone}"
+            style:--harness="var(--ax-harness-{agent.harness})"
+            use:ring={ringOf(card.status.tone)}
+          >
             <button class="open" type="button" {disabled} title={card.status.title} onclick={() => onOpen(agent)}>
               <span class="top">
                 <HexAvatar
@@ -396,6 +407,17 @@
 </div>
 
 <style>
+  /* The harness's light at the top of an agent tile (docs/plans/glass.md, G1): a soft glow from the top edge in the
+     harness's colour, instead of the hard bar it was. */
+  .master,
+  .card {
+    --harness-light: radial-gradient(
+      120% 70% at 50% 0%,
+      color-mix(in srgb, var(--harness) 16%, transparent),
+      transparent 70%
+    );
+  }
+
   .panel {
     flex: 1;
     min-height: 0;
@@ -444,26 +466,16 @@
     display: block;
     padding: 0;
     border: 1px solid var(--ax-border);
+    border-top-color: color-mix(in srgb, var(--harness) 55%, transparent);
     border-radius: var(--ax-radius-md);
-    background: var(--ax-elev-2);
+    background: var(--harness-light), var(--ax-elev-2);
     box-shadow: var(--ax-shadow-raised);
   }
 
   .card:hover,
   .card:focus-within {
     border-color: var(--ax-border-strong);
-    background: var(--ax-elev-3);
-  }
-
-  .card.working {
-    border-color: var(--ax-glow);
-    box-shadow: var(--ax-glow-shadow);
-    animation: var(--ax-anim-glow);
-  }
-
-  .card.waiting {
-    border-color: var(--ax-warning);
-    box-shadow: 0 0 0 1px var(--ax-warning) inset;
+    background: var(--harness-light), var(--ax-elev-3);
   }
 
   .card.ended {
@@ -548,6 +560,7 @@
   }
 
   .master {
+    position: relative;
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -556,9 +569,9 @@
     min-width: 0;
     padding: var(--ax-space-4) var(--ax-space-2) var(--ax-space-3);
     border: 1px solid color-mix(in srgb, var(--harness) 45%, var(--ax-border));
-    border-top: calc(3px * var(--ax-ui-scale)) solid var(--harness);
+    border-top-color: color-mix(in srgb, var(--harness) 55%, transparent);
     border-radius: var(--ax-radius-md);
-    background: var(--ax-elev-2);
+    background: var(--harness-light), var(--ax-elev-2);
     box-shadow: var(--ax-shadow-raised);
     color: var(--ax-text);
     font-family: var(--ax-font-sans);
@@ -568,17 +581,7 @@
   .master:hover,
   .master:focus-visible {
     border-color: var(--harness);
-    background: var(--ax-elev-3);
-  }
-
-  .master.working {
-    border-color: var(--ax-glow);
-    box-shadow: var(--ax-glow-shadow);
-    animation: var(--ax-anim-glow);
-  }
-
-  .master.waiting {
-    border-color: var(--ax-warning);
+    background: var(--harness-light), var(--ax-elev-3);
   }
 
   .master-name {

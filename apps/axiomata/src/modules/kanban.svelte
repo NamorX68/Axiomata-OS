@@ -54,7 +54,7 @@
   import { studioCards } from "../core/studioActivity";
   import { accentColor, themeAreaSwatches } from "../ide/projectAccent";
   import { listProjects } from "../ide/projects";
-  import { glow } from "../ui/glow";
+  import { ring } from "../ui/glow";
   import {
     actorLabel,
     applyFilter,
@@ -1451,9 +1451,11 @@
                 data-tone={card.labels.length > 0 ? labelColorIndex(card.labels[0], LABEL_TOKENS) : undefined}
                 data-project={project ? "" : undefined}
                 style:--card-project={project}
-                use:glow={$studioCards.has(card.id) ||
-                  glowing.has(card.id) ||
-                  (card.origin_of != null && stepAtWork($data?.cards ?? [], card.origin_of, $studioCards))}
+                use:ring={$studioCards.has(card.id) ||
+                glowing.has(card.id) ||
+                (card.origin_of != null && stepAtWork($data?.cards ?? [], card.origin_of, $studioCards))
+                  ? "working"
+                  : null}
                 class:archived={card.archived_at !== null}
                 class:waited={waits.length > 0}
                 class:lifted={dragging?.id === card.id || carrying?.id === card.id}
@@ -1887,13 +1889,6 @@
   }
   .card.archived {
     opacity: 0.55;
-  }
-  /* The glow of a card at work or just done (`ui/glow.ts`): the card's own shadow rule above would outrank the global
-     one, so the card says it again. */
-  .card:global([data-ax-glow]) {
-    border-color: var(--ax-glow);
-    box-shadow: var(--ax-glow-shadow);
-    animation: var(--ax-anim-glow);
   }
   /* G19: the project a card's plan runs in, as a short line along its top in the project's colour. */
   .card[data-project]::before {

@@ -81,6 +81,8 @@
   --ax-anim-breathe: ax-breathe var(--ax-dur-breath) var(--ax-ease) infinite;
   /* An ember running round an edge (the thinking assistant bar); `styles.css` registers its angle. */
   --ax-anim-orbit: ax-orbit 2200ms linear infinite;
+  /* The living ring round a working card (G11): the same ember, slower — a card works for minutes, not a breath. */
+  --ax-anim-ring: ax-orbit 3200ms linear infinite;
   /* "Waits for you" (plans/agent-waiting.md W1): a short bump every few seconds, the shape's call for the owner. */
   --ax-anim-nudge: ax-nudge 3600ms var(--ax-spring) infinite;
   --ax-dur-fast: 120ms;
@@ -433,6 +435,7 @@
   --ax-anim-breathe: none;
   --ax-anim-glow: none;
   --ax-anim-orbit: none;
+  --ax-anim-ring: none;
   --ax-anim-nudge: none;
 }
 

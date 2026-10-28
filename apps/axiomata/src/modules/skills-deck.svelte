@@ -14,7 +14,7 @@
   import { relativeTime } from "../core/format";
   import { backendLabel } from "../core/harness";
   import type { ModuleContext } from "../core/types";
-  import { glow } from "../ui/glow";
+  import { ring } from "../ui/glow";
   import StatusMark from "../ui/StatusMark.svelte";
 
   const POLL_MS = 5000;
@@ -125,7 +125,7 @@
       {#each visible as s (s.name)}
         {@const last = lastRun.get(s.name)}
         {@const busy = running.includes(s.name)}
-        <li class="card" class:live={busy} title={s.description} use:glow={busy}>
+        <li class="card" class:live={busy} title={s.description} use:ring={busy ? "working" : null}>
           <span class="icon" aria-hidden="true">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
               <path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" />
