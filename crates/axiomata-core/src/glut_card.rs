@@ -87,11 +87,13 @@ pub fn write(roots: &ChannelRoots, spec: &CardSpec) -> Result<PathBuf, AxiomataE
     Ok(channel.dir().join(SPEC_FILE))
 }
 
-/// Forgets what an earlier start of session `agent_id` on Glut left in its channel — its spec, conversation and turn
-/// journals — when it starts on another harness: nothing may run on a spec its session no longer stands for. The event
-/// log stays, it is what the session used.
+/// Forgets what an earlier start of session `agent_id` on Glut left in its channel — its spec, conversation, task list
+/// and turn journals — when it starts on another harness: nothing may run on a spec its session no longer stands for.
+/// The event log stays, it is what the session used.
 pub fn forget(roots: &ChannelRoots, agent_id: i64) {
-    let dir = Channel::for_agent(roots, agent_id).dir().to_path_buf();
+    let channel = Channel::for_agent(roots, agent_id);
+    let _ = channel.forget_glut_plan();
+    let dir = channel.dir().to_path_buf();
     for name in [SPEC_FILE, CONVERSATION_FILE] {
         let _ = std::fs::remove_file(dir.join(name));
     }

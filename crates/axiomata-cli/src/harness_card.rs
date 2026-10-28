@@ -16,12 +16,13 @@ use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::agent_entry::HARNESS_RUN_ENV;
 use axiomata_core::glut_card::{self, CardSpec};
-use axiomata_core::ide::lifecycle::{AgentState, Channel};
+use axiomata_core::ide::lifecycle::{AgentState, Channel, PlanStep, StepState};
 use axiomata_core::permission_ask::{self, Decision};
 use glut::journal;
 use glut::permissions::{
     Answer, AnswerFuture, AskRequest, BuiltGate, GateOptions, ask_display, printable,
 };
+use glut::planning::{TodoItem, TodoStatus};
 use glut::providers::catalog::Protocol;
 use glut::{Budget, Message, Prices, RunConfig};
 use glut_tui::{
@@ -375,6 +376,23 @@ impl Host for CardHost {
             glut_tui::State::Ended => AgentState::Ended,
         };
         let _ = self.channel.set_state(state);
+    }
+
+    fn todos(&self, items: &[TodoItem]) {
+        // The pane's own list, emptied by `/clear` too: the Agents panel shows it as the card's plan.
+        let steps: Vec<PlanStep> = items
+            .iter()
+            .map(|item| PlanStep {
+                text: item.text.clone(),
+                state: match item.status {
+                    TodoStatus::Pending => StepState::Todo,
+                    TodoStatus::InProgress => StepState::Doing,
+                    TodoStatus::Done => StepState::Done,
+                },
+                detail: None,
+            })
+            .collect();
+        let _ = self.channel.set_glut_plan(&steps);
     }
 
     fn kept(&self, conversation: &[Message]) {

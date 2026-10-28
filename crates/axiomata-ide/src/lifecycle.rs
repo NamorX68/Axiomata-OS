@@ -18,6 +18,10 @@
 //!   OC3): Opencode 2 runs its sessions on a shared service, and the embedder
 //!   reads their state from that service's event stream and lays it over what
 //!   this module reports. The v1 plugin that used to write here is gone.
+//! * **Glut reports from its own process**: `axiomata-cli harness card` writes
+//!   the state word and, at every `todo` of the session, its whole task list
+//!   ([`Channel::set_glut_plan`]) — the same plan the Agents panel shows for
+//!   Claude Code.
 //! * **Nothing is ever written into a worktree** (E12). Both hookups live in the
 //!   channel directory, so an agent can never commit them by accident, and an
 //!   agent sharing a plain project folder gets a status too.
@@ -83,6 +87,8 @@ const MAX_CLAUDE_SESSIONS: usize = 100;
 const PLANNING_FILE: &str = "planning.md";
 /// The last `Write`/`Edit` payload that touched Claude Code's plan folder.
 const PLAN_MODE_POINTER: &str = "plan-mode.json";
+/// A Glut session's task list as it last sent it, written by `axiomata-cli harness card` ([`Channel::set_glut_plan`]).
+const GLUT_PLAN_FILE: &str = "glut-plan.json";
 /// What [`PLANNING_FILE`] says (Claude Code's task tools; Opencode 2 has no
 /// todo tool — its step list comes with Axiomata's MCP server, opencode2.md Q3).
 const PLANNING_TEXT: &str = "\
@@ -408,6 +414,23 @@ impl Channel {
         )
     }
 
+    /// Writes a Glut session's task list, whole, as its pane last showed it — current state, not a
+    /// history (E10) — so the Agents panel shows Glut's step and progress as it shows Claude Code's. An empty list
+    /// reads as no plan.
+    pub fn set_glut_plan(&self, steps: &[PlanStep]) -> Result<()> {
+        ensure_plain_dir(&self.dir)?;
+        let text = serde_json::to_string(steps).map_err(|err| IdeError::Invalid {
+            field: "glut plan",
+            reason: err.to_string(),
+        })?;
+        write_atomic(&self.dir.join(GLUT_PLAN_FILE), &text)
+    }
+
+    /// Drops a Glut session's task list: its session starts again on another harness (`glut_card::forget`).
+    pub fn forget_glut_plan(&self) -> Result<()> {
+        remove_file(&self.dir.join(GLUT_PLAN_FILE))
+    }
+
     /// Marks the session as having used up a limit: from now on the `PreToolUse` hook of Claude Code refuses every tool
     /// call and shows `text` as the reason. Opencode has no such hook; the studio interrupts it instead.
     pub fn set_limit_reached(&self, text: &str) -> Result<()> {
@@ -482,7 +505,8 @@ impl Channel {
     ) -> Option<PlanSnapshot> {
         let (steps, updated_at) = match harness {
             Harness::ClaudeCode => read_claude_tasks(&self.claude_list_dir)?,
-            Harness::Opencode | Harness::Glut => return None,
+            Harness::Glut => read_glut_plan(&self.dir.join(GLUT_PLAN_FILE))?,
+            Harness::Opencode => return None,
         };
         if steps.is_empty() {
             return None;
@@ -705,6 +729,17 @@ fn read_claude_tasks(dir: &Path) -> Option<(Vec<PlanStep>, Option<DateTime<Utc>>
         tasks.into_iter().map(|(_, step)| step).collect(),
         newest.map(DateTime::<Utc>::from),
     ))
+}
+
+/// Reads the task list [`Channel::set_glut_plan`] wrote, with the file's time as the plan's.
+/// Missing or garbled ⇒ `None`.
+fn read_glut_plan(path: &Path) -> Option<(Vec<PlanStep>, Option<DateTime<Utc>>)> {
+    let steps: Vec<PlanStep> = serde_json::from_str(&read_to_string(path)?).ok()?;
+    let updated_at = fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(DateTime::<Utc>::from);
+    Some((steps, updated_at))
 }
 
 /// Reads a plan document; empty or missing ⇒ `None`.
@@ -1245,6 +1280,52 @@ mod tests {
         channel.reset().unwrap();
         let status = channel.read_status(Harness::Opencode);
         assert!(status.plan.is_none() && status.plan_document.is_none());
+    }
+
+    #[test]
+    fn a_glut_sessions_task_list_reads_back_as_its_plan() {
+        let channel = Channel::for_agent(&locations(), 9);
+        channel.reset().unwrap();
+        assert!(channel.read_status(Harness::Glut).plan.is_none());
+
+        let step = |text: &str, state| PlanStep {
+            text: text.into(),
+            state,
+            detail: None,
+        };
+        channel
+            .set_glut_plan(&[
+                step("read the board", StepState::Done),
+                step("add the status dot", StepState::Doing),
+                step("test it", StepState::Todo),
+            ])
+            .unwrap();
+        let plan = channel
+            .read_status(Harness::Glut)
+            .plan
+            .expect("the list is the plan");
+        let texts: Vec<_> = plan
+            .steps
+            .iter()
+            .map(|s| (s.text.as_str(), s.state))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                ("read the board", StepState::Done),
+                ("add the status dot", StepState::Doing),
+                ("test it", StepState::Todo),
+            ]
+        );
+        assert!(!plan.from_earlier_session);
+        // The same channel read as another harness's shows nothing of it.
+        assert!(channel.read_status(Harness::Opencode).plan.is_none());
+
+        // A list emptied by the session is no plan; a garbled file neither.
+        channel.set_glut_plan(&[]).unwrap();
+        assert!(channel.read_status(Harness::Glut).plan.is_none());
+        fs::write(channel.dir().join(GLUT_PLAN_FILE), "[{\"text\":").unwrap();
+        assert!(channel.read_status(Harness::Glut).plan.is_none());
     }
 
     #[test]
