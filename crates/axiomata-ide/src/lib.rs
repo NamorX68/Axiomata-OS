@@ -19,7 +19,7 @@
 //! the file system, never changes it" holds for projects and is what makes
 //! removing a project safe. It will not hold for the worktree module in M7.2,
 //! which has to create and remove real directories under
-//! `~/.axiomata/worktrees/`. That module states its own contract when it
+//! `~/Worktrees/axiomata-agents/`. That module states its own contract when it
 //! lands; do not extrapolate the projects store's narrower promise to it.
 //!
 //! Schema ownership follows from the same cut: [`SCHEMA_SQL_V1`] is the

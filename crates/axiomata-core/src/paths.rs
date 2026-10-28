@@ -157,14 +157,31 @@ pub fn agent_roles_trust_path() -> PathBuf {
     axiomata_home().join("agent-roles-trust.json")
 }
 
-/// Where the agentic IDE puts one git worktree per agent
-/// (`~/.axiomata/worktrees/<project>/<agent>-<id>`, M7.2 CP5).
+/// The one folder for every worktree on this Mac, whatever project or tool made it (`~/Worktrees`, owner
+/// 2026-10-28): outside `~/Documents`, which iCloud syncs and evicts — a build's thousands of files there kept it busy
+/// for an hour and made every read under `~/Documents` wait.
 ///
-/// App-owned runtime data, like everything else under `~/.axiomata` — and
-/// deliberately *not* inside the user's repository, so an agent's checkout
-/// never turns up as an untracked directory in their own `git status`.
+/// # Panics
+///
+/// Panics if the OS cannot report a home directory, like [`axiomata_home`].
+pub fn worktrees_root() -> PathBuf {
+    home::home_dir()
+        .expect("could not determine the current user's home directory")
+        .join("Worktrees")
+}
+
+/// Where the agentic IDE puts one git worktree per agent
+/// (`~/Worktrees/axiomata-agents/<project>/<agent>-<id>`, M7.2 CP5; under [`worktrees_root`] since 2026-10-28,
+/// before in `~/.axiomata/worktrees`).
+///
+/// Deliberately *not* inside the user's repository, so an agent's checkout never turns up as an untracked directory
+/// in their own `git status`. With `$AXIOMATA_HOME` set (tests, a scratch home) it stays inside that home, so a test
+/// never writes into the owner's real folder.
 pub fn worktrees_dir() -> PathBuf {
-    axiomata_home().join("worktrees")
+    if env::var_os(AXIOMATA_HOME_ENV).is_some() {
+        return axiomata_home().join("worktrees");
+    }
+    worktrees_root().join("axiomata-agents")
 }
 
 /// Where each IDE agent's status channel lives
@@ -249,6 +266,8 @@ mod tests {
         assert_eq!(logs_dir(), expected_home.join("logs"));
         assert_eq!(runs_log_path(), expected_home.join("logs").join("runs.log"));
         assert_eq!(global_skills_dir(), expected_home.join("skills"));
+        // A scratch home keeps the agents' worktrees inside it, never in the owner's ~/Worktrees.
+        assert_eq!(worktrees_dir(), expected_home.join("worktrees"));
         assert_eq!(
             terminal_settings_path(),
             expected_home.join("terminal-settings.json")

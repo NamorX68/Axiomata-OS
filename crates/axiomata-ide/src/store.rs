@@ -406,7 +406,7 @@ pub fn open_root(db: &Connection, root: &Path) -> Result<Project> {
 /// Worth stating in code because the opposite is a plausible reading of
 /// "delete project": the folder is the user's, the row is ours. The UI calls
 /// this "remove from the list" for the same reason. From M7.2 the app's *own*
-/// data for the project (git worktrees under `~/.axiomata/worktrees/`) may be
+/// data for the project (git worktrees under `~/Worktrees/axiomata-agents/`) may be
 /// cleaned up here too — but only after checking that no unmerged branch is
 /// hanging off one.
 pub fn delete_project(db: &Connection, id: i64) -> Result<bool> {

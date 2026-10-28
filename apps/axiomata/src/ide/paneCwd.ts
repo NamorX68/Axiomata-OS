@@ -14,7 +14,7 @@
  * layout is loaded or the project moves.
  *
  * Only terminal panes. M7.2's agent panes live in a git worktree under
- * `~/.axiomata/worktrees/`, which is deliberately **not** inside the project's
+ * `~/Worktrees/axiomata-agents/`, which is deliberately **not** inside the project's
  * folder, so they will bring their own rule rather than bend this one.
  */
 

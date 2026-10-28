@@ -1259,7 +1259,8 @@ commits, and there is no C dependency in a crate meant to stay extractable. The 
 `provision.rs` is the one place that knows a worktree and a port belong together. It is
 idempotent and runs on **every** start, not only at creation, so an agent that predates CP5
 or whose directory somebody deleted repairs itself by being started. Worktrees live at
-`~/.axiomata/worktrees/<project>/<agent>-<id>` — app-owned runtime data, deliberately outside
+`~/Worktrees/axiomata-agents/<project>/<agent>-<id>` (until 2026-10-28 `~/.axiomata/worktrees`, moved out of
+the way of iCloud with every other worktree, `paths::worktrees_root`) — app-owned runtime data, deliberately outside
 the user's repository so an agent's checkout never shows up in their own `git status`. The id
 is in the path because a slug is not unique: "A B" and "A-B" would otherwise be one directory
 and two agents overwriting each other.

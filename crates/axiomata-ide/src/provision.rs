@@ -36,7 +36,7 @@ pub const PORT_RANGE: std::ops::RangeInclusive<u16> = 4300..=4399;
 /// (`axiomata_core::paths::ide_locations`) and hands it in.
 #[derive(Debug, Clone)]
 pub struct Locations {
-    /// One git worktree per agent (`~/.axiomata/worktrees`).
+    /// One git worktree per agent (`~/Worktrees/axiomata-agents`).
     pub worktrees: PathBuf,
     /// Where the status channels live (M7.2 CP6).
     pub channels: ChannelRoots,
