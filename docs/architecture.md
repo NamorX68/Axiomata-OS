@@ -562,6 +562,261 @@ an untrusted-content path feeding a full agent run. Keeping skills solely in
 `~/.axiomata/skills/`, a directory only the user manages, removes that exposure and the
 merge/precedence machinery with it.
 
+### The database (ER diagram)
+
+`~/.axiomata/axiomata.db`, one SQLite file, 36 migrations (`axiomata-core/src/db/migrations`, the IDE's in
+`axiomata-ide/src/*.sql`). Drawn from the live schema on 2026-10-28; **update it in the commit that changes the
+schema**. Solid lines are foreign keys SQLite enforces; dotted ones are references the code keeps by id without a
+constraint (an agent, a plan or a card that may be gone). Columns are the ones that tie tables together or that a
+reader needs; the full list is the migration.
+
+**Overview — the five areas and how they meet:**
+
+```mermaid
+flowchart LR
+  subgraph Runs["Skills & routines"]
+    runs; routines; routine_runs; chat_turns; web_searches
+  end
+  subgraph Board["Board"]
+    boards; board_columns; cards
+  end
+  subgraph Plans["Plans"]
+    plans
+  end
+  subgraph Studio["Studio"]
+    projects; ide_agents; permission_asks; session_spend
+  end
+  subgraph Mail["Mailbox"]
+    mail_messages; mail_deliveries
+  end
+  routine_runs --> runs
+  cards --> plans
+  plans --> boards
+  plans -.-> projects
+  ide_agents -.-> cards
+  ide_agents -.-> plans
+  session_spend -.-> ide_agents
+  mail_messages -.-> cards
+```
+
+`app_meta` (key/value) and `schema_version` stand alone.
+
+**Skills & routines** — every skill run, scheduled or by hand, and the chat's turns:
+
+```mermaid
+erDiagram
+  routines ||--o{ routine_runs : fires
+  runs ||--o{ routine_runs : "recorded as"
+  routines {
+    int id PK
+    text name
+    text cron_expr "6–7 fields, seconds first"
+    text target_type
+    text target
+    int enabled
+    text next_fire_at
+  }
+  routine_runs {
+    int id PK
+    int routine_id FK
+    int run_id FK
+    text scheduled_for
+    text status
+  }
+  runs {
+    int id PK
+    text skill_name
+    text backend
+    text status "running, succeeded, failed, interrupted"
+    real cost_usd
+    int input_tokens
+    int cached_input_tokens
+    text model
+    text journal "durable runs"
+    text started_at
+  }
+  chat_turns {
+    int id PK
+    text session_id
+    text provider
+    text model
+    real cost_usd
+    text created_at
+  }
+  web_searches {
+    int id PK
+    text provider
+    text searched_at
+  }
+```
+
+**Board** — boards, their columns and the cards on them:
+
+```mermaid
+erDiagram
+  boards ||--o{ board_columns : has
+  board_columns ||--o{ cards : holds
+  cards ||--o{ card_events : "history of"
+  cards ||--o{ card_deps : "depends on"
+  cards ||--o| card_proposers : "proposed by"
+  cards ||--o| card_proposal_depth : ""
+  boards {
+    int id PK
+    text name
+  }
+  board_columns {
+    int id PK
+    int board_id FK
+    text name
+    text maps_to_status
+    text stage "proposal, review, …"
+  }
+  cards {
+    int id PK
+    int board_id FK
+    int column_id FK
+    int plan_id FK
+    text title
+    text labels
+    text agent
+    text claimed_by
+    int returned_count
+    text archived_at
+  }
+  card_events {
+    int id PK
+    int card_id FK
+    text at
+    text actor
+    text kind
+  }
+  card_deps {
+    int card_id PK
+    int depends_on_id PK
+  }
+  card_proposers {
+    int card_id PK
+    text actor
+  }
+  card_proposal_depth {
+    int card_id PK
+    int depth
+  }
+```
+
+**Plans** — a plan is a goal on a board, worked off by its cards:
+
+```mermaid
+erDiagram
+  boards ||--o{ plans : "planned on"
+  plans ||--o{ cards : "worked off by"
+  plans ||--o| plan_origin : "started from"
+  cards ||--o| plan_origin : "goal of"
+  plans ||--o| plan_grilled : ""
+  plans ||--o| plan_auto_rights : ""
+  plans ||--o| plan_goal_suggestions : ""
+  plans {
+    int id PK
+    int board_id FK
+    int project_id "Studio project, no FK"
+    text name
+    text status
+    real max_cost_usd
+    int max_tokens
+    text base_branch
+    text line_tip "integration line"
+    text approved_at
+  }
+  plan_origin {
+    int plan_id PK
+    int card_id FK
+  }
+  plan_grilled {
+    int plan_id PK
+    text at
+  }
+  plan_auto_rights {
+    int plan_id PK
+    text at
+  }
+  plan_goal_suggestions {
+    int plan_id PK
+    text goal
+  }
+```
+
+**Studio** — projects, their agents, what agents ask and what they spend:
+
+```mermaid
+erDiagram
+  projects ||--o{ ide_agents : has
+  ide_agents ||..o{ permission_asks : asks
+  ide_agents ||..o{ session_spend : spends
+  cards ||..o{ ide_agents : "worked on by"
+  plans ||..o{ ide_agents : "runs"
+  projects {
+    int id PK
+    text name
+    text repo_root
+    text layout_json
+    int accent_slot
+  }
+  ide_agents {
+    int id PK
+    int project_id FK
+    int card_id "no FK"
+    int plan_id "no FK"
+    text name
+    text harness
+    text engine_id
+    text agent_role
+    text worktree_path "~/Worktrees/axiomata-agents/…"
+    text branch
+    int port
+  }
+  permission_asks {
+    int id PK
+    int agent_id "no FK"
+    text tool
+    text decision
+    text asked_at
+  }
+  session_spend {
+    int id PK
+    int agent_id "no FK"
+    int plan_id "no FK"
+    int tokens
+    real cost_usd
+    text at
+  }
+```
+
+**Mailbox** — agent-to-agent messages (M7.5) and who has read them:
+
+```mermaid
+erDiagram
+  mail_messages ||--o{ mail_deliveries : "delivered as"
+  mail_messages ||--o{ mail_messages : "replied to by"
+  cards ||..o{ mail_messages : "about"
+  mail_messages {
+    int id PK
+    int in_reply_to FK
+    int card_id "no FK"
+    text sender
+    text to_addr
+    text kind
+    text status
+    text created_at
+  }
+  mail_deliveries {
+    int id PK
+    int message_id FK
+    text inbox
+    text read_at
+    int nudge_count
+  }
+```
+
 ## 5. What is actually implemented today
 
 This section describes only code that exists and runs; see §6 for planned work, §7 for the
