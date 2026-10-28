@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BLOCK_ELEMENT_RECTS,
   BOX_DRAWING_LINES,
+  boxLineRect,
   cellColors,
   cellFont,
   cssColorToRgb,
@@ -395,5 +396,33 @@ describe("TUI0b: what a full-screen program draws", () => {
       { ...cell("e"), combining: "\u0301" },
     ];
     expect(selectionText([wide], { row: 0, col: 0 }, { row: 0, col: 2 })).toBe("漢e\u0301");
+  });
+});
+
+describe("boxLineRect", () => {
+  it("lets a horizontal rule meet its neighbour on one pixel edge, however fractional the cell", () => {
+    const cellW = 7.83;
+    const [segment] = BOX_DRAWING_LINES["─"]!;
+    for (let col = 0; col < 40; col++) {
+      const [x, , w] = boxLineRect(segment!, col * cellW, 0, cellW, 17);
+      const [next] = boxLineRect(segment!, (col + 1) * cellW, 0, cellW, 17);
+      expect(x + w, `column ${col}`).toBe(next);
+    }
+  });
+
+  it("puts a corner's two arms on the same pixel row and column, touching", () => {
+    const [horizontal, vertical] = BOX_DRAWING_LINES["┌"]!.map((s) => boxLineRect(s, 10, 20, 7.5, 16.5));
+    const [hx, hy] = horizontal!;
+    const [vx, vy] = vertical!;
+    expect(hx).toBe(vx);
+    expect(hy).toBe(vy);
+  });
+
+  it("covers whole pixels only, one line wide", () => {
+    for (const segment of BOX_DRAWING_LINES["┼"]!) {
+      const rect = boxLineRect(segment, 3.3, 4.7, 8.25, 17.1);
+      for (const v of rect) expect(Number.isInteger(v)).toBe(true);
+      expect(Math.min(rect[2], rect[3])).toBe(1);
+    }
   });
 });

@@ -575,28 +575,39 @@ export const BOX_DRAWING_LINES: Readonly<Record<string, readonly CellRect[]>> = 
  *  below. */
 const BOX_LINE_WIDTH = 1;
 
-/** Rounds a stroke coordinate down to the nearest whole CSS pixel and
- *  re-centers it half a pixel above — the same "inset by half a device
- *  pixel" trick the `outline` cursor style already applies below
- *  (`ctx.strokeRect(x + 0.5, y + 0.5, ...)`), generalized here since a
- *  box-drawing segment's endpoints aren't always already-integer cell
- *  corners: a half-cell midpoint (`x + 0.5 * cellW`) only lands on a
- *  pixel *center* on its own when `cellW` is odd — when it's even, the
- *  raw midpoint is itself a whole pixel, and a 1px stroke centered on a
- *  whole-pixel coordinate straddles (and blurs across) two physical
- *  pixels instead of landing crisply on one. `Math.floor(v) + 0.5` is
- *  idempotent for a coordinate that's already correctly centered (odd
- *  `cellW` case) and shifts a whole-pixel coordinate (even `cellW`, or
- *  either case at a cell edge) onto the nearest pixel center instead —
- *  without this, this checkpoint would trade the doubled/misaligned-line
- *  bug it fixes for a new, more subtle "blurry line" one. */
-function snapToPixelCenter(v: number): number {
-  return Math.floor(v) + 0.5;
+/** Where a box-drawing segment's end lands, in whole CSS pixels: a cell edge rounds (the neighbour rounds the same
+ *  edge the same way, so two cells meet on one pixel edge), the cell's centre floors (a horizontal and a vertical
+ *  through the centre then cover the same pixel row and column). `end` is the far end of a segment: a segment ending
+ *  at the centre reaches over the line's own width, so it meets the crossing line instead of stopping short of it. */
+function boxLineEdge(v: number, at: number, end: boolean): number {
+  if (at === 0.5) return Math.floor(v) + (end ? BOX_LINE_WIDTH : 0);
+  return Math.round(v);
+}
+
+/** The rectangle `[x, y, w, h]` a box-drawing segment fills in the cell `(x, y, cellW, cellH)` — a whole-pixel
+ *  rectangle, not a stroke. Owner-reported (2026-10-28): stroked with both ends on pixel centres, every cell edge got
+ *  two half-covered pixels, and a long rule read as faintly dashed; filled rectangles on whole pixels meet seamlessly
+ *  however fractional the cell width is. */
+export function boxLineRect(
+  [x0, y0, x1, y1]: CellRect,
+  x: number,
+  y: number,
+  cellW: number,
+  cellH: number,
+): [number, number, number, number] {
+  if (y0 === y1) {
+    const left = boxLineEdge(x + x0 * cellW, x0, false);
+    const right = boxLineEdge(x + x1 * cellW, x1, true);
+    return [left, Math.floor(y + y0 * cellH), right - left, BOX_LINE_WIDTH];
+  }
+  const top = boxLineEdge(y + y0 * cellH, y0, false);
+  const bottom = boxLineEdge(y + y1 * cellH, y1, true);
+  return [Math.floor(x + x0 * cellW), top, BOX_LINE_WIDTH, bottom - top];
 }
 
 /** Draws `ch` procedurally if it's one of the box-drawing line characters
- *  above (see `BOX_DRAWING_LINES`'s own doc comment for why), stroking
- *  with `color` at the cell `(x, y, cellW, cellH)`. Returns `false` for
+ *  above (see `BOX_DRAWING_LINES`'s own doc comment for why), filling it
+ *  with `color` at the cell `(x, y, cellW, cellH)` (`boxLineRect`). Returns `false` for
  *  every other character — the caller's cue to fall back further (to
  *  `drawBlockElement`, then finally its normal `fillText` glyph path). */
 function drawBoxDrawingLine(
@@ -610,14 +621,11 @@ function drawBoxDrawingLine(
 ): boolean {
   const segments = BOX_DRAWING_LINES[glyph];
   if (!segments) return false;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = BOX_LINE_WIDTH;
-  ctx.beginPath();
-  for (const [x0, y0, x1, y1] of segments) {
-    ctx.moveTo(snapToPixelCenter(x + x0 * cellW), snapToPixelCenter(y + y0 * cellH));
-    ctx.lineTo(snapToPixelCenter(x + x1 * cellW), snapToPixelCenter(y + y1 * cellH));
+  ctx.fillStyle = color;
+  for (const segment of segments) {
+    const [rx, ry, rw, rh] = boxLineRect(segment, x, y, cellW, cellH);
+    ctx.fillRect(rx, ry, rw, rh);
   }
-  ctx.stroke();
   return true;
 }
 
