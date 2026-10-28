@@ -261,7 +261,10 @@ input[type="radio"] {
    border or shadow of its own.
    The blur lies on a layer behind the content, never on the plate itself: an element with a `backdrop-filter` becomes
    the containing block of every `position: fixed` inside it, and a context menu or popover placed in window
-   coordinates would land offset and clipped to the plate. `isolation` keeps the layer behind the content only. */
+   coordinates would land offset and clipped to the plate. `isolation` keeps the layer behind the content only.
+   No blur on a pane: what lies behind it is the ground — soft embers and the texture — which looks the same blurred,
+   while the blur is computed again for the whole plate on every frame something inside it scrolls or moves (measured
+   on the owner's 5K screen: scrolling and dragging panes stuttered). Only floating panels and menus, over detail, blur. */
 .ax-glass-pane {
   position: relative;
   isolation: isolate;
@@ -277,9 +280,33 @@ input[type="radio"] {
   z-index: -1;
   border-radius: inherit;
   background: var(--ax-glass-pane);
-  -webkit-backdrop-filter: var(--ax-glass-filter);
-  backdrop-filter: var(--ax-glass-filter);
   pointer-events: none;
+}
+
+/* What must cover takes the theme's solid surfaces back, which the Studio made translucent for its panes
+   (`IdeView.svelte`): whatever lies over text or over a pane — the editor's find bar, rename field, completion with its
+   docs, code actions, marked text while composing, a diff's Vi bar, the terminal and its banners, a menu, a list of
+   suggestions, a dialog, a tooltip, a popover, a drag ghost. The editor's own chrome around the text stays glass. */
+.ide
+  :is(
+    .terminal,
+    .find-bar,
+    .rename,
+    .actions,
+    .doc,
+    .vi-bar,
+    .input.composing,
+    [role="menu"],
+    [role="listbox"],
+    [role="dialog"],
+    [role="alertdialog"],
+    [role="tooltip"],
+    .bp-popover,
+    .ghost
+  ) {
+  --ax-surface-1: var(--ax-solid-surface-1);
+  --ax-surface-2: var(--ax-solid-surface-2);
+  --ax-surface-3: var(--ax-solid-surface-3);
 }
 
 /* The hexagon (U1): the system's shape, for avatars, status marks and empty states. */

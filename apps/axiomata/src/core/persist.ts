@@ -19,7 +19,17 @@ import { effects, readEffects } from "./effects";
 import { hiddenBuiltins, loadHiddenBuiltins, loadUserApps, userApps, type UserApp } from "./apps";
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { RETIRED_TILE_TYPES } from "./ringTypes";
-import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges, windowTransparency } from "./stores";
+import { DEFAULT_GROUND_BLUR, groundBlur } from "./glass";
+import {
+  activeTheme,
+  glassBlur,
+  instances,
+  loadInstances,
+  onDirty,
+  showGrid,
+  snapEdges,
+  windowTransparency,
+} from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
 import { isKeyboardSetting, keyboardSetting } from "./keys";
 import { isUiSize, uiSize } from "./uiScale";
@@ -264,6 +274,8 @@ export async function initPersistence(): Promise<void> {
   showGrid.set(getSetting<boolean>("showGrid") === true);
   snapEdges.set(getSetting<boolean>("snapEdges") !== false);
   windowTransparency.set(getSetting<number>("windowTransparency") ?? 50);
+  const savedBlur = getSetting<unknown>("glassBlur");
+  glassBlur.set(typeof savedBlur === "number" ? groundBlur(savedBlur) : DEFAULT_GROUND_BLUR);
   const savedUiSize = getSetting<unknown>("uiSize");
   uiSize.set(isUiSize(savedUiSize) ? savedUiSize : "auto");
   const savedKeyboard = getSetting<unknown>("keyboard");
@@ -335,6 +347,9 @@ export async function initPersistence(): Promise<void> {
   // Its effect on the glass is `glass.ts`'s; only its persistence is here.
   windowTransparency.subscribe((v) => {
     if (!first) setSetting("windowTransparency", v);
+  });
+  glassBlur.subscribe((v) => {
+    if (!first) setSetting("glassBlur", v);
   });
   first = false;
   window.addEventListener("pagehide", () => void flush());

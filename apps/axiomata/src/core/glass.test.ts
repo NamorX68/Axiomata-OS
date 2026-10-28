@@ -2,8 +2,16 @@ import { get } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { invokeBackend } from "./backend";
-import { SOLID_GLASS, glass, glassOpacity, startGlass, systemReducesTransparency } from "./glass";
-import { windowTransparency } from "./stores";
+import {
+  MAX_GROUND_BLUR,
+  SOLID_GLASS,
+  glass,
+  glassOpacity,
+  groundBlur,
+  startGlass,
+  systemReducesTransparency,
+} from "./glass";
+import { glassBlur, windowTransparency } from "./stores";
 
 vi.mock("./backend", () => ({ invokeBackend: vi.fn() }));
 const invoke = vi.mocked(invokeBackend);
@@ -17,11 +25,11 @@ describe("glassOpacity", () => {
     expect(glassOpacity(0, false)).toBe(SOLID_GLASS);
     expect(glassOpacity(100, false)).toBe(0);
     expect(glassOpacity(75, false)).toBe(0.5);
-    expect(glassOpacity(25, false)).toBeCloseTo(1.6);
+    expect(glassOpacity(25, false)).toBeCloseTo(1.75);
   });
 
   it("makes even the thinnest authored alpha solid at the solid end", () => {
-    const thinnestAlpha = 0.46;
+    const thinnestAlpha = 0.4;
     expect(thinnestAlpha * glassOpacity(0, false)).toBeGreaterThanOrEqual(1);
   });
 
@@ -34,6 +42,16 @@ describe("glassOpacity", () => {
     expect(glassOpacity(-20, false)).toBe(SOLID_GLASS);
     expect(glassOpacity(180, false)).toBe(0);
     expect(glassOpacity(Number.NaN, false)).toBe(1);
+  });
+});
+
+describe("groundBlur", () => {
+  it("keeps a stored blur inside the knob's ends, in whole pixels", () => {
+    expect(groundBlur(20)).toBe(20);
+    expect(groundBlur(12.6)).toBe(13);
+    expect(groundBlur(-5)).toBe(0);
+    expect(groundBlur(500)).toBe(MAX_GROUND_BLUR);
+    expect(groundBlur(Number.NaN)).toBe(0);
   });
 });
 
@@ -58,7 +76,18 @@ describe("startGlass (G5, G12)", () => {
     windowTransparency.set(50);
     systemReducesTransparency.set(false);
     root.style.removeProperty("--ax-tile-glass-opacity");
+    root.style.removeProperty("--ax-ground-blur");
+    glassBlur.set(20);
     delete root.dataset.transparency;
+  });
+
+  it("writes the ground's blur on <html> and follows the knob", () => {
+    invoke.mockResolvedValue(false);
+    const stop = startGlass();
+    expect(root.style.getPropertyValue("--ax-ground-blur")).toBe("20px");
+    glassBlur.set(4);
+    expect(root.style.getPropertyValue("--ax-ground-blur")).toBe("4px");
+    stop();
   });
 
   it("writes the knob's multiplier on <html> and follows it", async () => {

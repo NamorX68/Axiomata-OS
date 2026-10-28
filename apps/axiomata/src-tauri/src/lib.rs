@@ -30,6 +30,7 @@ mod tasks;
 mod terminal;
 mod vault_watch;
 mod waiting_watch;
+mod wallpaper;
 
 /// File-name prefix of the app log; `tracing-appender` appends the date (`app.log.YYYY-MM-DD`).
 /// Distinct from `runs.log`, so the rotation's clean-up (it matches the prefix plus a dot) never
@@ -360,6 +361,9 @@ pub fn run() {
             commands::installed_fonts,
             commands::ui_displays,
             commands::reduce_transparency,
+            wallpaper::wallpaper_pick,
+            wallpaper::wallpaper_read,
+            wallpaper::wallpaper_clear,
             commands::clipboard_write,
             commands::ide_agent_discard_hunk,
             commands::ide_agent_last_subject,

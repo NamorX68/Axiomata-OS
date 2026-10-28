@@ -50,6 +50,32 @@ einer Lichtkante statt eines Rahmens; dahinter liegt ein Grund, den das Glas bri
   in GL1:* das Mockup hielt ihn für eine versteckte Ansicht; versteckte Panes sind aber schon `visibility: hidden`
   (`pane-store`, `PaneGroup`), nachgestellt im Mock am 2026-10-28.
 
+### Kurswechsel nach dem Leistungstest (Owner, 2026-10-28)
+
+Gemessen in der installierten App am 5K-Monitor: mit `backdrop-filter` auf jeder Studio-Platte ruckelten Scrollen im
+Code, das Verschieben von Panes und die Größenänderung eines Editor-Splits — die Unschärfe wird für die ganze Platte
+neu gerechnet, sobald sich darin etwas bewegt. Ohne sie lief es flüssig, sah aber flacher aus. Vorbild für den Ausweg
+ist PandaCode (Tauri 2, macOS/Windows/Linux; Muster aus seinem Quellcode destilliert, nicht übernommen): ein
+Hintergrundbild, **einmal** verwischt, Flächen darüber nur getönt.
+
+- **G15 Eigenes Hintergrundbild (ersetzt G7 teilweise).** Optional, global für alle Themes: über den nativen Dialog
+  gewählt, auf PNG/JPEG/WebP (keine Animation unter dem Blur) und 25 MB geprüft, Links nie verfolgt, nach `~/.axiomata/wallpaper/` kopiert (`src-tauri/src/wallpaper.rs`,
+  `core/wallpaper.ts`); die Webansicht nennt nie einen Pfad. Über dem Bild ein Schleier aus dem Grund des Themes
+  (`--ax-ground-scrim`), damit Text lesbar bleibt. Ohne Bild der Grund des Themes.
+- **G16 Unschärfe auf dem Grund, nicht auf den Flächen; zwei Regler.** Der Grund (Theme oder Bild) ist eine stille
+  Ebene mit `filter: blur()` (`IdeView.svelte`, `.ground`), einmal gerechnet; jede durchscheinende Fläche darüber
+  wirkt dadurch verwischt — auch Editor und Notizen. Echte Unschärfe (`backdrop-filter`) nur, wo hinter einer Fläche
+  Scharfes liegt (Menüs, schwebende Panels über Orbit, GL3). Einstellungen → **Glass**: „Transparency“ (der bisherige
+  Regler, Multiplikator jetzt 0–2,5) und „Blur“ (0–40 px, `glassBlur`); G12 macht weiter alles dicht.
+- **G17 Kein Glutlicht in den Ecken.** Die zwei Lichter links unten und rechts oben waren Mockup-Willkür. Licht gibt
+  es ohne Bild nur dort, wo etwas lebt (GL4); die `--ax-glass-ember`-Tokens bleiben dafür.
+- **G18 Alles im Studio durchscheinend (ersetzt die Bau-Entscheidungen von GL2 und G13 für den Editor).** Listen,
+  Karten, Leisten, Flow und Editor nehmen die Flächen des Themes, vom Regler durchsichtig gemacht
+  (`--ax-glass-surface-*`, `--ax-glass-editor`). Was decken muss, bleibt dicht: Menüs, Popover, Such- und
+  Umbenennen-Felder, Vorschläge (`styles.css`), die Knoten der Flow-Ansicht, die angehefteten Kopfzeilen des Editors.
+  Die Zeilennummern-Spalte deckt nicht mehr, sie **schneidet** den Text ab (`clip-path` auf `.content`). Das Terminal
+  meldet seine Farbe weiter vom Wurzelelement (OSC 11) und hat seinen eigenen Transparenz-Regler.
+
 ## 3. Spec (auch für N3)
 
 Werte für dunkle Themes (aus `glass.css`); die hellen (Paper, Latte, GitHub Light) aus `glass-light.css`, abgenommen
@@ -111,6 +137,10 @@ Owners). Halt nur bei GL0 und nach GL2.
   Terminal (G13), Editor und Diff bleiben damit von selbst dicht. Danach
   **Leistungstest** in der installierten App (Studio mit laufenden Agent-Panes, Scrollen in Editor und Kanban,
   Zeitmessung im Safari-Web-Inspector, Owner als „Hände“); ruckelt es, wird zuerst die Unschärfe angepasst.
+  **Ergebnis:** es ruckelte (die installierte App hat keinen Web Inspector, gemessen wurde mit dem Auge) — daraus
+  G15–G18. Beim Test fiel nebenbei ein alter Fehler auf: `get_workspace_graph` lief auf dem Hauptthread und hielt die
+  Datenbank, solange iCloud bremste stand die App (`3ce35b4`).
+- **GL2b — Grund, Regler, Hintergrundbild, Editor auf Glas (G15–G18):** gebaut 2026-10-28.
 - **GL3 — Panels:** `Window.svelte`, Staging-Panels, Kanban (Spalten ohne Boden, Kartenplatten), Datei/Notes,
   Spotlight, Einstellungen; der Orbit-Grund (G10).
 - **GL4 — Lebende Ringe:** `use:glow` wird ab Kartengröße zum Ring (G11), Harness-Licht oben in den Agent-Kacheln.

@@ -19,6 +19,10 @@ export const snapEdges: Writable<boolean> = writable(true);
  *  own authored alpha (`--ax-tile-glass-opacity`): 50 is each theme's look unchanged, 0 a solid surface (CSS clamps
  *  an alpha above 1), 100 fully transparent. macOS "Reduce transparency" overrides it with solid glass. */
 export const windowTransparency: Writable<number> = writable(50);
+/** How soft the ground behind the glass is, in px of blur (`docs/plans/glass.md`, G16): the theme's ground or the
+ *  owner's background image is blurred once, as a still layer, so every translucent surface over it reads as frosted
+ *  without a blur of its own. `core/glass.ts` writes it to `--ax-ground-blur`. */
+export const glassBlur: Writable<number> = writable(20);
 /** Current canvas box in CSS px (set by Canvas.svelte's ResizeObserver). */
 export const canvasSize: Writable<{ w: number; h: number }> = writable({ w: 0, h: 0 });
 /** Snap guide lines while a tile is dragged / resized (canvas coordinates). */

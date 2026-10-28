@@ -1386,7 +1386,7 @@
     min-width: 0;
     min-height: 0;
     height: 100%;
-    background: var(--ax-bg);
+    background: var(--ax-editor-frame-bg);
     color: var(--ax-text);
     font-family: var(--ax-font-sans);
   }

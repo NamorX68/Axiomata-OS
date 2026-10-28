@@ -406,13 +406,14 @@
     font-size: 12px;
     font-weight: 600;
   }
+  /* Nodes are drawn over the edges: their fills stay solid on the glass (docs/plans/glass.md), the pane does not. */
   .goal rect {
-    fill: var(--ax-surface-2);
+    fill: var(--ax-solid-surface-2);
     stroke: var(--tone);
     stroke-width: 2;
   }
   .goal.done rect {
-    fill: color-mix(in srgb, var(--tone) 18%, var(--ax-surface-2));
+    fill: color-mix(in srgb, var(--tone) 18%, var(--ax-solid-surface-2));
   }
   .goal-title {
     fill: var(--ax-text);
@@ -461,7 +462,7 @@
   }
   /* A tile: the surface with a breath of the state's colour, a thin outline, and a band of the colour on the left. */
   .node .tile {
-    fill: color-mix(in srgb, var(--tone) 7%, var(--ax-surface-2));
+    fill: color-mix(in srgb, var(--tone) 7%, var(--ax-solid-surface-2));
     stroke: color-mix(in srgb, var(--tone) 55%, var(--ax-border));
     stroke-width: 1;
   }
@@ -469,14 +470,14 @@
     fill: var(--tone);
   }
   .node:hover .tile {
-    fill: color-mix(in srgb, var(--tone) 13%, var(--ax-surface-2));
+    fill: color-mix(in srgb, var(--tone) 13%, var(--ax-solid-surface-2));
   }
   .node.proposed .tile {
     stroke-dasharray: 5 4;
   }
   /* A review is a stage of its card, not a card: a little lighter, its outline finely dashed. */
   .node.review-node .tile {
-    fill: color-mix(in srgb, var(--tone) 4%, var(--ax-surface-1));
+    fill: color-mix(in srgb, var(--tone) 4%, var(--ax-solid-surface-1));
     stroke-dasharray: 2 3;
   }
   .node.review-node .band {

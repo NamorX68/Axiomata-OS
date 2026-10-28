@@ -35,8 +35,9 @@
   import { playCue, unlockAudio } from "./soundPlayer";
   import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
-  import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
-  import { systemReducesTransparency } from "../core/glass";
+  import { activeTheme, glassBlur, showGrid, snapEdges, windowTransparency } from "../core/stores";
+  import { MAX_GROUND_BLUR, systemReducesTransparency } from "../core/glass";
+  import { clearWallpaper, pickWallpaper, wallpaper } from "../core/wallpaper";
   import { KEYBOARD_SETTINGS, isKeyboardSetting, keyboardSetting, platform, platformLabel } from "../core/keys";
   import { UI_SIZE_MAX, UI_SIZE_MIN, uiScaleAuto, uiSize } from "../core/uiScale";
   import { THEMES, applyTheme } from "../core/themes";
@@ -123,6 +124,20 @@
     const state = await loadCustomTheme();
     reloading = false;
     toast(state.message, state.status === "applied" || state.status === "absent" ? "info" : "warning");
+  }
+
+  let wallpaperBusy = $state(false);
+
+  /** Runs a background-image step (docs/plans/glass.md, G15); a refusal says why. */
+  async function wallpaperStep(work: () => Promise<unknown>, failed: string): Promise<void> {
+    wallpaperBusy = true;
+    try {
+      await work();
+    } catch (err) {
+      toast(`${failed}: ${err instanceof Error ? err.message : String(err)}`, "warning");
+    } finally {
+      wallpaperBusy = false;
+    }
   }
 
   async function copyTemplate() {
@@ -601,9 +616,9 @@
         </section>
 
         <section>
-          <h3>Transparency</h3>
+          <h3>Glass</h3>
           <label class="row">
-            <span class="label">Glass</span>
+            <span class="label">Transparency</span>
             <input
               type="range"
               min="0"
@@ -614,10 +629,42 @@
             />
             <span class="readout">{$windowTransparency}%</span>
           </label>
+          <label class="row">
+            <span class="label">Blur</span>
+            <input
+              type="range"
+              min="0"
+              max={MAX_GROUND_BLUR}
+              step="1"
+              disabled={$systemReducesTransparency}
+              bind:value={$glassBlur}
+            />
+            <span class="readout">{$glassBlur} px</span>
+          </label>
+          <div class="row">
+            <span class="label">Background image</span>
+            <div class="actions">
+              <button
+                type="button"
+                disabled={wallpaperBusy}
+                onclick={() => void wallpaperStep(pickWallpaper, "The image was not taken")}
+              >
+                {$wallpaper ? "Choose another…" : "Choose image…"}
+              </button>
+              {#if $wallpaper}
+                <button
+                  type="button"
+                  disabled={wallpaperBusy}
+                  onclick={() => void wallpaperStep(clearWallpaper, "The image could not be removed")}>Remove</button
+                >
+              {/if}
+            </div>
+          </div>
           <p class="hint">
-            How see-through the glass looks — panes, panels, dialogs and dragged tiles. 0% a solid surface, 100% fully
-            transparent, 50% the theme's own look. Menus stay dense either way, and macOS "Reduce transparency" makes
-            all of it solid.
+            Transparency: how much of the ground shows through the surfaces — 0% solid, 100% clear, 50% the theme's own
+            look. Blur: how soft the ground is, and with it everything seen through the glass. The ground is the theme's
+            own or your image, blurred once, so a softer one costs nothing while you work. Menus and text overlays stay
+            dense either way, and macOS "Reduce transparency" makes all of it solid.
           </p>
           {#if $systemReducesTransparency}
             <p class="hint">macOS "Reduce transparency" is on: the glass is solid now.</p>

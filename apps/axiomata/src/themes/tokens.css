@@ -263,16 +263,32 @@
   --ax-glass-shadow-plate: var(--ax-glass-light), 0 6px 18px rgba(0, 0, 0, 0.22);
   --ax-glass-plate: rgba(255, 255, 255, 0.04);
   --ax-glass-plate-hover: rgba(255, 255, 255, 0.065);
-  /* The ground the glass refracts (G7, G10): the glow as two embers — strong low on the left, faint high on the
-     right — and a cool counter-light in the middle, under the theme's own texture. It does not wander: where
-     something works, the rings say (G11). */
-  --ax-glass-ember: color-mix(in srgb, var(--ax-glow) 22%, transparent);
-  --ax-glass-ember-far: color-mix(in srgb, var(--ax-glow) 8%, transparent);
-  --ax-glass-counter: rgba(90, 100, 140, 0.06);
-  --ax-glass-backdrop:
-    radial-gradient(1400px 800px at 12% 115%, var(--ax-glass-ember), transparent 62%),
-    radial-gradient(1100px 700px at 92% -12%, var(--ax-glass-ember-far), transparent 60%),
-    radial-gradient(900px 900px at 55% 50%, var(--ax-glass-counter), transparent 70%), var(--ax-bg);
+  /* The light that lives (G11, GL4): the glow as embers, kept for the rings and the light behind a working pane — no
+     longer painted into the ground's corners (G17). */
+  --ax-glass-ember: color-mix(in srgb, var(--ax-glow) 30%, transparent);
+  --ax-glass-ember-far: color-mix(in srgb, var(--ax-glow) 12%, transparent);
+  --ax-glass-counter: rgba(90, 100, 140, 0.08);
+  /* The ground behind the glass (G7, G15–G17): the theme's own colour, or the owner's image (`--ax-wallpaper`, set by
+     `core/wallpaper.ts`), blurred once as a still layer by `--ax-ground-blur` (`core/glass.ts`). Over an image a scrim
+     of the theme's ground keeps text readable whatever the picture is. */
+  --ax-glass-backdrop: var(--ax-bg);
+  --ax-ground-blur: 20px;
+  --ax-ground-scrim: rgb(from var(--ax-bg) r g b / 0.35);
+  /* What a pane's own lists, cards and bars are painted with inside the glass (the Studio's `--ax-surface-*`): the
+     theme's own surfaces, made see-through by the transparency knob, so the frosted ground shows through them. An
+     alpha below 0.4 never turns solid at the knob's solid end (`SOLID_GLASS` in `core/glass.ts`). */
+  --ax-glass-surface-1-alpha: 0.4;
+  --ax-glass-surface-2-alpha: 0.55;
+  --ax-glass-surface-3-alpha: 0.65;
+  --ax-glass-surface-1: rgb(
+    from var(--ax-solid-surface-1) r g b / min(1, calc(var(--ax-glass-surface-1-alpha) * var(--ax-glass-opacity)))
+  );
+  --ax-glass-surface-2: rgb(
+    from var(--ax-solid-surface-2) r g b / min(1, calc(var(--ax-glass-surface-2-alpha) * var(--ax-glass-opacity)))
+  );
+  --ax-glass-surface-3: rgb(
+    from var(--ax-solid-surface-3) r g b / min(1, calc(var(--ax-glass-surface-3-alpha) * var(--ax-glass-opacity)))
+  );
 
   /* Elevation (U1 §3): the ground, a tile, a panel, a popover. Each step is a tone *and* a 1-px light edge along the
      top — the glass edge carries depth where a shadow cannot (dark themes); light themes redefine the edge. */
@@ -341,6 +357,21 @@
   --ax-syntax-code: #9ad48a;
   /* The editor surface's own background and text: the app's, unless an editor theme (`editor-themes.css`) sets them. */
   --ax-editor-bg: var(--ax-surface-1);
+  /* The theme's surfaces as they are here, at the root: a custom property resolves where it is declared, so these stay
+     solid inside the glass, where the Studio makes `--ax-surface-*` translucent. A menu or popover there takes them
+     back (`styles.css`). */
+  --ax-solid-surface-1: var(--ax-surface-1);
+  --ax-solid-surface-2: var(--ax-surface-2);
+  --ax-solid-surface-3: var(--ax-surface-3);
+  --ax-solid-editor-bg: var(--ax-editor-bg);
+  /* What a file editor stands on around its surface: the app's ground, and nothing in the Studio's glass. */
+  --ax-editor-frame-bg: var(--ax-bg);
+  /* The editor on glass (the Studio's `--ax-editor-bg`): its own colour, made see-through by the transparency knob.
+     Its gutter cuts the text instead of covering it, and its sticky headers stay solid (`EditorSurface.svelte`). */
+  --ax-glass-editor-alpha: 0.5;
+  --ax-glass-editor: rgb(
+    from var(--ax-editor-bg) r g b / min(1, calc(var(--ax-glass-editor-alpha) * var(--ax-glass-opacity)))
+  );
   --ax-editor-fg: var(--ax-text);
   --ax-editor-current-line: rgba(255, 255, 255, 0.035);
   --ax-editor-indent-guide: rgba(255, 255, 255, 0.07);
@@ -398,4 +429,11 @@
   --ax-glass-filter: none;
   --ax-glass-filter-panel: none;
   --ax-tile-glass-blur: 0px;
+}
+/* Above a custom theme's glass surfaces or alphas: whatever it sets, reduced transparency is solid. */
+:root[data-transparency="reduced"] {
+  --ax-glass-surface-1: var(--ax-solid-surface-1);
+  --ax-glass-surface-2: var(--ax-solid-surface-2);
+  --ax-glass-surface-3: var(--ax-solid-surface-3);
+  --ax-glass-editor: var(--ax-solid-editor-bg);
 }

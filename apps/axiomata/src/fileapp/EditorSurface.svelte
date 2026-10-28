@@ -95,6 +95,7 @@
   import { SignatureHint, type SignaturePort } from "./signatureHint";
   import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
+  import { textClipPath } from "./textClip";
   import FindBar from "./FindBar.svelte";
   import Minimap from "./Minimap.svelte";
   import { lastFind, rememberFind } from "./findShared";
@@ -1812,7 +1813,13 @@
           {/if}
         {/each}
       </div>
-      <div class="content" style:left="{textLeft}px">
+      <!-- Cut where the gutter stands, so text scrolled under it is not there at all: the gutter may be glass, and
+           would otherwise show it (docs/plans/glass.md). -->
+      <div
+        class="content"
+        style:left="{textLeft}px"
+        style:clip-path={textClipPath(scrollLeft, gutterW, textLeft)}
+      >
         {#each view.rows as r (r.row)}
           {#if r.deco.kind}
             <div class="line-bg ln-{r.deco.kind} {r.slide ?? ''}" style:top="{r.row * rowH}px"></div>
@@ -2686,7 +2693,8 @@
     pointer-events: none;
   }
 
-  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. */
+  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. Solid even on glass: the text
+     scrolls on under them, and a header is a band, not a window (docs/plans/glass.md). */
   .sticky {
     position: absolute;
     top: 0;
@@ -2694,7 +2702,7 @@
     right: var(--minimap-w);
     z-index: 3;
     overflow: hidden;
-    background: var(--ax-editor-bg);
+    background: var(--ax-solid-editor-bg);
     box-shadow: var(--ax-sticky-shadow);
   }
 
@@ -2705,7 +2713,7 @@
     height: var(--row);
     padding: 0;
     border: 0;
-    background: var(--ax-editor-bg);
+    background: var(--ax-solid-editor-bg);
     color: var(--ax-text);
     font: inherit;
     line-height: var(--row);

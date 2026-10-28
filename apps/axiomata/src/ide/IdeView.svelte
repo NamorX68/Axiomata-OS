@@ -121,6 +121,7 @@
   import { pathAt } from "../editor/syntax/outline";
   import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
   import { invokeBackend, listenBackend } from "../core/backend";
+  import { wallpaper } from "../core/wallpaper";
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type SidebarView, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
@@ -945,6 +946,7 @@
   style:--ax-project-hue={projectHue}
   onkeydowncapture={onViewKeydown}
 >
+  <div class="ground" class:image={$wallpaper !== null} aria-hidden="true"></div>
   <header>
     <div class="titles">
       <div class="brand" style:--tree-w="{tree.visible ? tree.width * $uiScale : 0}px">
@@ -1182,13 +1184,53 @@
     z-index: calc(var(--ax-z-staging) - 1);
     display: flex;
     flex-direction: column;
-    /* The ground the panes' glass refracts (docs/plans/glass.md, G7): the theme's texture over the embers. */
-    background: var(--ax-texture-url), var(--ax-glass-backdrop);
+    /* Under the ground's blurred edge, the theme's own colour (docs/plans/glass.md, G7). */
+    background: var(--ax-bg);
     color: var(--ax-text);
-    /* Inside the glass, lines are light, not frames. Only this one: a surface colour stays opaque, because what must
-       cover — the editor's gutter, the terminal, which reports `--ax-surface-1` as its background to a TUI (OSC 11) —
-       reads it; and `--ax-border-strong` stays too, scrollbar thumbs, status marks and empty states fill with it. */
+    /* Inside the glass, lines are light, not frames, and a pane's surfaces — its lists, cards, bars and the editor —
+       are see-through by the transparency knob, so the frosted ground shows through them (G18). What must cover
+       stays solid: a menu, popover or text overlay takes the root's surfaces back (`styles.css`), the editor's sticky
+       headers keep its solid colour, and the terminal reports its colour from the root (OSC 11) and has a
+       transparency of its own. `--ax-border-strong` stays: scrollbar thumbs, status marks and empty states fill with
+       it. */
     --ax-border: var(--ax-glass-edge);
+    --ax-surface-1: var(--ax-glass-surface-1);
+    --ax-surface-2: var(--ax-glass-surface-2);
+    --ax-surface-3: var(--ax-glass-surface-3);
+    --ax-editor-bg: var(--ax-glass-editor);
+    --ax-editor-frame-bg: transparent;
+  }
+
+  /* The ground the glass shows (docs/plans/glass.md, G15–G16): the theme's texture or the owner's image, blurred once
+     as a still layer. Every translucent surface over it reads as frosted without a blur of its own, which would be
+     computed again on every frame something inside it scrolls. The blurred layer overhangs the box, so its edge does
+     not fade in from the window's sides. */
+  .ground {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .ground::before {
+    content: "";
+    position: absolute;
+    inset: calc(-2 * var(--ax-ground-blur));
+    background: var(--ax-texture-url), var(--ax-glass-backdrop);
+    filter: blur(var(--ax-ground-blur));
+  }
+
+  .ground.image::before {
+    background: var(--ax-wallpaper) center / cover no-repeat, var(--ax-bg);
+  }
+
+  /* Over a picture, a veil of the theme's ground: text stays readable whatever the image is. */
+  .ground.image::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--ax-ground-scrim);
   }
 
   /* Hidden, not unmounted — see the header comment. `visibility` keeps every
