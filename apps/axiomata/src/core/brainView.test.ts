@@ -9,7 +9,13 @@ describe("readBrainView", () => {
 
   it("takes the stored setting as it is, dropping the old motion switch", () => {
     const stored = { motion: false, speed: 0.06, labels: false, fileNames: true, shine: "twinkle" };
-    expect(readBrainView(stored)).toEqual({ speed: 0.06, labels: false, fileNames: true, shine: "twinkle" });
+    expect(readBrainView(stored)).toEqual({
+      speed: 0.06,
+      labels: false,
+      fileNames: true,
+      shine: "twinkle",
+      layout: "map",
+    });
   });
 
   it("takes over the old Second Brain preferences: their slider and file names", () => {
@@ -18,7 +24,18 @@ describe("readBrainView", () => {
       labels: true,
       fileNames: true,
       shine: "metal",
+      layout: "map",
     });
+  });
+
+  it("offers three layouts, the map by default, and keeps the layout the view stored before it was a setting", () => {
+    expect(readBrainView(undefined).layout).toBe("map");
+    expect(readBrainView({ layout: "hex" }).layout).toBe("hex");
+    expect(readBrainView({ layout: "rings" }).layout).toBe("rings");
+    expect(readBrainView(undefined, { layout: "rings", grouping: "folders" }).layout).toBe("rings");
+    expect(readBrainView(undefined, { layout: "hex" }).layout).toBe("hex");
+    expect(readBrainView({ layout: "map" }, { layout: "rings" }).layout).toBe("map");
+    expect(readBrainView({ layout: "circle" }, { layout: "spiral" }).layout).toBe("map");
   });
 
   it("lights the cells like metal unless another shimmer was chosen (G7)", () => {

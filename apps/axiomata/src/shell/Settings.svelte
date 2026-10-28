@@ -24,7 +24,7 @@
   import { emit } from "../core/bus";
   import { HARNESSES, providerAfterHarnessChange, providersFor, usesClaudeCode } from "../core/harness";
   import { WEB_KEYS, type WebKeyId, webUpdate } from "../core/webSettings";
-  import { brainView, SHINES, SPEED_MAX } from "../core/brainView";
+  import { BRAIN_LAYOUTS, brainView, SHINES, SPEED_MAX } from "../core/brainView";
   import { MOTION_LEVELS, isMotionLevel, motion, motionSetting, systemReducesMotion, turns } from "../core/motion";
   import { effects } from "../core/effects";
   import { CUE_LABELS, CUE_ORDER } from "../core/sounds";
@@ -556,6 +556,15 @@
               {/each}
             </select>
             <span class="hint">(how the hex cells catch the light; still unless motion is Full)</span>
+          </label>
+          <label class="row">
+            <span class="label">Layout</span>
+            <select bind:value={$brainView.layout}>
+              {#each BRAIN_LAYOUTS as l (l.id)}
+                <option value={l.id}>{l.label}</option>
+              {/each}
+            </select>
+            <span class="hint">(the Second Brain: arcs, countries or a honeycomb)</span>
           </label>
         </section>
 

@@ -131,6 +131,62 @@ describe("layouts", () => {
     expect(orbitRestAngle(m)).toBe(0);
   });
 
+  it("hex gives every file its own cell, tiled in its area's wedge, hub/skills as in rings", () => {
+    const m = buildModel(fixture(), palette);
+    applyLayout(m, "hex");
+    const hub = m.byId.get("hub")!;
+    expect([hub.x, hub.y]).toEqual([0, 0]);
+    const skill = m.byId.get("skill:a")!;
+    expect(Math.hypot(skill.x, skill.y)).toBeCloseTo(RING.skills, 5);
+    expect(m.hexUnit).toBeGreaterThan(0);
+    const files = m.nodes.filter((n) => n.kind === "file");
+    // Every file lands on a distinct cell — no two share a position.
+    const seen = new Set(files.map((n) => `${n.x.toFixed(6)},${n.y.toFixed(6)}`));
+    expect(seen.size).toBe(files.length);
+    // Neighbouring cells in the same axial hex grid sit exactly `hexUnit * √3` apart or more — never closer, which
+    // would mean two notes overlapping.
+    const minGap = Math.sqrt(3) * m.hexUnit! - 1e-6;
+    for (let i = 0; i < files.length; i++) {
+      for (let j = i + 1; j < files.length; j++) {
+        const d = Math.hypot(files[i]!.x - files[j]!.x, files[i]!.y - files[j]!.y);
+        expect(d).toBeGreaterThanOrEqual(minGap);
+      }
+    }
+    // The outermost cell lands on the band's outer edge.
+    expect(Math.max(...files.map((n) => Math.hypot(n.x, n.y)))).toBeCloseTo(RING.filesOuter, 6);
+  });
+
+  it("hex keeps each area's cells inside its own wedge, so an area's colour lies together", () => {
+    const m = buildModel(fixture(), palette);
+    applyLayout(m, "hex");
+    const twoPi = Math.PI * 2;
+    for (const seg of m.areas) {
+      for (const n of m.nodes.filter((x) => x.kind === "file" && x.area === seg.name)) {
+        let a = Math.atan2(n.y, n.x);
+        while (a < seg.start) a += twoPi;
+        while (a >= seg.start + twoPi) a -= twoPi;
+        expect(a).toBeGreaterThanOrEqual(seg.start);
+        expect(a).toBeLessThan(seg.end);
+      }
+    }
+  });
+
+  it("hex lays an area's oldest notes nearest the middle", () => {
+    const graph = fixture();
+    graph.files = graph.files.map((f) => ({ ...f, created: "2025-01-01T00:00:00Z", modified: null }));
+    // Dev's notes born one day apart, the last one first in the list.
+    graph.files.forEach((f, i) => {
+      if (f.area === "Dev") f.created = new Date(Date.UTC(2025, 0, 30 - i)).toISOString();
+    });
+    const m = buildModel(graph, palette);
+    applyLayout(m, "hex");
+    const dev = m.nodes
+      .filter((n) => n.kind === "file" && n.area === "Dev")
+      .sort((a, b) => Date.parse(a.created!) - Date.parse(b.created!));
+    const radius = (n: { x: number; y: number }) => Math.hypot(n.x, n.y);
+    expect(radius(dev[0]!)).toBeLessThan(radius(dev[dev.length - 1]!));
+  });
+
   it("map gives every file its own field inside the lens, skills ringing it, areas at their country's middle", () => {
     const m = buildModel(fixture(), palette);
     applyLayout(m, "map");

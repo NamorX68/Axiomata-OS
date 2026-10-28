@@ -18,7 +18,24 @@ export interface BrainView {
   fileNames: boolean;
   /** How the hex cells catch the light (`docs/plans/ui-ux-round.md` G7): still, twinkling, or lit like metal plates. */
   shine: Shine;
+  /** How the Second Brain view lays the vault out. */
+  layout: BrainLayout;
 }
+
+/**
+ * The Second Brain's layouts: `rings` puts the notes on arcs in their area's segment, `map` makes every area a
+ * country of hex fields (UX5), `hex` tiles the notes as a honeycomb in the rings' area wedges (the layout before the
+ * map, brought back as a choice).
+ */
+export type BrainLayout = "rings" | "map" | "hex";
+
+export const BRAIN_LAYOUTS: readonly { id: BrainLayout; label: string }[] = [
+  { id: "rings", label: "Rings" },
+  { id: "map", label: "Map" },
+  { id: "hex", label: "Hex" },
+];
+
+const isLayout = (value: unknown): value is BrainLayout => BRAIN_LAYOUTS.some((x) => x.id === value);
 
 /** The hex cells' shimmer: `calm` holds still, `twinkle` breathes each cell, `metal` lights each by its tilt. */
 export type Shine = "calm" | "twinkle" | "metal";
@@ -29,7 +46,13 @@ export const SHINES: readonly { id: Shine; label: string }[] = [
   { id: "metal", label: "Metal" },
 ];
 
-export const DEFAULT_BRAIN_VIEW: BrainView = { speed: 0.02, labels: true, fileNames: false, shine: "metal" };
+export const DEFAULT_BRAIN_VIEW: BrainView = {
+  speed: 0.02,
+  labels: true,
+  fileNames: false,
+  shine: "metal",
+  layout: "map",
+};
 
 /**
  * The radius of the disc the Second Brain graph is drawn in, as a share of the shorter side of the Orbit's own box (the one the cloud is sized from). The cloud it replaces has
@@ -55,7 +78,8 @@ const isSpeed = (value: unknown): value is number =>
 
 /**
  * The stored view setting, read defensively. A file written before the setting existed has the old Second Brain
- * preferences (`spin`: the slider, 0 = off; `fileNames`) instead, and those are taken over.
+ * preferences (`spin`: the slider, 0 = off; `fileNames`; `layout`, which the view kept there until it became a setting)
+ * instead, and those are taken over.
  */
 export function readBrainView(stored: unknown, legacySecondBrain?: unknown): BrainView {
   const own = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
@@ -71,6 +95,7 @@ export function readBrainView(stored: unknown, legacySecondBrain?: unknown): Bra
     fileNames:
       typeof own.fileNames === "boolean" ? own.fileNames : legacy.fileNames === true || DEFAULT_BRAIN_VIEW.fileNames,
     shine: SHINES.some((x) => x.id === own.shine) ? (own.shine as Shine) : DEFAULT_BRAIN_VIEW.shine,
+    layout: isLayout(own.layout) ? own.layout : isLayout(legacy.layout) ? legacy.layout : DEFAULT_BRAIN_VIEW.layout,
   };
 }
 

@@ -3,21 +3,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import type { BrainLayout } from "../core/brainView";
   import { uiScale } from "../core/uiScale";
   import { readPalette, type NodeKind } from "./model";
   import { drawGlyph } from "./render";
 
   /** `app` nodes only exist in orbit mode (the dashboard background's App
-   *  Ring) — this legend covers the Second Brain's own rings/map
+   *  Ring) — this legend covers the Second Brain's own rings/map/hex
    *  views, which never show one. Excluding it from the type (rather than
    *  giving `NodeKind`'s full `Record` a phantom, never-read `app` entry)
    *  keeps the exhaustiveness check meaningful: a kind this legend actually
    *  needs but forgets still fails to compile. */
   type LegendKind = Exclude<NodeKind, "app">;
 
-  /** On the map the "file" swatch is the pointy-top field it stands for
-   *  instead of the dot the rings use. */
-  let { map = false }: { map?: boolean } = $props();
+  /** The "file" swatch is what a note is drawn as in the shown layout: the
+   *  map's pointy-top field, the honeycomb's flat-top cell, or the rings' dot. */
+  let { layout = "rings" }: { layout?: BrainLayout } = $props();
 
   const KINDS: { kind: LegendKind; label: string }[] = [
     { kind: "hub", label: "AGENTS.md (hub)" },
@@ -50,10 +51,12 @@
       const r = kind === "file" ? 3 : 7;
       ctx.fillStyle = colors[kind];
       ctx.beginPath();
-      if (kind === "file" && map) {
+      if (kind === "file" && layout !== "rings") {
         const hr = 6;
+        // Pointy-top on the map, flat-top in the honeycomb, as each draws its cells.
+        const turn = layout === "map" ? -Math.PI / 2 : 0;
         for (let k = 0; k < 6; k++) {
-          const a = (Math.PI / 3) * k - Math.PI / 2;
+          const a = (Math.PI / 3) * k + turn;
           const px = 11 + Math.cos(a) * hr;
           const py = 11 + Math.sin(a) * hr;
           if (k === 0) ctx.moveTo(px, py);
@@ -83,9 +86,9 @@
     return () => mo.disconnect();
   });
 
-  // Repaint whenever the canvases mount, `map` flips (layout switch) or the UI scale changes.
+  // Repaint whenever the canvases mount, the layout switches or the UI scale changes.
   $effect(() => {
-    map;
+    void layout;
     void $uiScale;
     paint();
   });

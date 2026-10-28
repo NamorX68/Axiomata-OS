@@ -22,11 +22,11 @@ import { APP_RING, approachAngle, bornOf, EXPANDED_GROUP_RING, orbitRestAngle } 
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 import { cellKey, NEIGHBOURS, pixelToAxial } from "./territory";
 
-export type RenderMode = "rings" | "orbit" | "map";
+export type RenderMode = "rings" | "orbit" | "map" | "hex";
 
 export interface RenderOptions {
-  /** `rings`/`map` = the Second Brain view (dots on arcs vs. the territory
-   *  map's fields); `orbit` = the dashboard centre. */
+  /** `rings`/`map`/`hex` = the Second Brain view (dots on arcs, the territory
+   *  map's fields, or honeycomb cells in the rings' wedges); `orbit` = the dashboard centre. */
   mode?: RenderMode;
   /** Radians per second of ring rotation. */
   spin: number;
@@ -47,7 +47,16 @@ export interface RenderOptions {
   fadeFrom?: number;
 }
 
-/** A hive cell's or map field's tone before the shimmer (`GraphRenderer.noteTones`). */
+/** Where the shimmer's light stands for the flat cells of a frame (`GraphRenderer.cellLight`). */
+interface CellLight {
+  still: boolean;
+  shine: Shine;
+  x: number;
+  y: number;
+  spread: number;
+}
+
+/** A hive cell's, map field's or honeycomb cell's tone before the shimmer (`GraphRenderer.noteTones`). */
 interface HiveTone {
   col: Rgb;
   heat: number;
@@ -267,8 +276,8 @@ export class GraphRenderer {
   private turning = false;
   /** When the drag last moved the hive (`performance.now()` ms): a release after holding still does not coast. */
   private turnedAt = 0;
-  /** The map's notes for the current model (`mapNotes`). */
-  private mapFiles: { model: GraphModel; files: GraphNode[] } | null = null;
+  /** The map's fields' or the honeycomb's notes for the current model (`cellNotes`). */
+  private cellFiles: { model: GraphModel; hex: boolean; files: GraphNode[] } | null = null;
   /** Where the countries' names were drawn in the last frame, for the hit test (they lie on top of the fields). */
   private mapLabels: { node: GraphNode; x: number; y: number; w: number; h: number }[] = [];
   private rgbCache = new Map<string, Rgb>();
@@ -326,12 +335,13 @@ export class GraphRenderer {
     return Math.min(this.width, this.height) * this.options.fit * this.view.zoom;
   }
 
-  /** A file field's px radius on the map — 0 outside the map, or before
-   *  `model.hexUnit` is known. The one place `model.hexUnit` (graph units)
-   *  becomes a screen size, so hit-testing, drawing and the pulse effect
-   *  can't drift out of sync with each other. */
+  /** A file field's or honeycomb cell's px radius — 0 outside the map and
+   *  the honeycomb, or before `model.hexUnit` is known. The one place
+   *  `model.hexUnit` (graph units) becomes a screen size, so hit-testing,
+   *  drawing and the pulse effect can't drift out of sync with each other. */
   private hexCellRadius(): number {
-    if (this.options.mode !== "map" || !this.model?.hexUnit) return 0;
+    const mode = this.options.mode;
+    if ((mode !== "map" && mode !== "hex") || !this.model?.hexUnit) return 0;
     return this.model.hexUnit * this.radius();
   }
 
@@ -401,13 +411,17 @@ export class GraphRenderer {
     let best: GraphNode | null = null;
     let bestD = Infinity;
     const orbit = this.options.mode === "orbit";
+    const hex = this.options.mode === "hex";
+    const hexPx = this.hexCellRadius();
     for (const n of this.model.nodes) {
       if (orbit && n.kind === "area") continue;
       // A note of the hive is found by its cell (`hitCell`); only the recent ones also sit on the ring.
       if (orbit && n.kind === "file" && !n.onOrbit) continue;
+      // In the time travel a honeycomb cell not yet born is not there to be pointed at.
+      if (hex && n.kind === "file" && !this.bornBy(n)) continue;
       const s = orbit && n.sx !== undefined && n.sy !== undefined ? { x: n.sx, y: n.sy } : this.toScreen(n);
       const d = Math.hypot(s.x - px, s.y - py);
-      const reach = Math.max(n.r * this.view.zoom, 3) + slop;
+      const reach = hex && n.kind === "file" ? Math.max(hexPx, 3) + slop : Math.max(n.r * this.view.zoom, 3) + slop;
       if (d < reach && d < bestD) {
         best = n;
         bestD = d;
@@ -557,12 +571,19 @@ export class GraphRenderer {
       ctx.globalAlpha = 1;
     }
 
+    // The honeycomb's cells, each in its note's tone (`noteTones`); in the time travel only the notes born by then.
+    const hex = this.options.mode === "hex";
+    const hexR = this.hexCellRadius();
+    const cellNotes = hex ? this.cellNotes(model) : [];
+    const cellTones = hex ? this.noteTones(cellNotes) : [];
+    const unborn = (n: GraphNode) => hex && n.kind === "file" && !this.bornBy(n);
+
     // Edges.
     ctx.lineWidth = 0.6;
     for (const e of model.edges) {
       const a = model.byId.get(e.from);
       const b = model.byId.get(e.to);
-      if (!a || !b) continue;
+      if (!a || !b || unborn(a) || unborn(b)) continue;
       const pa = this.toScreen(a);
       const pb = this.toScreen(b);
       const hot = this.hover === a || this.hover === b || this.selected === a || this.selected === b;
@@ -577,7 +598,20 @@ export class GraphRenderer {
 
     // Nodes.
     const hl = this.highlight;
+    if (hex) {
+      const light = this.cellLight(t);
+      cellNotes.forEach((n, i) => {
+        const tone = cellTones[i];
+        if (!tone?.settled) return;
+        const p = this.toScreen(n);
+        const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
+        const fill = this.shimmerFill(tone.col, p.x, p.y, n.phase, t, light);
+        const hot = n === this.selected ? "selected" : n === this.hover ? "hover" : null;
+        this.drawHexCell(p.x, p.y, hexR, fill, dimmed ? 0.12 : 1, hot, tone);
+      });
+    }
     for (const n of model.nodes) {
+      if (hex && n.kind === "file") continue;
       const p = this.toScreen(n);
       const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
       const twinkle = n.kind === "file" ? 0.75 + 0.25 * Math.sin(t * 1.7 + n.phase * TWO_PI) : 1;
@@ -621,10 +655,12 @@ export class GraphRenderer {
           n.kind === "file" && (this.options.fileLabels || lit || n === this.hover || n === this.selected);
         if (n.kind === "file" && !showFile) continue;
         if (hl !== null && !lit && n !== this.selected && n !== this.hover) continue;
+        if (unborn(n)) continue;
         const p = this.toScreen(n);
         ctx.fillStyle = n.kind === "file" || n.kind === "hub" ? this.textColor : n.kind === "area" ? n.color : this.mutedColor;
         ctx.globalAlpha = n === this.hover || n === this.selected ? 1 : 0.8;
-        ctx.fillText(n.label, p.x, p.y + n.r * this.view.zoom + 6);
+        const below = hex && n.kind === "file" ? hexR : n.r * this.view.zoom;
+        ctx.fillText(n.label, p.x, p.y + below + 6);
       }
       ctx.globalAlpha = 1;
     }
@@ -1378,12 +1414,93 @@ export class GraphRenderer {
     return Number.isNaN(born) || born <= cutoff;
   }
 
-  /** The map's notes, in a list kept for as long as the model, so their tones are worked out once a second. */
-  private mapNotes(model: GraphModel): GraphNode[] {
-    if (this.mapFiles?.model !== model) {
-      this.mapFiles = { model, files: model.nodes.filter((n) => n.kind === "file" && n.cell !== undefined) };
+  /**
+   * The notes that have a cell — the map's fields (those placed on its grid) or the honeycomb's cells (every note) —
+   * in a list kept for as long as the model, so their tones are worked out once a second.
+   */
+  private cellNotes(model: GraphModel): GraphNode[] {
+    // Keyed by the mode too: a frame may fall between a layout switch and the new model it brings.
+    const hex = this.options.mode === "hex";
+    if (this.cellFiles?.model !== model || this.cellFiles.hex !== hex) {
+      const files = model.nodes.filter((n) => n.kind === "file" && (hex || n.cell !== undefined));
+      this.cellFiles = { model, hex, files };
     }
-    return this.mapFiles.files;
+    return this.cellFiles.files;
+  }
+
+  /** Where the metal's light stands this frame for the map and the honeycomb: it wanders slowly across the lens; at
+   *  Calm and Off it stands at the upper left (G3). */
+  private cellLight(t: number): CellLight {
+    const { width, height } = this;
+    const still = this.options.pulse === false;
+    const lens = Math.min(width, height) * this.options.fit;
+    const sweep = t * GraphRenderer.MAP_SWEEP;
+    return {
+      still,
+      shine: this.options.shine ?? "metal",
+      x: width / 2 + (still ? -0.45 : Math.cos(sweep) * 0.6) * lens,
+      y: height / 2 + (still ? -0.4 : Math.sin(sweep) * 0.45) * lens,
+      spread: 2 * (lens * 0.4) ** 2,
+    };
+  }
+
+  /** A flat cell's fill under the shimmer (G7) at (`x`, `y`) px: it breathes, and under "metal" it catches the light
+   *  where `light` stands. Scaling toward black and mixing toward white both keep the note's hue. */
+  private shimmerFill(col: Rgb, x: number, y: number, phase: number, t: number, light: CellLight): string {
+    let [r, g, b] = col;
+    if (light.shine !== "calm") {
+      const wave = light.still ? 1 : 0.82 + 0.18 * Math.sin(t * GraphRenderer.MAP_BREATH + phase * TWO_PI);
+      let lift = 0;
+      if (light.shine === "metal") {
+        const catchL = Math.exp(-((x - light.x) ** 2 + (y - light.y) ** 2) / light.spread);
+        lift = catchL * (light.still ? 0.8 : 0.5 + 0.5 * wave) * 0.4;
+      }
+      r = Math.min(255, r * wave + (255 - r) * lift);
+      g = Math.min(255, g * wave + (255 - g) * lift);
+      b = Math.min(255, b * wave + (255 - b) * lift);
+    }
+    return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+  }
+
+  /** One honeycomb cell: a filled flat-top hexagon (matches `layoutHex`'s axial→pixel orientation) with a thin
+   *  separating stroke, an ember in the middle while its note is fresh, outlined when hovered (text colour) or
+   *  selected (the glow). */
+  private drawHexCell(
+    x: number,
+    y: number,
+    r: number,
+    fill: string,
+    alpha: number,
+    hot: "selected" | "hover" | null,
+    tone: HiveTone,
+  ): void {
+    const { ctx } = this;
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = (Math.PI / 3) * k;
+      ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.globalAlpha = hot ? 1 : Math.min(1, alpha + 0.3);
+    ctx.strokeStyle = hot === "selected" ? this.glowColor : hot === "hover" ? this.textColor : this.surfaceColor;
+    ctx.lineWidth = hot ? 1.8 : 1;
+    ctx.stroke();
+    if (tone.heat > GraphRenderer.EMBER_FROM) {
+      ctx.beginPath();
+      ctx.arc(x, y, r * 0.22, 0, TWO_PI);
+      ctx.globalAlpha = alpha * Math.min(1, 0.35 + tone.heat);
+      if (tone.blur) {
+        ctx.shadowBlur = (this.lightScheme ? 4 : 12) * tone.heat;
+        ctx.shadowColor = this.glowColor;
+      }
+      ctx.fillStyle = this.glowColor;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** A skill's px radius on the ring around the map: steady while zooming, so the ring reads as a frame. */
@@ -1428,19 +1545,13 @@ export class GraphRenderer {
   private drawMap(t: number): void {
     const { ctx, width, height } = this;
     const model = this.model!;
-    const notes = this.mapNotes(model);
+    const notes = this.cellNotes(model);
     const tones = this.noteTones(notes, GraphRenderer.MAP_COOLING);
     const s = this.hexCellRadius();
     const zoom = this.view.zoom;
     const hl = this.highlight;
-    const still = this.options.pulse === false;
-    const shine = this.options.shine ?? "metal";
-    const lens = Math.min(width, height) * this.options.fit;
-    // The metal's light wanders slowly across the lens; at Calm and Off it stands at the upper left (G3).
-    const sweep = t * GraphRenderer.MAP_SWEEP;
-    const lightX = width / 2 + (still ? -0.45 : Math.cos(sweep) * 0.6) * lens;
-    const lightY = height / 2 + (still ? -0.4 : Math.sin(sweep) * 0.45) * lens;
-    const spread = 2 * (lens * 0.4) ** 2;
+    const light = this.cellLight(t);
+    const shine = light.shine;
     const onScreen = (x: number, y: number) => x > -s && x < width + s && y > -s && y < height + s;
 
     // Fields.
@@ -1462,24 +1573,13 @@ export class GraphRenderer {
         middles.set(n.area, m);
       }
       if (!onScreen(p.x, p.y)) return;
-      let [r, g, b] = tone.col;
-      if (shine !== "calm") {
-        const wave = still ? 1 : 0.82 + 0.18 * Math.sin(t * GraphRenderer.MAP_BREATH + n.phase * TWO_PI);
-        let lift = 0;
-        if (shine === "metal") {
-          const catchL = Math.exp(-((p.x - lightX) ** 2 + (p.y - lightY) ** 2) / spread);
-          lift = catchL * (still ? 0.8 : 0.5 + 0.5 * wave) * 0.4;
-        }
-        r = Math.min(255, r * wave + (255 - r) * lift);
-        g = Math.min(255, g * wave + (255 - g) * lift);
-        b = Math.min(255, b * wave + (255 - b) * lift);
-      }
+      const fill = this.shimmerFill(tone.col, p.x, p.y, n.phase, t, light);
       ctx.save();
       ctx.translate(p.x, p.y);
       this.hexagonPath(s * 0.94);
       const alpha = hl !== null && !hl.has(n.id) && n !== this.selected ? 0.15 : 1;
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+      ctx.fillStyle = fill;
       ctx.fill();
       if (tone.heat > GraphRenderer.EMBER_FROM) {
         // A fresh note's glow: an ember in the middle of its field, as bright as the note is fresh.

@@ -1,11 +1,13 @@
 <!--
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
-  labels, layout Rings / Map, grouping
+  labels, layout Rings / Map / Hex (the app-wide `brainView.layout`, also in the settings), grouping
   by areas or folders, spin + file-name toggles, and a detail panel for the
   selected node (file → open in the file panel / copy path / fly to / connections;
   skill → run; hub → open). "Back to the OS" closes.
   Map (UX5, G16) draws the vault as a territory map: every note a field, every
-  area a country, links as roads, with a semantic zoom and the Orbit's time travel. Orbit (the dashboard-centre widget's 3-D cloud) lives only
+  area a country, links as roads, with a semantic zoom and the Orbit's time travel. Hex (the layout before the map,
+  back as a choice) tiles every note as a honeycomb cell in its area's Rings wedge, with the time travel too.
+  Orbit (the dashboard-centre widget's 3-D cloud) lives only
   there now, not as a full-view option here.
 -->
 <script lang="ts">
@@ -15,12 +17,12 @@
 
   import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime } from "../core/format";
-  import { BRAIN_DISC, brainView, spinOf, travelAt } from "../core/brainView";
+  import { BRAIN_DISC, BRAIN_LAYOUTS, brainView, spinOf, travelAt, type BrainLayout } from "../core/brainView";
   import { animates, motion } from "../core/motion";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel, staged } from "../core/staging";
   import { toast } from "../core/toast";
-  import { applyLayout, type LayoutKind } from "../graph/layout";
+  import { applyLayout } from "../graph/layout";
   import {
     buildModel,
     neighbours,
@@ -45,8 +47,8 @@
     focus = null,
   }: { open?: boolean; focus?: string | null } = $props();
 
+  /** The view's own preferences; the layout is a setting of its own now (`brainView.layout`), read from here once. */
   interface Prefs {
-    layout?: LayoutKind;
     grouping?: Grouping;
     help?: boolean;
   }
@@ -104,11 +106,12 @@
   // work fine through a proxy, which is why this went unnoticed).
   let selected = $state.raw<GraphNode | null>(null);
   let hover = $state.raw<GraphNode | null>(null);
-  // The map is the default (it replaced "hex", which an older setting may still name).
-  let layout = $state<LayoutKind>(prefs.layout === "rings" ? "rings" : "map");
-  // The one place the layout is mapped to a renderer mode, so the mount-time renderer options and the reactive
+  // One setting with the app settings' "Layout" (`core/brainView.ts`), so a choice in either place shows in both.
+  const layout = $derived($brainView.layout);
+  const setLayout = (id: BrainLayout) => brainView.update((v) => ({ ...v, layout: id }));
+  // Each layout has a renderer mode of the same name; spelled out so the mount-time options and the reactive
   // `$effect` below can't drift apart.
-  const renderMode = $derived<RenderMode>(layout === "map" ? "map" : "rings");
+  const renderMode = $derived<RenderMode>(layout);
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let helpOpen = $state(prefs.help === true);
   let areaFilter = $state("");
@@ -118,6 +121,10 @@
     [
       "Map",
       "A map of the vault: every note a field, every area a country, the oldest notes at its heart. Links are roads (zoom in); close up every field shows its name. Skills ring the map.",
+    ],
+    [
+      "Hex",
+      "Honeycomb instead of arcs: every note its own hex cell, packed tight, in the same area segment as in Rings, the oldest nearest the middle. Skills and areas stay as in Rings.",
     ],
     ["Areas", "One segment per top-level vault folder."],
     ["Folders", "One segment per deepest folder, e.g. Learning/Rust/lessons. A finer split of large areas."],
@@ -386,7 +393,7 @@
   // Remember the view preferences in dashboard.json (settings.secondBrain).
   let prefsReady = false;
   $effect(() => {
-    const next: Prefs = { layout, grouping, help: helpOpen };
+    const next: Prefs = { grouping, help: helpOpen };
     if (prefsReady) setSetting("secondBrain", next);
     prefsReady = true;
   });
@@ -469,8 +476,8 @@
     <canvas bind:this={canvas}></canvas>
     {#if error}<p class="error">{error}</p>{/if}
   </div>
-  <!-- Over the Orbit its own time travel serves the map too; without one, the map brings its own. -->
-  {#if !inOrbit && span && layout === "map"}
+  <!-- Over the Orbit its own time travel serves the map and the honeycomb too; without one, they bring their own. -->
+  {#if !inOrbit && span && layout !== "rings"}
     <div class="travel"><TimeTravel {span} onTravel={(at) => travelAt.set(at)} /></div>
   {/if}
 
@@ -478,8 +485,9 @@
     <div class="group">
       <span class="label">Layout</span>
       <div class="seg">
-        <button type="button" class:on={layout === "rings"} title={helpText("Rings")} aria-describedby="help-rings" onclick={() => (layout = "rings")}>Rings</button>
-        <button type="button" class:on={layout === "map"} title={helpText("Map")} aria-describedby="help-map" onclick={() => (layout = "map")}>Map</button>
+        {#each BRAIN_LAYOUTS as l (l.id)}
+          <button type="button" class:on={layout === l.id} title={helpText(l.label)} aria-describedby="help-{l.id}" onclick={() => setLayout(l.id)}>{l.label}</button>
+        {/each}
       </div>
     </div>
     <div class="group">
@@ -499,7 +507,7 @@
     {/if}
     {#if helpOpen}
       <div class="help">
-        <Legend map={layout === "map"} />
+        <Legend {layout} />
         <dl class="help-terms">
           {#each HELP as [term, text] (term)}
             <dt id="help-{term.toLowerCase().replace(' ', '-')}">{term}</dt>
