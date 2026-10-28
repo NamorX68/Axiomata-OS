@@ -106,8 +106,10 @@ and each module's manual ↻ still runs regardless (`core/devFlags.ts`).
   `~/Documents` slows down, the installed app's vault walk and the vite mock stall. Put a worktree under
   `~/.claude/worktrees/<name>/` with symlinks `Axiomata-Glut` and `Axiomata-Foundation` beside it (the root
   `Cargo.toml`'s path dependencies are `../Axiomata-Glut`, `../Axiomata-Foundation`), make its `node_modules` a
-  symlink to the main checkout's (never `npm ci` there; Vite's `server.fs.allow` covers the symlinked path), and
-  remove the worktree once its branch is merged.
+  symlink to the main checkout's (never `npm ci` there — but `npm run build` and `vitest` then need the link's real
+  path in Vite's `server.fs.allow`, not wired in yet), and remove the worktree once its branch is merged. iCloud's
+  "Optimise Mac Storage" also evicts files of a checkout under `~/Documents` (`find . -flags +dataless`): a read then
+  waits for the download, and vitest workers time out.
 
 - **Two crates live in repositories of their own, beside this one** (2026-10-21): Glut — the harness and its program `glut`
   — in `../Axiomata-Glut`, and the guarded file service `axiomata-files` in `../Axiomata-Foundation` (shared with Glut
