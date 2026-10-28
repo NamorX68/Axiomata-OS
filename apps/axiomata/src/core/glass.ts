@@ -9,6 +9,7 @@
  *   the middle, {@link SOLID_GLASS} at the solid end, where every alpha passes 1 and CSS clamps it.
  * * **The blur** (`glassBlur`) is the ground's, written to `--ax-ground-blur`: the ground is blurred once, as a still
  *   layer, so nothing over it needs a blur of its own (G16).
+ * * **The veil** (`glassDim`) over the owner's picture, written to `--ax-ground-dim` (G19).
  * * **"Reduce transparency"** wins over the knob, like "Reduce motion" over the motion setting: the glass turns
  *   solid and loses its blur (`data-transparency="reduced"` on `<html>`). WebKit's `prefers-reduced-transparency`
  *   cannot be relied on, so the Mac's own setting is asked (`reduce_transparency`); the media query still counts,
@@ -21,7 +22,7 @@
 import { derived, writable, type Readable, type Writable } from "svelte/store";
 
 import { invokeBackend } from "./backend";
-import { glassBlur, windowTransparency } from "./stores";
+import { glassBlur, glassDim, windowTransparency } from "./stores";
 
 /**
  * The multiplier that makes every theme's glass solid: the thinnest authored alpha, the Studio's first surface at 0.4
@@ -31,6 +32,18 @@ export const SOLID_GLASS = 2.5;
 
 /** The ground's blur in px before the owner moves the knob (`stores.ts` starts `glassBlur` there too). */
 export const DEFAULT_GROUND_BLUR = 20;
+
+/** How much the veil over a picture starts at, in % (`glassDim`). */
+export const DEFAULT_GROUND_DIM = 35;
+
+/** The densest veil the dim knob reaches, in %: beyond it the picture would be gone. */
+export const MAX_GROUND_DIM = 80;
+
+/** The veil's alpha (0–0.8) for a stored setting in %, kept inside the knob's ends. */
+export function groundDim(setting: number): number {
+  const percent = Number.isFinite(setting) ? Math.round(setting) : DEFAULT_GROUND_DIM;
+  return Math.min(MAX_GROUND_DIM, Math.max(0, percent)) / 100;
+}
 
 /** The softest ground the blur knob reaches, in px. */
 export const MAX_GROUND_BLUR = 40;
@@ -93,6 +106,9 @@ export function startGlass(): () => void {
   const unsubscribeBlur = glassBlur.subscribe((blur) => {
     root.style.setProperty("--ax-ground-blur", `${groundBlur(blur)}px`);
   });
+  const unsubscribeDim = glassDim.subscribe((dim) => {
+    root.style.setProperty("--ax-ground-dim", String(groundDim(dim)));
+  });
   const unsubscribeReduced = systemReducesTransparency.subscribe((reduces) => {
     if (reduces) root.dataset.transparency = "reduced";
     else delete root.dataset.transparency;
@@ -103,6 +119,7 @@ export function startGlass(): () => void {
     window.removeEventListener("focus", onFocus);
     unsubscribeOpacity();
     unsubscribeBlur();
+    unsubscribeDim();
     unsubscribeReduced();
   };
 }

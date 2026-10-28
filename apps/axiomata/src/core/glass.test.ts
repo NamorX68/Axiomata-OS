@@ -4,14 +4,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { invokeBackend } from "./backend";
 import {
   MAX_GROUND_BLUR,
+  MAX_GROUND_DIM,
   SOLID_GLASS,
   glass,
   glassOpacity,
   groundBlur,
+  groundDim,
   startGlass,
   systemReducesTransparency,
 } from "./glass";
-import { glassBlur, windowTransparency } from "./stores";
+import { glassBlur, glassDim, windowTransparency } from "./stores";
 
 vi.mock("./backend", () => ({ invokeBackend: vi.fn() }));
 const invoke = vi.mocked(invokeBackend);
@@ -55,6 +57,16 @@ describe("groundBlur", () => {
   });
 });
 
+describe("groundDim", () => {
+  it("turns the stored % into the veil's alpha, inside the knob's ends", () => {
+    expect(groundDim(35)).toBe(0.35);
+    expect(groundDim(0)).toBe(0);
+    expect(groundDim(200)).toBe(MAX_GROUND_DIM / 100);
+    expect(groundDim(-10)).toBe(0);
+    expect(groundDim(Number.NaN)).toBe(0.35);
+  });
+});
+
 describe("glass", () => {
   it("derives the multiplier in effect from the setting and the system", () => {
     windowTransparency.set(75);
@@ -77,7 +89,9 @@ describe("startGlass (G5, G12)", () => {
     systemReducesTransparency.set(false);
     root.style.removeProperty("--ax-tile-glass-opacity");
     root.style.removeProperty("--ax-ground-blur");
+    root.style.removeProperty("--ax-ground-dim");
     glassBlur.set(20);
+    glassDim.set(35);
     delete root.dataset.transparency;
   });
 
@@ -87,6 +101,15 @@ describe("startGlass (G5, G12)", () => {
     expect(root.style.getPropertyValue("--ax-ground-blur")).toBe("20px");
     glassBlur.set(4);
     expect(root.style.getPropertyValue("--ax-ground-blur")).toBe("4px");
+    stop();
+  });
+
+  it("writes the veil over the picture on <html> and follows the knob", () => {
+    invoke.mockResolvedValue(false);
+    const stop = startGlass();
+    expect(root.style.getPropertyValue("--ax-ground-dim")).toBe("0.35");
+    glassDim.set(60);
+    expect(root.style.getPropertyValue("--ax-ground-dim")).toBe("0.6");
     stop();
   });
 

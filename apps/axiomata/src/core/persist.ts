@@ -19,10 +19,11 @@ import { effects, readEffects } from "./effects";
 import { hiddenBuiltins, loadHiddenBuiltins, loadUserApps, userApps, type UserApp } from "./apps";
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { RETIRED_TILE_TYPES } from "./ringTypes";
-import { DEFAULT_GROUND_BLUR, groundBlur } from "./glass";
+import { DEFAULT_GROUND_BLUR, DEFAULT_GROUND_DIM, groundBlur, groundDim } from "./glass";
 import {
   activeTheme,
   glassBlur,
+  glassDim,
   instances,
   loadInstances,
   onDirty,
@@ -276,6 +277,8 @@ export async function initPersistence(): Promise<void> {
   windowTransparency.set(getSetting<number>("windowTransparency") ?? 50);
   const savedBlur = getSetting<unknown>("glassBlur");
   glassBlur.set(typeof savedBlur === "number" ? groundBlur(savedBlur) : DEFAULT_GROUND_BLUR);
+  const savedDim = getSetting<unknown>("glassDim");
+  glassDim.set(typeof savedDim === "number" ? Math.round(groundDim(savedDim) * 100) : DEFAULT_GROUND_DIM);
   const savedUiSize = getSetting<unknown>("uiSize");
   uiSize.set(isUiSize(savedUiSize) ? savedUiSize : "auto");
   const savedKeyboard = getSetting<unknown>("keyboard");
@@ -350,6 +353,9 @@ export async function initPersistence(): Promise<void> {
   });
   glassBlur.subscribe((v) => {
     if (!first) setSetting("glassBlur", v);
+  });
+  glassDim.subscribe((v) => {
+    if (!first) setSetting("glassDim", v);
   });
   first = false;
   window.addEventListener("pagehide", () => void flush());

@@ -76,6 +76,11 @@ Hintergrundbild, **einmal** verwischt, Flächen darüber nur getönt.
   Die Zeilennummern-Spalte deckt nicht mehr, sie **schneidet** den Text ab (`clip-path` auf `.content`). Das Terminal
   meldet seine Farbe weiter vom Wurzelelement (OSC 11) und hat seinen eigenen Transparenz-Regler.
 
+- **G19 Dritter Regler „Image dim“ (Owner, 2026-10-28).** Bei voller Transparenz gingen hellgraue Kommentare vor hellen
+  Stellen des Bildes unter: der Schleier aus dem Grund des Themes über dem Bild ist jetzt einstellbar (0–80 %, Standard
+  35 %, `glassDim` → `--ax-ground-dim`), dunkel in dunklen Themes, hell in hellen. Er erscheint nur, wenn ein Bild gewählt
+  ist. Dazu: Hex-Avatare und leere Zustände behalten ihre dichte Fläche, sonst füllt der Ring darunter das Sechseck.
+
 ## 3. Spec (auch für N3)
 
 Werte für dunkle Themes (aus `glass.css`); die hellen (Paper, Latte, GitHub Light) aus `glass-light.css`, abgenommen

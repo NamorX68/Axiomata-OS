@@ -23,6 +23,10 @@ export const windowTransparency: Writable<number> = writable(50);
  *  owner's background image is blurred once, as a still layer, so every translucent surface over it reads as frosted
  *  without a blur of its own. `core/glass.ts` writes it to `--ax-ground-blur`. */
 export const glassBlur: Writable<number> = writable(20);
+/** How strongly the owner's background image is veiled by the theme's own ground, in % (`docs/plans/glass.md`,
+ *  G19): darker in a dark theme, lighter in a light one, so text stays readable over any picture. `core/glass.ts`
+ *  writes it to `--ax-ground-dim`. */
+export const glassDim: Writable<number> = writable(35);
 /** Current canvas box in CSS px (set by Canvas.svelte's ResizeObserver). */
 export const canvasSize: Writable<{ w: number; h: number }> = writable({ w: 0, h: 0 });
 /** Snap guide lines while a tile is dragged / resized (canvas coordinates). */

@@ -269,14 +269,15 @@
   --ax-glass-ember-far: color-mix(in srgb, var(--ax-glow) 12%, transparent);
   --ax-glass-counter: rgba(90, 100, 140, 0.08);
   /* The ground behind the glass (G7, G15–G17): the theme's own colour, or the owner's image (`--ax-wallpaper`, set by
-     `core/wallpaper.ts`), blurred once as a still layer by `--ax-ground-blur` (`core/glass.ts`). Over an image a scrim
-     of the theme's ground keeps text readable whatever the picture is. */
+     `core/wallpaper.ts`), blurred once as a still layer by `--ax-ground-blur` (`core/glass.ts`). Over an image a veil
+     of the theme's ground, as dense as the "Image dim" knob says (`--ax-ground-dim`, G19), keeps text readable. */
   --ax-glass-backdrop: var(--ax-bg);
   --ax-ground-blur: 20px;
   /* The texture on the ground: a dark theme's hex lines three times over (about 9 % instead of 3 %); a theme whose
      texture is noise sets it once (stacked and blurred, noise turns into a grey veil). */
   --ax-ground-texture: var(--ax-texture-url), var(--ax-texture-url), var(--ax-texture-url);
-  --ax-ground-scrim: rgb(from var(--ax-bg) r g b / 0.35);
+  --ax-ground-dim: 0.35;
+  --ax-ground-scrim: rgb(from var(--ax-bg) r g b / var(--ax-ground-dim));
   /* The Orbit's disc over the ground: dense enough for the graph's labels, thinned by the transparency knob; solid
      at the knob's solid end and with reduced transparency, in the ground's own colour, so its fade has no edge. */
   --ax-glass-orbit-disc: rgb(from var(--ax-bg) r g b / min(1, calc(0.8 * var(--ax-glass-opacity))));

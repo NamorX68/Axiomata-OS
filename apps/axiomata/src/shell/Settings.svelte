@@ -35,8 +35,8 @@
   import { playCue, unlockAudio } from "./soundPlayer";
   import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
-  import { activeTheme, glassBlur, showGrid, snapEdges, windowTransparency } from "../core/stores";
-  import { MAX_GROUND_BLUR, systemReducesTransparency } from "../core/glass";
+  import { activeTheme, glassBlur, glassDim, showGrid, snapEdges, windowTransparency } from "../core/stores";
+  import { MAX_GROUND_BLUR, MAX_GROUND_DIM, systemReducesTransparency } from "../core/glass";
   import { clearWallpaper, pickWallpaper, wallpaper } from "../core/wallpaper";
   import { KEYBOARD_SETTINGS, isKeyboardSetting, keyboardSetting, platform, platformLabel } from "../core/keys";
   import { UI_SIZE_MAX, UI_SIZE_MIN, uiScaleAuto, uiSize } from "../core/uiScale";
@@ -660,10 +660,18 @@
               {/if}
             </div>
           </div>
+          {#if $wallpaper}
+            <label class="row">
+              <span class="label">Image dim</span>
+              <input type="range" min="0" max={MAX_GROUND_DIM} step="5" bind:value={$glassDim} />
+              <span class="readout">{$glassDim}%</span>
+            </label>
+          {/if}
           <p class="hint">
             Transparency: how much of the ground shows through the surfaces — 0% solid, 100% clear, 50% the theme's own
             look. Blur: how soft the ground is, and with it everything seen through the glass. The ground is the theme's
-            own or your image, blurred once, so a softer one costs nothing while you work. Menus and text overlays stay
+            own or your image, blurred once, so a softer one costs nothing while you work. Image dim: how strongly the theme's
+            own ground veils your image — darker in a dark theme, lighter in a light one —, so text stays readable. Menus and text overlays stay
             dense either way, and macOS "Reduce transparency" makes all of it solid.
           </p>
           {#if $systemReducesTransparency}
