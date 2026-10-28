@@ -578,6 +578,7 @@ fn render(event: &Event) -> Option<String> {
         // Glut's own word to the model (T73): why the run went on.
         Event::Nudged { kind, .. } => match kind {
             glut::NudgeKind::Reminder => "· reminded of its task list".to_owned(),
+            glut::NudgeKind::NoList => "· asked to write a task list".to_owned(),
             glut::NudgeKind::OpenItems => {
                 "· asked to go on: its task list has items open".to_owned()
             }
