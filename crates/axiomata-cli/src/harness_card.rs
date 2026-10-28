@@ -240,6 +240,10 @@ impl AppAsks {
         let db = self.db.lock().unwrap_or_else(|poison| poison.into_inner());
         // Head and tail, as the pane shows it: a long harmless start must not hide what comes last.
         let mut detail = ask_display(&request.target);
+        // Glut T74: a command that would run with the Keychain open says so before what it is.
+        if request.keychain {
+            detail = format!("🔑 Keychain · {detail}");
+        }
         // Glut TUI T40: beside others a subagent's ask says whose it is, in the app as in the pane.
         if let Some(from) = &request.from {
             let from: String = printable(from).chars().take(FROM_CHARS).collect();
@@ -746,6 +750,7 @@ mod tests {
             target: "wc -l README.md".into(),
             scopes: Vec::new(),
             from: None,
+            keychain: false,
         }
     }
 
@@ -754,6 +759,22 @@ mod tests {
         permission_ask::open_ask(&db, asks.agent_id)
             .unwrap()
             .map(|ask| ask.id)
+    }
+
+    #[test]
+    fn an_ask_for_the_keychain_says_so_in_the_app() {
+        let (asks, dir) = asks();
+        let request = AskRequest {
+            target: "gh pr list".into(),
+            keychain: true,
+            ..request()
+        };
+        asks.store(&request).unwrap();
+        let db = asks.db.lock().unwrap();
+        let open = permission_ask::open_ask(&db, 9).unwrap().unwrap();
+        assert_eq!(open.detail, "🔑 Keychain · gh pr list");
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
