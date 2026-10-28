@@ -1206,8 +1206,8 @@
     justify-content: space-between;
     gap: var(--ax-space-4);
     padding: var(--ax-space-3) var(--ax-space-5);
-    border-bottom: 1px solid var(--ax-border);
-    /* The project's marker colour as a thin top edge; nothing when the project has none (card #70). */
+    /* No line beneath: the header stands on the ground like the tabs, and the plates below are set off by their air
+       and edge (docs/plans/glass.md). The project's marker colour as a thin top edge; nothing when the project has none (card #70). */
     box-shadow: inset 0 calc(3px * var(--ax-ui-scale)) 0 var(--ax-project-hue, transparent);
     flex: 0 0 auto;
   }
