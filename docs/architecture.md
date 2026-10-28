@@ -1997,6 +1997,28 @@ Every effect is switchable under Appearance (`core/effects.ts`). Open from the r
 installed app, the CSP blocks `data:` font subsets) and the Mac check of whether WebKit throttles the sounds of a
 hidden window.
 
+### Glass (GL0–GL5, 2026-10-28)
+
+The whole app moved to glass, with no switch (`docs/plans/glass.md`, G1–G19). What came out of the owner's
+performance test on a 5K screen shaped it: a `backdrop-filter` on every Studio plate stuttered, so the blur lies on
+the ground instead.
+
+- **The ground** (`ui/Ground.svelte`): the theme's texture or the owner's background image (`src-tauri/src/wallpaper.rs`,
+  `core/wallpaper.ts`, checked to be a still PNG/JPEG/WebP of at most 25 MB, copied into `~/.axiomata/wallpaper/`),
+  blurred once as a still layer. Every translucent surface over it reads as frosted at no cost per frame. Under the
+  whole app only with a picture; the Studio has its own.
+- **Three knobs** (Settings → Glass, `core/glass.ts`): Transparency (a multiplier 0–2.5 on every theme's alpha),
+  Blur (the ground's, 0–40 px), Image dim (the veil of the theme's ground over the picture). macOS "Reduce
+  transparency" (`axiomata_macos::accessibility`) makes all of it solid.
+- **One glass scope** (`.ax-glass-scope` in `styles.css`) for the Studio, floating windows and staged panels: their
+  surfaces are the theme's own made see-through; whatever lies over text or panes (menus, popovers, find bar,
+  completion, dialogs) takes the solid surfaces back. Floating panels blur for real (`.ax-glass-panel`); while
+  something covers the ground the Orbit and the pointer light hold still (`core/cover.ts`), so that blur is computed
+  once. The editor's gutter cuts its text (`fileapp/textClip.ts`) and its sticky headers mask it, instead of
+  covering it with colour.
+- **The living ring** (`use:ring` in `ui/glow.ts`): working cards carry an ember running round their edge, waiting
+  ones an amber rim; agent tiles the harness's soft light. Section heads in sentence case.
+
 ### A card started as a plan (2026-10-12)
 
 The board's cards are worked off the way the owner plans with an assistant (`docs/plans/card-as-plan.md`, K1–K6):

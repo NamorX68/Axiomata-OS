@@ -91,8 +91,6 @@
 
   .bar span {
     flex: 1;
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
   }
 
 </style>

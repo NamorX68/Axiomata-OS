@@ -596,8 +596,6 @@
   .master-kind {
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
   }
 
   /* The roles of the project as chips: one click starts an agent in that role. */
@@ -677,8 +675,6 @@
   .starts-label {
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
   }
 
   .start {

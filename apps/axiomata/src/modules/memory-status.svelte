@@ -107,8 +107,6 @@
     border-radius: var(--ax-radius-pill);
     font-size: var(--ax-font-size-sm);
     font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
   .badge.fresh {
     background: color-mix(in srgb, var(--ax-success) 22%, transparent);

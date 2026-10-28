@@ -1674,8 +1674,6 @@
     justify-content: space-between;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
   }
 
   /* D1: squeeze to --min-col, then scroll sideways. A board that hides a
@@ -2305,8 +2303,6 @@
     margin: var(--ax-space-3) 0 var(--ax-space-2);
     font-size: var(--ax-font-size-xs);
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
   .fields select {

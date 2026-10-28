@@ -272,8 +272,6 @@
     padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-1);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
   }
   .row {
     display: flex;

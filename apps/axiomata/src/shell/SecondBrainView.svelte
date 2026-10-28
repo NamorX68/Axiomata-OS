@@ -745,8 +745,6 @@
   }
   .label {
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
   .seg {
@@ -916,8 +914,6 @@
     border: 1px solid var(--ax-accent);
     color: var(--ax-accent);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
   .tag.kind {
     background: var(--ax-accent);
@@ -942,8 +938,6 @@
   }
   .meta dt {
     color: var(--ax-text-muted);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     font-size: var(--ax-font-size-xs);
     padding-top: 2px;
   }
@@ -1018,8 +1012,6 @@
   .detail h3 {
     margin: var(--ax-space-3) 0 var(--ax-space-1);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
   .detail h4 {

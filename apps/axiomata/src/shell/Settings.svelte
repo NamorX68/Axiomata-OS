@@ -1048,8 +1048,6 @@
   /* Section heads in the label role (UX2, as `ui/SectionHead.svelte`): quiet, so the choices below them speak. */
   h3 {
     font: var(--ax-type-label);
-    letter-spacing: var(--ax-tracking-label);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
     margin-bottom: var(--ax-space-2);
   }

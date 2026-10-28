@@ -347,8 +347,6 @@
     margin: 0 0 var(--ax-space-1);
     padding: 0 var(--ax-space-2);
     font: var(--ax-type-label);
-    letter-spacing: var(--ax-tracking-label);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
   }
 

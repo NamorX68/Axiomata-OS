@@ -169,8 +169,6 @@
     color: var(--ax-text-muted);
     font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
     cursor: pointer;
   }
 

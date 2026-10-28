@@ -247,8 +247,6 @@
     padding: 0;
     border-radius: 0;
     font: var(--ax-type-label);
-    letter-spacing: var(--ax-tracking-label);
-    text-transform: uppercase;
   }
 
   .areas .tab.active {

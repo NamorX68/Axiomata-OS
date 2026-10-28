@@ -489,8 +489,6 @@
   .day-head {
     font: var(--ax-type-label);
     color: var(--ax-text-muted);
-    text-transform: uppercase;
-    letter-spacing: var(--ax-tracking-label);
     padding-bottom: var(--ax-space-1);
   }
   .events {

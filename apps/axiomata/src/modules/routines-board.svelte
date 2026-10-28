@@ -233,8 +233,6 @@
     text-align: left;
     padding: var(--ax-space-1) var(--ax-space-2);
     font: var(--ax-type-label);
-    letter-spacing: var(--ax-tracking-label);
-    text-transform: uppercase;
     color: var(--ax-text-muted);
     border-bottom: 1px solid var(--ax-border);
   }

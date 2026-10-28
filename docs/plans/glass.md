@@ -161,4 +161,5 @@ Owners). Halt nur bei GL0 und nach GL2.
   laufenden Skills; Master-Kacheln tragen das weiche Harness-Licht statt des 3-px-Balkens. Kleine Dinge (Abzeichen)
   behalten `use:glow`.
 - **GL5 — Titel + Doku:** normale Schreibung app-weit (G9); `docs/architecture.md` §7, AGENTS.md (Glas-Regel neben
-  der Akzentregel), Querverweis in `ui-ux-round.md`.
+  der Akzentregel), Querverweis in `ui-ux-round.md`. **Gebaut** 2026-10-28: keine gesperrten Versalien mehr in 32
+  Bereichsköpfen; nur der Themen-Chip der Mail und der „REVIEW“-Stempel im Flow-Graphen bleiben in Großbuchstaben.
