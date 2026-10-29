@@ -43,6 +43,8 @@ import { emit, on } from "./core/bus";
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
+  /** The settings tab asked for with `shell:settings` (`{ tab }`), else the one last shown. */
+  let settingsTab = $state<string | null>(null);
   // The IDE is mounted from the first time it is opened and never unmounted
   // again — it hides itself instead. Every pane in it would otherwise be
   // destroyed on the way back to the dashboard, and a terminal pane closes its
@@ -54,6 +56,8 @@ import { emit, on } from "./core/bus";
   let spotlightOpen = $state(false);
   let brainOpen = $state(false);
   let brainFocus = $state<string | null>(null);
+  /** The Second Brain's filter asked for from outside, numbered so the same text asked for twice is set again. */
+  let brainQuery = $state<{ text: string; seq: number } | null>(null);
 
   /**
    * The window-wide keys (`core/globalKeys.ts`): ⌘K toggles the spotlight from every view, ⌘, opens the settings and ⌘W
@@ -115,7 +119,11 @@ import { emit, on } from "./core/bus";
         if (typeof d.path !== "string") return;
         openFilePanel(d.path, d.mode === "edit" ? "edit" : "read");
       }),
-      on("shell:settings", () => (settingsOpen = true)),
+      on("shell:settings", (detail) => {
+        const d = (detail ?? {}) as { tab?: string };
+        settingsTab = typeof d.tab === "string" ? d.tab : null;
+        settingsOpen = true;
+      }),
       // The ring's "Kanban" entry: the board opens as a large panel (Kanban is an app, it has no tile).
       on("shell:kanban", () => void openKanban()),
       // The ring's single "Studio" entry opens the workbench in the mode it was left in.
@@ -153,6 +161,8 @@ import { emit, on } from "./core/bus";
       on("open-second-brain", (detail) => {
         const d = (detail ?? {}) as { focus?: string | null; query?: string };
         brainFocus = typeof d.focus === "string" ? d.focus : null;
+        // Only an asked-for filter is handed on: a plain open must not bring back the last one.
+        brainQuery = typeof d.query === "string" ? { text: d.query, seq: (brainQuery?.seq ?? 0) + 1 } : null;
         brainOpen = true;
       }),
     ];
@@ -246,10 +256,10 @@ import { emit, on } from "./core/bus";
 <Sounds />
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />
-<Settings bind:open={settingsOpen} />
+<Settings bind:open={settingsOpen} initialTab={settingsTab} />
 <Spotlight bind:open={spotlightOpen} />
 {#if brainOpen}
-  <SecondBrainView bind:open={brainOpen} focus={brainFocus} />
+  <SecondBrainView bind:open={brainOpen} focus={brainFocus} query={brainQuery} />
 {/if}
 {#if ideStarted}
   <IdeView bind:open={ideOpen} />

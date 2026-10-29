@@ -27,6 +27,7 @@ mod maintenance;
 mod menu;
 mod model_watch;
 mod plan_watch;
+mod tags;
 mod tasks;
 mod terminal;
 mod vault_watch;
@@ -264,6 +265,9 @@ pub fn run() {
             commands::search_workspace,
             commands::list_skills,
             commands::list_skipped_skills,
+            commands::bundled_skills_status,
+            commands::bundled_skill_update,
+            commands::bundled_skills_update_outdated,
             commands::list_runs,
             commands::get_run,
             commands::run_skill,
@@ -368,6 +372,17 @@ pub fn run() {
             maintenance::maintenance_clean,
             maintenance::maintenance_save_settings,
             maintenance::maintenance_remove_worktree,
+            tags::get_tag_list,
+            tags::save_tag_list,
+            tags::tag_proposals,
+            tags::answer_tag_proposal,
+            tags::rename_tag,
+            tags::rename_note_links,
+            tags::vault_tagging_status,
+            tags::vault_tagging_start,
+            tags::vault_tagging_apply,
+            tags::vault_tagging_discard,
+            tags::vault_tagging_end,
             wallpaper::wallpaper_pick,
             wallpaper::wallpaper_read,
             wallpaper::wallpaper_clear,

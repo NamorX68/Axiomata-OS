@@ -8,6 +8,9 @@
   through the middle along the vault's folders. Map (UX5, G16) draws the vault as a territory map: every note a field,
   every area a country, links as roads, with a semantic zoom. Hex (the layout before the map, back as a choice) tiles
   every note as a honeycomb cell in its area's wedge. All three follow the Orbit's time travel.
+  A filter field finds notes by name, path or `#tag` (`docs/plans/tags-links.md` Q5) and dims everything else; a
+  note's tags are chips in its detail panel, and a chip sets the filter. `/brain ?…` and a tag chosen in the spotlight
+  open the view with the filter set.
   "▶ How your vault grew" (BV2) replays the vault's life over the chosen layout in a fixed time, with its own bar
   (pause, a slider, Esc or a click ends it), and fades into the layout at its end.
   Orbit (the dashboard-centre widget's 3-D cloud) lives only
@@ -28,9 +31,11 @@
   import { applyLayout } from "../graph/layout";
   import {
     buildModel,
+    modelTags,
     neighbours,
     readPalette,
     regroup,
+    searchNodes,
     type GraphModel,
     type GraphNode,
     type Grouping,
@@ -50,7 +55,8 @@
   let {
     open = $bindable(false),
     focus = null,
-  }: { open?: boolean; focus?: string | null } = $props();
+    query = null,
+  }: { open?: boolean; focus?: string | null; query?: { text: string; seq: number } | null } = $props();
 
   /** The view's own preferences; the layout is a setting of its own now (`brainView.layout`), read from here once. */
   interface Prefs {
@@ -120,6 +126,18 @@
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let helpOpen = $state(prefs.help === true);
   let areaFilter = $state("");
+  /** The view's own filter: words and `#tag`s, every one has to match (`searchNodes`); everything else dims. */
+  let filter = $state("");
+  const filterHits = $derived(model && filter.trim() ? searchNodes(model, filter) : null);
+  const allTags = $derived(model ? modelTags(model) : []);
+  $effect(() => {
+    const hits = filterHits;
+    if (renderer) renderer.highlight = hits;
+  });
+  /** Shows the notes tagged `tag` (a chip in the detail panel). */
+  function filterByTag(tag: string) {
+    filter = `#${tag}`;
+  }
 
   const HELP = [
     [
@@ -515,6 +533,15 @@
     void grouping;
     untrack(rebuild);
   });
+  // A filter handed in from outside (`/brain ?…`, a tag from the spotlight) replaces the one typed here — once per value.
+  let lastQuery = 0;
+  $effect(() => {
+    const next = query;
+    if (next && next.seq !== lastQuery) {
+      lastQuery = next.seq;
+      filter = next.text;
+    }
+  });
   // `/brain <path>` while the view is already open re-targets the focus —
   // once per focus value, not on every model rebuild.
   let lastFocus: string | null = null;
@@ -621,6 +648,23 @@
         <button type="button" class:on={grouping === "folders"} title={helpText("Folders")} aria-describedby="help-folders" onclick={() => (grouping = "folders")}>Folders</button>
       </div>
     </div>
+    <div class="group search">
+      <input
+        type="search"
+        class="find"
+        placeholder="Find notes or #tag"
+        aria-label="Find notes by name or #tag"
+        list="brain-tags"
+        spellcheck="false"
+        bind:value={filter}
+      />
+      <datalist id="brain-tags">
+        {#each allTags as tag (tag)}<option value="#{tag}"></option>{/each}
+      </datalist>
+      {#if filterHits}
+        <span class="label">{filterHits.size} {filterHits.size === 1 ? "match" : "matches"}</span>
+      {/if}
+    </div>
     <div class="row">
       <button type="button" title="Replay the vault's life from its first note, in twenty seconds" disabled={!span || growth !== null} onclick={startGrowth}>▶ How your vault grew</button>
       <button type="button" title="Reset zoom and pan" onclick={resetView}>Reset view</button>
@@ -680,6 +724,14 @@
           <dt>Modified</dt><dd>{relativeTime(selected.modified)} <span class="dim">· {absoluteTime(selected.modified)}</span></dd>
           <dt>Path</dt><dd class="mono">{selected.path}</dd>
           <dt>Links</dt><dd>{linksOut.length} out · {linksIn.length} in</dd>
+          {#if selected.tags && selected.tags.length > 0}
+            <dt>Tags</dt>
+            <dd class="chips">
+              {#each selected.tags as tag (tag)}
+                <button type="button" class="chip" title="Show the notes tagged #{tag}" onclick={() => filterByTag(tag)}>#{tag}</button>
+              {/each}
+            </dd>
+          {/if}
         </dl>
         <div class="preview">
           {#key selected.path}
@@ -951,6 +1003,33 @@
   .stats {
     margin: 0;
     color: var(--ax-text-muted);
+  }
+  .find {
+    width: calc(200px * var(--ax-ui-scale));
+    font-size: var(--ax-font-size-sm);
+  }
+  .search .label {
+    white-space: nowrap;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-1);
+  }
+  /* A tag is a plain chip: no accent, it is neither alive nor the one action (the accent rule). */
+  .chip {
+    padding: 1px var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-2);
+    color: var(--ax-text);
+    font: inherit;
+    font-size: var(--ax-font-size-xs);
+    cursor: pointer;
+  }
+  .chip:hover,
+  .chip:focus-visible {
+    background: var(--ax-selected-bg);
   }
   /* The explanations open beside the bar, to its right: above the bar they covered the cloud's lower rim. They are lifted
      by the assistant bar's height so they do not run under that bar (it is centred over the same strip, z above these). */

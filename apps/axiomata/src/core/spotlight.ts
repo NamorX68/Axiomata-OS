@@ -6,7 +6,7 @@
  */
 
 /** What a spotlight item is; the order of [`KIND_ORDER`] is the order of the groups in the list. */
-export type SpotlightKind = "command" | "module" | "skill" | "routine" | "card" | "plan" | "project" | "file";
+export type SpotlightKind = "command" | "module" | "skill" | "routine" | "card" | "plan" | "project" | "tag" | "file";
 
 /** A result group: a kind, or the short "jump to" list shown for an empty query. */
 export type SpotlightGroup = SpotlightKind | "suggestion";
@@ -51,6 +51,7 @@ export const KIND_ORDER: readonly SpotlightKind[] = [
   "card",
   "plan",
   "project",
+  "tag",
   "file",
 ];
 
@@ -63,6 +64,7 @@ export const GROUP_LABEL: Record<SpotlightGroup, string> = {
   card: "Cards",
   plan: "Plans",
   project: "Projects",
+  tag: "Tags",
   file: "Files",
 };
 

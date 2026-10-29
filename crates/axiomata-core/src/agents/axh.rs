@@ -1688,10 +1688,24 @@ mod tests {
                 .await
                 .is_ok()
         );
+        for allowed in [
+            "axiomata-cli notes tag \"Arbeit/a.md\" --tag rust --related \"Cargo\"",
+            "axiomata-cli notes tags list",
+        ] {
+            assert!(
+                inbox.judge("bash", &bash(allowed)).await.is_ok(),
+                "{allowed}"
+            );
+        }
         for refused in [
             "mv -n -f \"Inbox/a.md\" AGENTS.md",
             "mv \"Inbox/a.md\" x",
             "rm Inbox/a.md",
+            "axiomata-cli notes tag a.md; rm a.md",
+            "axiomata-cli notes tag \"$(id).md\" --tag x",
+            "axiomata-cli notes tag `id`.md",
+            "axiomata-cli notes tags list > AGENTS.md",
+            "axiomata-cli board add --column 1 x",
         ] {
             assert!(
                 inbox.judge("bash", &bash(refused)).await.is_err(),
@@ -1699,6 +1713,36 @@ mod tests {
             );
         }
         assert!(inbox.judge("web_fetch", &page).await.is_err());
+
+        let tagging = bundled_rights(
+            "vault-tagging",
+            include_str!("../../resources/vault-tagging/SKILL.md"),
+        );
+        for allowed in [
+            "axiomata-cli notes tags todo",
+            "axiomata-cli notes tags propose rust \"Rust\"",
+            "axiomata-cli notes tag --dry-run \"A/x.md\" --tag rust",
+        ] {
+            assert!(
+                tagging.judge("bash", &bash(allowed)).await.is_ok(),
+                "{allowed}"
+            );
+        }
+        // The run plans; only the owner writes: a `notes tag` without `--dry-run` is not its right.
+        for refused in [
+            "axiomata-cli notes tag \"A/x.md\" --tag rust",
+            "axiomata-cli notes tag A/x.md --dry-run --tag rust",
+            "axiomata-cli inbox move a.md B",
+        ] {
+            assert!(
+                tagging.judge("bash", &bash(refused)).await.is_err(),
+                "{refused}"
+            );
+        }
+        let note = Access::Edit {
+            path: "A/x.md".into(),
+        };
+        assert!(tagging.judge("write_file", &note).await.is_err());
 
         let board = bundled_rights(
             "todo-to-kanban",

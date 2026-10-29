@@ -11,6 +11,7 @@ mod harness_watch;
 mod inbox_cmd;
 mod maintenance_cmd;
 mod models_cmd;
+mod notes_cmd;
 
 use std::path::{Path, PathBuf};
 
@@ -134,6 +135,12 @@ enum Command {
         #[command(subcommand)]
         action: inbox_cmd::InboxAction,
     },
+    /// The vault's notes (`docs/plans/tags-links.md`): `tag` sets tags from the list and `## Related` links on one note
+    /// (what `inbox-sort` and `vault-tagging` may do), `tags list` prints the tag list.
+    Notes {
+        #[command(subcommand)]
+        action: notes_cmd::NotesAction,
+    },
     /// The `PermissionRequest` hook of a studio session's Claude Code (`docs/plans/permission-asks.md`): stores the
     /// request from stdin, waits for the owner's answer in the app and prints it for Claude Code — or nothing, and
     /// Claude Code asks in its pane. Started by the hook; not meant to be run by hand.
@@ -201,16 +208,23 @@ enum SkillsAction {
     /// Re-copy the bundled skills from `resources/` into `~/.axiomata/skills/`.
     ///
     /// Without `--force` this only seeds any *missing* bundled skill (the
-    /// app's normal every-start behaviour). With `--force` the bundled skills
-    /// (`calendar-digest`, `mail-digest`, `reminders-digest`, `cleanup`) are
-    /// overwritten from `resources/` — the escape hatch for the seed's
-    /// seed-if-absent gotcha, where a bundled `SKILL.md` edit never reaches an
-    /// install whose copy already exists. User-created skills are never
-    /// touched.
+    /// app's normal every-start behaviour). With `--force` every bundled skill
+    /// is overwritten from `resources/`, the owner's edits to one included —
+    /// the app's Skills Deck settings ("Bundled skills") update one at a time
+    /// and ask first. Each copy written is recorded by its hash, so the app
+    /// can tell an outdated copy from an edited one. User-created skills are
+    /// never touched.
     Reseed {
         /// Overwrite the bundled skills even where a copy already exists.
         #[arg(long)]
         force: bool,
+    },
+    /// List every bundled skill with its state: up to date, outdated, missing,
+    /// changed by you, or differs (may be yours — seeded before hashes were recorded).
+    Bundled {
+        /// Print the list as JSON (`[{"name": …, "state": "up_to_date"}, …]`).
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -763,8 +777,8 @@ async fn main() -> Result<()> {
         && !skill_run_may(&command)
     {
         bail!(
-            "a skill run of the app may list skills, runs and boards and add a plain card, nothing else; \
-             the owner does the rest"
+            "a skill run of the app may list skills, runs and boards, add a plain card and tag notes, nothing \
+             else; the owner does the rest"
         );
     }
     // Shared: a card's pane hands it to the TUI's host, which outlives any borrow of it.
@@ -787,6 +801,7 @@ async fn main() -> Result<()> {
                 board_flow::owner_only("reseeding the bundled skills")?;
                 skills_reseed(force)?
             }
+            SkillsAction::Bundled { json } => skills_bundled(json)?,
         },
         Command::Models { action } => return models_cmd::run(&core, action).await,
         Command::Routines { action } => return routines_cmd(&core, action).await,
@@ -809,6 +824,7 @@ async fn main() -> Result<()> {
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
         Command::McpServe => return mcp_serve(&core),
         Command::Maintenance { action } => maintenance_cmd::run(&core, action)?,
+        Command::Notes { action } => notes_cmd::run(&core, action)?,
         Command::Inbox { .. } => unreachable!("answered before the core starts"),
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
@@ -1114,6 +1130,29 @@ fn list_skills() -> Result<()> {
             "⚠ skipped {name}: {reason}",
             name = skill.name,
             reason = skill.reason
+        );
+    }
+    Ok(())
+}
+
+/// Prints each bundled skill's state against its installed copy (`skills::bundled`).
+fn skills_bundled(json: bool) -> Result<()> {
+    let list = skills::bundled::status().context("could not read the bundled skills")?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&list)?);
+        return Ok(());
+    }
+    let width = list.iter().map(|skill| skill.name.len()).max().unwrap_or(0);
+    for skill in &list {
+        println!("{:width$}  {}", skill.name, skill.state.label());
+    }
+    let outdated = list
+        .iter()
+        .filter(|skill| skill.state.needs_update())
+        .count();
+    if outdated > 0 {
+        println!(
+            "\n{outdated} can be updated in the app (Skills Deck → settings → Bundled skills)."
         );
     }
     Ok(())
@@ -2736,8 +2775,9 @@ fn board_add(
 }
 
 /// Whether a skill run of the app may run `command` (glut-round, fourth audit): looking (status, skills, runs, the
-/// board) and adding a plain card — what the bundled skills need. `inbox move` is answered before this, and the rest
-/// (routines, the IDE, files, agents, other runs, imports, the board's other steps) is the owner's.
+/// board, the tag list), adding a plain card and setting a note's tags and links (`notes tag`, which checks every tag
+/// and link itself, `docs/plans/tags-links.md` V2) — what the bundled skills need. `inbox move` is answered before
+/// this, and the rest (routines, the IDE, files, agents, other runs, imports, the board's other steps) is the owner's.
 fn skill_run_may(command: &Command) -> bool {
     match command {
         Command::Status
@@ -2747,6 +2787,18 @@ fn skill_run_may(command: &Command) -> bool {
         Command::Board { action } => {
             matches!(action, BoardAction::List { .. } | BoardAction::Add { .. })
         }
+        // Of `notes tags` the list, the vault run's todo, a skip and a proposal — nothing that writes a note. Renaming,
+        // describing and lifting are the owner's.
+        Command::Notes { action } => matches!(
+            action,
+            notes_cmd::NotesAction::Tag { .. }
+                | notes_cmd::NotesAction::Tags {
+                    action: notes_cmd::TagsAction::List { .. }
+                        | notes_cmd::TagsAction::Todo
+                        | notes_cmd::TagsAction::Skip { .. }
+                        | notes_cmd::TagsAction::Propose { .. }
+                }
+        ),
         _ => false,
     }
 }
@@ -3220,6 +3272,10 @@ mod tests {
             &["board", "add", "--column", "1", "t"],
             &["list-skills"],
             &["list-runs"],
+            &["notes", "tag", "A/x.md", "--tag", "rust", "--related", "B"],
+            &["notes", "tags", "list"],
+            &["notes", "tags", "todo"],
+            &["notes", "tags", "propose", "rust", "Rust"],
             &[],
         ] {
             assert!(may(allowed), "{allowed:?}");
@@ -3235,6 +3291,10 @@ mod tests {
             &["modules"],
             &["maintenance", "clean"],
             &["maintenance", "status"],
+            &["notes", "tags", "rename", "a", "b"],
+            &["notes", "tags", "rename", "a", "b", "--dry-run"],
+            &["notes", "tags", "describe", "a", "A"],
+            &["notes", "tags", "lift-inline", "--dry-run"],
         ] {
             assert!(!may(refused), "{refused:?}");
         }

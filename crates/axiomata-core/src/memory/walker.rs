@@ -110,6 +110,19 @@ pub fn freshness(config: &Config) -> Result<Freshness, AxiomataError> {
     })
 }
 
+/// The workspace-relative paths of every tracked file, the same set [`scan`] finds, without reading any of them — what
+/// resolving a `[[link]]` against the vault needs (`tags`).
+///
+/// Errors:
+///     as [`scan`].
+pub fn file_paths(config: &Config) -> Result<Vec<String>, AxiomataError> {
+    Ok(walk(&config.workspace_root)?
+        .files
+        .into_iter()
+        .map(|tracked| tracked.rel_path)
+        .collect())
+}
+
 /// A single tracked file as the walk sees it, before title extraction.
 struct Tracked {
     /// Forward-slashed path relative to the workspace root.

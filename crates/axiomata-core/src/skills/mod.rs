@@ -12,6 +12,7 @@ use std::io::{ErrorKind, Write};
 use crate::error::AxiomataError;
 use crate::paths;
 
+pub mod bundled;
 pub mod model;
 pub mod registry;
 pub mod runlog;
@@ -19,6 +20,7 @@ pub mod runner;
 
 // Curated facade so consumers (CLI, Tauri commands) don't bind to the internal
 // module layout of `skills`.
+pub use bundled::{BundledSkill, BundledState};
 pub use model::{RunRecord, RunSource, RunStatus, RunSummary};
 pub use registry::{Skill, SkippedSkill, find_skill, list_skills, list_skipped_skills};
 pub use runlog::{get_run, list_runs};
@@ -37,7 +39,8 @@ const EXAMPLE_SKILL_MD: &str = include_str!("../../resources/example-skill/SKILL
 /// The skills bundled with the app and seeded into
 /// `~/.axiomata/skills/` on first run (or after a clean reinstall) — the
 /// owner's actual working skill set, not the `example-skill` smoke test.
-const DEFAULT_SKILLS: &[(&str, &str)] = &[
+/// Their state against the installed copies is [`bundled`]'s.
+pub(crate) const DEFAULT_SKILLS: &[(&str, &str)] = &[
     (
         "calendar-digest",
         include_str!("../../resources/calendar-digest/SKILL.md"),
@@ -75,6 +78,11 @@ const DEFAULT_SKILLS: &[(&str, &str)] = &[
         "model-news",
         include_str!("../../resources/model-news/SKILL.md"),
     ),
+    // The one run over the whole vault: a proposed tag list, then a preview of every note's tags (tags-links.md TL6).
+    (
+        "vault-tagging",
+        include_str!("../../resources/vault-tagging/SKILL.md"),
+    ),
 ];
 
 /// Writes `content` into `~/.axiomata/skills/<name>/SKILL.md` if it isn't
@@ -84,9 +92,11 @@ const DEFAULT_SKILLS: &[(&str, &str)] = &[
 /// edit, or a previous seed — is left untouched, so nothing here ever
 /// overwrites a change made after the fact.
 ///
+/// Returns whether the file was written now (`false`: a copy was already there).
+///
 /// Errors:
 ///     [`AxiomataError::Io`] if the directory or file cannot be created.
-fn seed_skill(name: &str, content: &str) -> Result<(), AxiomataError> {
+fn seed_skill(name: &str, content: &str) -> Result<bool, AxiomataError> {
     let dir = paths::global_skills_dir().join(name);
     let manifest = dir.join("SKILL.md");
 
@@ -104,11 +114,12 @@ fn seed_skill(name: &str, content: &str) -> Result<(), AxiomataError> {
     {
         Ok(mut file) => file
             .write_all(content.as_bytes())
+            .map(|()| true)
             .map_err(|source| AxiomataError::Io {
                 path: manifest,
                 source,
             }),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => Ok(()),
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => Ok(false),
         Err(source) => Err(AxiomataError::Io {
             path: manifest,
             source,
@@ -125,7 +136,7 @@ fn seed_skill(name: &str, content: &str) -> Result<(), AxiomataError> {
 /// Errors:
 ///     [`AxiomataError::Io`] if the directory or file cannot be created.
 pub fn seed_example_skill() -> Result<(), AxiomataError> {
-    seed_skill(EXAMPLE_SKILL_NAME, EXAMPLE_SKILL_MD)
+    seed_skill(EXAMPLE_SKILL_NAME, EXAMPLE_SKILL_MD).map(|_| ())
 }
 
 /// Writes every skill in [`DEFAULT_SKILLS`] into `~/.axiomata/skills/`, each
@@ -134,14 +145,30 @@ pub fn seed_example_skill() -> Result<(), AxiomataError> {
 /// four exist, so a user's own edits (or a deleted skill they don't want
 /// back) always survive.
 ///
+/// Each copy written now gets its hash recorded ([`bundled`]), and so does an existing copy that equals the bundled
+/// one — it is untouched for sure, so a later bundled change can show as "outdated" rather than "may be yours".
+/// Writing that record is best-effort here: a start must not fail on bookkeeping.
+///
 /// Errors:
 ///     [`AxiomataError::Io`] if any skill's directory or file cannot be
 ///     created; aborts at the first failure (the skills already written stay put).
 pub fn seed_default_skills() -> Result<(), AxiomataError> {
+    let mut record = bundled::Record::load();
+    let mut result = Ok(());
     for (name, content) in DEFAULT_SKILLS {
-        seed_skill(name, content)?;
+        match seed_skill(name, content) {
+            Ok(true) => record.note(name, content),
+            Ok(false) => record.note_if_current(name, content),
+            Err(err) => {
+                result = Err(err);
+                break;
+            }
+        }
     }
-    Ok(())
+    if let Err(err) = record.save_if_changed() {
+        tracing::warn!(%err, "could not record the seeded bundled skills");
+    }
+    result
 }
 
 /// Writes every skill in [`DEFAULT_SKILLS`] into `~/.axiomata/skills/`,
@@ -153,19 +180,36 @@ pub fn seed_default_skills() -> Result<(), AxiomataError> {
 /// hatch for the seed's seed-if-absent gotcha — an edit to a bundled
 /// skill's `resources/SKILL.md` does **not** reach an install whose
 /// `~/.axiomata/skills/<name>/SKILL.md` already exists. Skills outside
-/// [`DEFAULT_SKILLS`] (the user's own) are never touched.
+/// [`DEFAULT_SKILLS`] (the user's own) are never touched. Every copy written
+/// gets its hash recorded, the same record the app's "Bundled skills" section reads.
 ///
 /// Errors:
 ///     [`AxiomataError::Io`] if any skill's file cannot be created or
-///     overwritten; aborts at the first failure (the skills already written stay put).
+///     overwritten, or the record cannot be written; aborts at the first failure
+///     (the skills already written stay put, and so do their hashes). A skill whose
+///     folder is a link is skipped with a warning, never written through.
 pub fn reseed_default_skills(force: bool) -> Result<(), AxiomataError> {
     if !force {
         return seed_default_skills();
     }
+    let mut record = bundled::Record::load();
+    let mut result = Ok(());
     for (name, content) in DEFAULT_SKILLS {
-        write_skill(name, content)?;
+        match write_skill(name, content) {
+            Ok(()) => record.note(name, content),
+            // A linked skill folder is never written through; the others still get their reseed.
+            Err(AxiomataError::BundledSkill { name, reason }) => {
+                tracing::warn!(%name, %reason, "skipped by the forced reseed");
+            }
+            Err(err) => {
+                result = Err(err);
+                break;
+            }
+        }
     }
-    Ok(())
+    // The first failure is the one to report; the record's own failure only when everything else went through.
+    let saved = record.save_if_changed();
+    result.and(saved)
 }
 
 /// Overwrites `~/.axiomata/skills/<name>/SKILL.md` with `content`, atomically.
@@ -173,10 +217,19 @@ pub fn reseed_default_skills(force: bool) -> Result<(), AxiomataError> {
 /// The overwrite writes an `O_EXCL` temp sibling then renames it over the
 /// target, so a crash mid-write can't leave a truncated manifest behind and a
 /// symlink planted at the predictable temp path is never followed. Only the
-/// named skill is touched.
-fn write_skill(name: &str, content: &str) -> Result<(), AxiomataError> {
+/// named skill is touched. A skill folder that is itself a link is refused: the
+/// registry skips such a folder, and writing through it would land outside
+/// `~/.axiomata/skills/`.
+pub(crate) fn write_skill(name: &str, content: &str) -> Result<(), AxiomataError> {
     let dir = paths::global_skills_dir().join(name);
     let manifest = dir.join("SKILL.md");
+
+    if fs::symlink_metadata(&dir).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(AxiomataError::BundledSkill {
+            name: name.to_owned(),
+            reason: format!("{} is a link; it is not written through", dir.display()),
+        });
+    }
 
     fs::create_dir_all(&dir).map_err(|source| AxiomataError::Io {
         path: dir.clone(),
@@ -320,6 +373,7 @@ mod tests {
             "model-news",
             "inbox-sort",
             "todo-to-kanban",
+            "vault-tagging",
         ] {
             let skill = skills.iter().find(|s| s.name == name).unwrap();
             let declared = skill
@@ -332,6 +386,22 @@ mod tests {
                 rules.iter().any(|rule| rule.text().starts_with("Read")),
                 "{name} cannot read"
             );
+            // The owner's list cleanup rewrites many notes at once: no skill declares a command that covers it (the
+            // CLI refuses it in a skill run as well; this keeps the declaration from inviting it — security audit).
+            for pattern in declared
+                .split("Bash(")
+                .skip(1)
+                .filter_map(|rest| rest.split_once(')').map(|(inner, _)| inner))
+            {
+                let words: Vec<&str> = pattern.trim_end_matches(":*").split_whitespace().collect();
+                for owner in ["rename", "describe", "lift-inline"] {
+                    let command = ["axiomata-cli", "notes", "tags", owner];
+                    assert!(
+                        !command.starts_with(&words),
+                        "{name} declares {pattern:?}, which covers `notes tags {owner}`"
+                    );
+                }
+            }
         }
 
         unsafe {

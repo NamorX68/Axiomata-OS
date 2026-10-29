@@ -4,18 +4,24 @@
   outcome. Polls skills + recent runs every POLL_MS. Config (flip side):
   `filterBackend` ("" = all) and `order` ("name" | "recent").
 
+  The bundled skills are read once at mount: when one is outdated or missing, a quiet neutral notice links to the
+  flip side's "Bundled skills" section (an update waits for no one, so no glow).
+
   Calm at rest ("Glut + Hex", UX3): the skill that runs is the one card that glows — its icon lights up and its run
   button turns into a quiet "busy" mark; the last outcome is a hex mark.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import { type RunSummary, type Skill, type SkippedSkill, runFailed } from "../core/backend";
+  import { type BundledSkill, type RunSummary, type Skill, type SkippedSkill, runFailed } from "../core/backend";
   import { relativeTime } from "../core/format";
   import { backendLabel } from "../core/harness";
+  import { updateInstance } from "../core/stores";
   import type { ModuleContext } from "../core/types";
   import { ring } from "../ui/glow";
+  import Notice from "../ui/Notice.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
+  import { bundledFocus, bundledSkills, noticeText } from "./bundledSkills";
 
   const POLL_MS = 5000;
   const RUN_LIMIT = 50;
@@ -100,7 +106,22 @@
     await refresh();
   }
 
+  const bundledNotice = $derived(noticeText($bundledSkills));
+
+  /** Turns the tile to its settings and asks them to show the "Bundled skills" section. */
+  function showBundled() {
+    bundledFocus.update((n) => n + 1);
+    updateInstance(ctx.instanceId, { flipped: true });
+  }
+
   onMount(() => {
+    // Once per start, not with every poll: the bundled versions only change with a new build of the app.
+    ctx
+      .invoke<BundledSkill[]>("bundled_skills_status")
+      .then((list) => bundledSkills.set(list))
+      .catch(() => {
+        // The notice is a hint only; the settings' section reports a failure to read.
+      });
     void refresh();
     const id = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(id);
@@ -110,6 +131,15 @@
 <div class="deck">
   {#if error}
     <p class="error">{error}</p>
+  {/if}
+  {#if bundledNotice}
+    <div class="bundled">
+      <Notice title={bundledNotice} tone="neutral">
+        {#snippet action()}
+          <button type="button" class="ax-btn" onclick={showBundled}>Review</button>
+        {/snippet}
+      </Notice>
+    </div>
   {/if}
   {#if skipped.length > 0}
     <ul class="skipped" title="A skill directory with a broken or missing SKILL.md — see ~/.axiomata/skills/">
@@ -296,6 +326,9 @@
   .error {
     color: var(--ax-danger);
     font-size: var(--ax-font-size-sm);
+    margin-bottom: var(--ax-space-2);
+  }
+  .bundled {
     margin-bottom: var(--ax-space-2);
   }
   .skipped {

@@ -161,6 +161,16 @@ export interface Skill {
   harness: string;
 }
 
+/** Where an installed bundled skill stands against the version bundled with the app (`skills::bundled`): `changed`
+ *  — the owner edited it after its seed; `differs` — it differs and nothing records its seed, so it may be theirs. */
+export type BundledState = "up_to_date" | "outdated" | "missing" | "changed" | "differs";
+
+/** One bundled skill and its state (`bundled_skills_status`). */
+export interface BundledSkill {
+  name: string;
+  state: BundledState;
+}
+
 /** A skill directory `list_skills` could not turn into a `Skill` — a broken
  *  `SKILL.md`, a symlink, … — surfaced instead of just vanishing. */
 export interface SkippedSkill {
@@ -829,6 +839,84 @@ export interface GraphFile {
   /** The earliest of frontmatter `created:`, birth and modification time (G17); the Orbit's time travel. */
   created?: string | null;
   is_markdown: boolean;
+  /**
+   * The note's tags (`docs/plans/tags-links.md` Q1): lower case, without `#`, its frontmatter's and its text's united,
+   * nested ones kept as `a/b`. Missing on an older backend.
+   */
+  tags?: string[];
+}
+
+/** One entry of the vault's tag list, `TAGS.md` (`get_tag_list`, `save_tag_list`). */
+export interface TagEntry {
+  /** Lower case, without `#`. */
+  tag: string;
+  description: string;
+}
+
+/** A tag an agent wanted that is not on the list, waiting for the owner (`tag_proposals`). */
+export interface TagProposal {
+  id: number;
+  tag: string;
+  description: string;
+  /** The notes that asked for it; an accepted tag is set there. */
+  notes: string[];
+  proposed_by: string;
+  proposed_at: string;
+}
+
+/** What answering a proposal did (`answer_tag_proposal`). */
+export interface TagAnswer {
+  tag: string;
+  accepted: boolean;
+  notes_tagged: number;
+  notes_failed: string[];
+}
+
+/** A step of the one run over the vault (`docs/plans/tags-links.md` Q9, TL6). */
+export type VaultPhase = "list" | "notes";
+
+/** What a step of the vault run is expected to cost, before the owner starts it. */
+export interface VaultEstimate {
+  phase: VaultPhase;
+  notes: number;
+  bytes: number;
+  input_tokens: number;
+  output_tokens: number;
+  model: string | null;
+  /** `null` when the model has no price in the owner's table (Anthropic's subscription, a local Ollama). */
+  cost_usd: number | null;
+}
+
+/** What the vault run plans for one note: a row of the preview. */
+export interface PlannedNote {
+  note: string;
+  tags: string[];
+  related: string[];
+  /** Proposed to the owner when the plan is written; set on the note once accepted. */
+  proposed: string[];
+  /** Why the run left the note out, if it did. */
+  skipped?: string | null;
+}
+
+/** The vault run as Settings → Workspace → Tags shows it (`vault_tagging_status`). */
+export interface VaultTagging {
+  phase: VaultPhase | null;
+  list_estimate: VaultEstimate;
+  notes_estimate: VaultEstimate;
+  plan: PlannedNote[];
+}
+
+/** What writing the preview did (`vault_tagging_apply`). */
+export interface VaultApplied {
+  written: number;
+  unchanged: number;
+  failed: string[];
+}
+
+/** What a rename changed or would change (`rename_note_links`, `rename_tag`): notes, and links or uses of the tag. */
+export interface RenameCount {
+  files: number;
+  links: number;
 }
 
 export interface GraphArea {

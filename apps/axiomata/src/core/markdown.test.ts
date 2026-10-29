@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cut, renderMarkdown, renderMarkdownBlocks } from "./markdown";
+import { cut, leadingFrontmatter, renderMarkdown, renderMarkdownBlocks } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("renders task-list items as read-only checkboxes, not text fields", () => {
@@ -68,6 +68,14 @@ describe("renderMarkdown", () => {
 });
 
 describe("renderMarkdownBlocks", () => {
+  it("leaves a leading frontmatter out but keeps counting its lines", () => {
+    const html = renderMarkdownBlocks("---\ntags:\n  - rust\n---\n# Title\n");
+    expect(html).not.toContain("tags");
+    expect(html).toContain('data-line="4"');
+    expect(leadingFrontmatter("text\n---\na: 1\n---\n")).toBe("");
+    expect(leadingFrontmatter("---\r\na: 1\r\n...\r\nbody")).toBe("---\r\na: 1\r\n...\r\n");
+  });
+
   it("marks every top-level block with its source line", () => {
     const html = renderMarkdownBlocks("# Title\n\nA paragraph\nwrapped.\n\n- one\n- two\n\n```ts\nconst x = 1;\n```\n");
     const lines = [...html.matchAll(/data-line="(\d+)"/g)].map((m) => Number(m[1]));
@@ -117,5 +125,39 @@ describe("cut", () => {
   it("trims trailing whitespace left by the break before adding the ellipsis", () => {
     expect(cut("word ".repeat(40).trim(), 20)).not.toContain("  ");
     expect(cut("word ".repeat(40).trim(), 20).endsWith("…")).toBe(true);
+  });
+});
+
+describe("renderMarkdownBlocks with note links (tags-links TL2)", () => {
+  const exists = (target: string) => target !== "Missing";
+  const anchors = (html: string) =>
+    [...new DOMParser().parseFromString(html, "text/html").querySelectorAll("a")].map((a) => ({
+      cls: a.className,
+      href: a.getAttribute("href"),
+      text: a.textContent,
+    }));
+
+  it("turns wikilinks and tags into fragment links, a dangling link marked", () => {
+    const html = renderMarkdownBlocks("See [[Plan#Ziel|the plan]], [[Missing]] and #rust/async.\n", { exists });
+    expect(anchors(html)).toEqual([
+      { cls: "ax-wikilink", href: "#ax-note:Plan%23Ziel%7Cthe%20plan", text: "the plan" },
+      { cls: "ax-wikilink ax-wikilink-missing", href: "#ax-note:Missing", text: "Missing" },
+      { cls: "ax-tag", href: "#ax-tag:rust%2Fasync", text: "#rust/async" },
+    ]);
+  });
+
+  it("leaves code, numbers, mid-word #s and headings alone", () => {
+    const html = renderMarkdownBlocks("# Title\n\n`[[Not]] #not` #1 C#\n\n```\n[[Not]] #not\n```\n", { exists });
+    expect(anchors(html)).toEqual([]);
+  });
+
+  it("escapes what a link shows and never nests a link in a link", () => {
+    const html = renderMarkdownBlocks('[[<img src=x onerror=alert(1)>]] [see #x](https://e.com)\n', { exists });
+    expect(new DOMParser().parseFromString(html, "text/html").querySelectorAll("img")).toHaveLength(0);
+    expect(anchors(html).map((a) => a.cls)).toEqual(["ax-wikilink", ""]);
+  });
+
+  it("renders without them where no notes are given", () => {
+    expect(anchors(renderMarkdownBlocks("[[Plan]] #tag\n"))).toEqual([]);
   });
 });

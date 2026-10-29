@@ -33,6 +33,8 @@ export interface GraphNode {
   /** When the note came into being (G17), for the Orbit's time travel. */
   created?: string | null;
   isMarkdown?: boolean;
+  /** File nodes: the note's tags, lower case and without `#` (`docs/plans/tags-links.md` Q5). */
+  tags?: string[];
   /** Area nodes: which icon to draw (see `glyphForArea`). Builtin `"app"`
    *  nodes: which icon to draw (see `glyphForModuleType`) — a hand-drawn
    *  vector glyph, not a rasterized image; see that function's doc comment
@@ -352,16 +354,32 @@ export function regroup(g: WorkspaceGraph, grouping: Grouping): WorkspaceGraph {
   };
 }
 
-/** Node ids whose label / path / area contain every word of `query`. */
+/** Whether `tags` hold `tag` itself or a tag nested below it (`#rust` holds `rust/async`), as Obsidian filters. */
+export function hasTag(tags: readonly string[] | undefined, tag: string): boolean {
+  return (tags ?? []).some((t) => t === tag || t.startsWith(`${tag}/`));
+}
+
+/**
+ * Node ids that match every word of `query`: a word `#tag` matches the notes tagged so (or below it, Q5), any other
+ * word a label, path or area that contains it.
+ */
 export function searchNodes(model: GraphModel, query: string): Set<string> {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = new Set<string>();
   if (words.length === 0) return hits;
   for (const n of model.nodes) {
     const hay = `${n.label} ${n.path ?? ""} ${n.area ?? ""}`.toLowerCase();
-    if (words.every((w) => hay.includes(w))) hits.add(n.id);
+    const matches = (w: string) => (w.startsWith("#") && w.length > 1 ? hasTag(n.tags, w.slice(1)) : hay.includes(w));
+    if (words.every(matches)) hits.add(n.id);
   }
   return hits;
+}
+
+/** Every tag of the model's notes, sorted, for the filter's suggestions. */
+export function modelTags(model: GraphModel): string[] {
+  const all = new Set<string>();
+  for (const n of model.nodes) for (const t of n.tags ?? []) all.add(t);
+  return [...all].sort();
 }
 
 /** Neighbours of a node via the edge list, as `{ id, direction }`. */
@@ -486,6 +504,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       modified: f.modified,
       created: f.created ?? f.modified,
       isMarkdown: f.is_markdown,
+      tags: f.tags ?? [],
     });
   }
 

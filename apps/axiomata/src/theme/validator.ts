@@ -108,6 +108,7 @@ export const ALLOWED_TOKENS: readonly string[] = [
   ...["operator", "punctuation", "tag", "attribute", "heading", "link", "emphasis", "code"].map(
     (t) => `--ax-syntax-${t}`,
   ),
+  ...["wikilink", "wikilink-missing", "hashtag"].map((t) => `--ax-syntax-${t}`),
   ...["bg", "fg", "current-line", "indent-guide", "bracket-1", "bracket-2", "bracket-3", "glow"].map((t) => `--ax-editor-${t}`),
   ...LANGUAGE_COLOR_IDS.map((id) => `--ax-lang-${id}`),
   ...["claude_code", "opencode", "glut", "mini"].map((id) => `--ax-harness-${id}`),

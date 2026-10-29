@@ -1024,6 +1024,39 @@ Storage). The app runs it weekly from the bootstrap (`spawn_weekly`, 90 s after 
 `maintenance status|clean [--dry-run] [--json]` (a real clean is owner-only); Settings → Storage shows sizes, editable
 rules, "Clean up now" and Glut's row from `glut clean --dry-run --json` (format 1; Axiomata never touches `~/.glut`).
 
+### Tags and links (`docs/plans/tags-links.md`, TL1 + TL3–TL6, built 2026-10-29; TL2 the editor's)
+
+Tags as Obsidian has them (`axiomata_core::tags`): `#tag` in the text and `tags:` in the frontmatter (block list, flow
+list or text), nested `a/b`, compared without case; not in headings, code, links or URLs, never a bare number
+(`tags::detect`). The graph carries them per note (`GraphFile.tags`, read once per file with its link targets; the tag
+list itself has none). **One tag list**, `<workspace>/TAGS.md` (`- #tag — description`, seeded with `#ai/news` and
+`#ai/models`), written only by the app (Settings → Workspace → Tags, `shell/TagsSettings.svelte`, or the owner's
+`notes tags rename|describe`, every list change checked against the version read); a description is
+one visible line (format characters dropped). **An agent's one write into a note** is `axiomata-cli notes tag <file>
+--tag … --related … --propose tag:"…" [--dry-run]` (`tags::note::tag_note`): only the frontmatter's `tags:` (rewritten
+only when its form reads back unchanged; ambiguous YAML items quoted) and `- [[Note]]` lines under `## Related` (at most
+3, existing notes only, link-safe names), through the workspace's strict guard with a version check; protected files
+(`AGENTS.md`, `CLAUDE.md`, `TAGS.md`, …) and `Kanban/` are refused. A tag not on the list becomes a proposal
+(`tag_proposals`, migration 37), answered in the settings — accepted, it goes onto the list and onto the notes that asked
+for it; a tag turned down is not proposed again for 30 days. `notes tag|tags list|todo|propose|skip` are direct CLI commands
+(`agent_entry::DIRECT_COMMANDS`) and open to a skill run (`skill_run_may`), closed in a studio agent session; a skill
+run's non-dry `notes tag` writes only a note placed within the last hour. Users: the note placement (`create_note`: a
+read-only turn, the vault strings framed as data, up to 40 related candidates sharing a word with the note, the reply cut
+to 4 tags / 1 proposal / 3 related), `inbox-sort` after each move, and `vault-tagging` — the one run over the vault
+(`tags::vault_run`, migration 38): it proposes the list, then plans every note with `--dry-run` into a preview
+(`tag_plan`; a note it cannot plan is skipped with its reason), which the owner writes (or throws away) after an
+estimate of each step's cost (note sizes × the skill model's price); the planned proposals go to the owner then, and a
+note that fails to write stays in the preview. Renames pull their uses along: `rename_note_links` (V3, for the file app; refuses names that cannot be a
+link and requires one side to exist) and `rename_tag` (nested tags follow; a new name already listed is a merge that keeps its description; notes it could
+not rewrite are reported). The owner's cleanup from a terminal: `notes tags rename <old> <new> [--description]
+[--dry-run] [--json]`, `notes tags describe <tag> "<text>"`, `notes tags lift-inline [--tag t]… [--dry-run] [--json]`
+(`tags::lift`: inline `#tags` into the frontmatter; a run at a line's start or end goes with its separator, a tag inside
+a sentence keeps its word) — `owner_only`, closed to sessions, skill runs and chat turns, and no direct commands. The
+news skills write their tag only into the frontmatter. The spotlight finds `#tag` (a group of
+tags, opening the Second Brain filtered), the Second Brain has a filter field (words and `#tag`s dim the rest) and tag
+chips; a waiting proposal is a hex badge beside the Dock's settings. The reading view leaves a note's frontmatter out and shows its `tags:` as chips at the top (a click opens the Second
+Brain filtered, `core/frontmatterTags.ts`).
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
@@ -1153,7 +1186,18 @@ balanced `{…}` that parses; a balanced `{…}` of prose is stepped over, a tru
 Ollama ignores the field. On the dashboard side `loadLatestSkillRun` reports the newer run it passed
 over (`skipped`), and the Mail, Calendar and Reminders tiles say so (`staleDigestNote`,
 now in `core/skillRun.ts`) instead of quietly showing an older digest. Bundled skills are
-seed-if-absent: an edited `SKILL.md` reaches an install through `skills reseed --force`.
+seed-if-absent: an edited `SKILL.md` reaches an install through the Skills Deck's settings, section "Bundled skills"
+(2026-10-29, `skills/bundled.rs`), or `skills reseed --force`. Every write of a bundled skill — the seed, an update,
+a forced reseed — records the SHA-256 of what it wrote in `~/.axiomata/bundled-skills.json` (beside the skills folder,
+so the registry never meets it). The installed copy is then compared with the bundled text and that record: equal to
+the bundled one is *up to date*; equal to the record only is *outdated*; neither is *changed by you*; no record and not
+the bundled one (seeded before the record existed) is *differs — may be yours*. The seed backfills the record for any
+copy equal to the bundled one; a copy seeded before the record that a later build has changed shows as "differs" once
+(owner's decision: rather ask once than overwrite an edit), and its update asks first. "Update all outdated" takes only outdated and missing ones; a copy that may be the
+owner's is replaced only after the question under its row (`bundled::update`'s `replace_own_edit` guards it in the
+core too), a linked skill folder is never written through, and a name outside `DEFAULT_SKILLS` is refused. The deck
+reads the state once at mount and shows a neutral notice ("N bundled skills have updates") that turns the tile to
+that section. `axiomata-cli skills bundled [--json]` prints the same list.
 
 ### Skills runner (`skills/`)
 
@@ -1343,8 +1387,8 @@ cross-fade into the layout; at motion Off it shows the end and the slider only �
 by the dashboard-centre background widget (since UX4 a Goldberg hive sphere, `graph/hive.ts`: notes as cells among dark
 unsettled ones, glowing by age, with skills/routines/newest notes as an icon rim) — Orbit is the fixed name for that background widget
 specifically, distinct from "Second Brain" (the full-screen view it opens into on click).
-The full view (`shell/SecondBrainView.svelte`) adds pan/zoom, search (title/path/area
-locally, note contents via `search_workspace`, debounced), and a detail panel (view / copy
+The full view (`shell/SecondBrainView.svelte`) adds pan/zoom, a filter field (title/path/area words and `#tag`s, the
+rest dimmed; see "Tags and links"), and a detail panel (view / copy
 path / fly-to / run skill / toggle routine). Import (`axiomata_core::importer` +
 `axiomata-cli import obsidian`) and single-note creation (`axiomata_core::notes`, the "New
 note" icon) both have the agent propose placement into one of the workspace's existing

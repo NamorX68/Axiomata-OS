@@ -103,6 +103,14 @@ export class InsertMode {
     this.session.keys = [];
   }
 
+  /** The cursor was put elsewhere from outside the session (a mouse click): as after an arrow key, what was typed
+   *  no longer repeats, and what comes next is an undo step of its own (Vim). */
+  movedFromOutside(): void {
+    if (!this.session) return;
+    this.breakRepeat();
+    this.restartGroup();
+  }
+
   enter(at: Pos, count: number, replace: boolean): void {
     if (this.host.readOnly()) return this.host.bell();
     // The change that started the session may have opened the group already (`c`, `o`).

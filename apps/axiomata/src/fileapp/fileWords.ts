@@ -114,9 +114,11 @@ function wordStartAt(line: string, col: number): number {
 /** `server` with the file's words added (or the words alone when there is no server, or when it fails). */
 export function withFileWords(server: CompletionPort | null, words: (at: Pos) => string[]): CompletionPort {
   return {
-    ask: async (at, trigger, again): Promise<CompletionAnswer> => {
-      const found = trigger === null ? words(at) : [];
+    ask: async (at, trigger, again, span): Promise<CompletionAnswer> => {
       const empty: CompletionAnswer = { items: [], incomplete: false };
+      // A note name or a tag (`CompletionPort.span`) is the server's alone: a file word is neither.
+      if (span) return server ? server.ask(at, trigger, again, span).catch(() => empty) : empty;
+      const found = trigger === null ? words(at) : [];
       const answer = server ? await server.ask(at, trigger, again).catch(() => empty) : empty;
       if (trigger !== null) return answer;
       const offered = new Set(answer.items.map((i) => i.label));
@@ -125,5 +127,6 @@ export function withFileWords(server: CompletionPort | null, words: (at: Pos) =>
     },
     resolve: (item) => (item.source === "file" || !server ? Promise.resolve(item) : server.resolve(item)),
     triggers: () => server?.triggers() ?? [],
+    span: server?.span ? (at) => server.span?.(at) ?? null : undefined,
   };
 }

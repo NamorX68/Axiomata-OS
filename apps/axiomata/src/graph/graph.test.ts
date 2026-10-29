@@ -13,7 +13,7 @@ import {
   RING,
   shortestTurn,
 } from "./layout";
-import { buildModel, glyphForArea, neighbours, regroup, searchNodes, type Palette } from "./model";
+import { buildModel, glyphForArea, hasTag, modelTags, neighbours, regroup, searchNodes, type Palette } from "./model";
 import { cellKey, NEIGHBOURS } from "./territory";
 
 const palette: Palette = {
@@ -350,6 +350,20 @@ describe("regroup / search / neighbours", () => {
     expect(searchNodes(m, "n1 work").has("file:Work/sub1/n1.md")).toBe(true);
     expect(searchNodes(m, "zzz").size).toBe(0);
     expect(searchNodes(m, "  ").size).toBe(0);
+  });
+
+  it("a #tag word filters by tag, nested tags included, and combines with text", () => {
+    const g = fixture();
+    g.files[0].tags = ["rust", "rust/async"];
+    g.files[1].tags = ["rust/async"];
+    g.files[2].tags = ["rusty"];
+    const m = buildModel(g, palette);
+    expect([...searchNodes(m, "#rust")].sort()).toEqual(["file:Dev/sub0/n0.md", "file:Dev/sub1/n1.md"]);
+    expect([...searchNodes(m, "#Rust/Async n1")]).toEqual(["file:Dev/sub1/n1.md"]);
+    expect(searchNodes(m, "#none").size).toBe(0);
+    expect(modelTags(m)).toEqual(["rust", "rust/async", "rusty"]);
+    expect(hasTag(["a/b"], "a")).toBe(true);
+    expect(hasTag(["ab"], "a")).toBe(false);
   });
 
   it("neighbours report direction", () => {

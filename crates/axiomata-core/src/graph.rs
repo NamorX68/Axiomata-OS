@@ -5,9 +5,9 @@
 //! the workspace `CLAUDE.md` as the hub.
 //!
 //! Built on the memory walker (same file set the router indexes). Files are
-//! capped at [`MAX_FILES`] and link extraction at [`MAX_LINK_SCAN_BYTES`] per
-//! file, so a huge vault yields a truncated-but-usable graph rather than a
-//! stalled UI.
+//! capped at [`MAX_FILES`] and link and tag extraction at [`MAX_LINK_SCAN_BYTES`]
+//! per file, so a huge vault yields a truncated-but-usable graph rather than a
+//! stalled UI. Each note is read once for its links, its tags and its `created:`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -27,8 +27,6 @@ use crate::skills;
 pub const MAX_FILES: usize = 5000;
 /// Bytes of a Markdown file scanned for links.
 pub const MAX_LINK_SCAN_BYTES: u64 = 256 * 1024;
-/// Bytes read from the top of a Markdown file to find its frontmatter `created:`.
-const FRONTMATTER_SCAN_BYTES: u64 = 4096;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphFile {
@@ -45,6 +43,11 @@ pub struct GraphFile {
     #[serde(default)]
     pub created: Option<DateTime<Utc>>,
     pub is_markdown: bool,
+    /// The note's tags, lower case and without `#`, its frontmatter's and its text's united, nested ones as `a/b`
+    /// (`docs/plans/tags-links.md` Q1, `crate::tags::detect`). Empty for anything but a Markdown note, and for the tag
+    /// list itself, whose every line names a tag.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,6 +107,8 @@ pub fn build(config: &Config, routines: Vec<Routine>) -> Result<WorkspaceGraph, 
     entries.truncate(MAX_FILES);
 
     let mut files = Vec::with_capacity(entries.len());
+    // Only each file's link targets are kept, not its text: 5000 files of 256 KiB held at once would be gigabytes.
+    let mut targets: HashMap<String, Vec<String>> = HashMap::new();
     let mut area_counts: BTreeMap<String, usize> = BTreeMap::new();
     for (area, entry) in &entries {
         let full = root.join(&entry.rel_path);
@@ -117,11 +122,16 @@ pub fn build(config: &Config, routines: Vec<Routine>) -> Result<WorkspaceGraph, 
             .as_ref()
             .and_then(|m| m.created().ok())
             .map(DateTime::<Utc>::from);
-        let stated = is_markdown
-            .then(|| read_head(&full, FRONTMATTER_SCAN_BYTES))
-            .flatten()
-            .and_then(|head| frontmatter_created(&head));
+        let text = (is_markdown || is_html(&entry.rel_path))
+            .then(|| read_head(&full, MAX_LINK_SCAN_BYTES))
+            .flatten();
+        let markdown_text = text.as_deref().filter(|_| is_markdown);
+        let stated = markdown_text.and_then(frontmatter_created);
         let created = [stated, born, modified].into_iter().flatten().min();
+        let tags = markdown_text
+            .filter(|_| !entry.rel_path.eq_ignore_ascii_case(crate::tags::TAGS_FILE))
+            .map(crate::tags::detect::note_tags)
+            .unwrap_or_default();
         files.push(GraphFile {
             path: entry.rel_path.clone(),
             area: area.clone(),
@@ -133,13 +143,22 @@ pub fn build(config: &Config, routines: Vec<Routine>) -> Result<WorkspaceGraph, 
             modified,
             created,
             is_markdown,
+            tags,
         });
+        if let Some(text) = text {
+            let found = if is_markdown {
+                link_targets(&text)
+            } else {
+                html_link_targets(&text)
+            };
+            targets.insert(entry.rel_path.clone(), found);
+        }
         if let Some(a) = area {
             *area_counts.entry(a.clone()).or_default() += 1;
         }
     }
 
-    let links = extract_links(root, &files);
+    let links = links_between(&files, |file| targets.remove(&file.path));
 
     let skills = skills::registry::list_skills()
         .unwrap_or_default()
@@ -175,7 +194,7 @@ pub fn build(config: &Config, routines: Vec<Routine>) -> Result<WorkspaceGraph, 
     })
 }
 
-fn file_stem(rel_path: &str) -> String {
+pub(crate) fn file_stem(rel_path: &str) -> String {
     let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
     name.rsplit_once('.')
         .map(|(stem, _)| stem)
@@ -189,6 +208,21 @@ fn file_stem(rel_path: &str) -> String {
 /// (case-insensitive) anywhere in the workspace. Unresolvable links are
 /// dropped; duplicates and self-links too.
 pub fn extract_links(root: &Path, files: &[GraphFile]) -> Vec<GraphLink> {
+    links_between(files, |file| {
+        let text = read_head(&root.join(&file.path), MAX_LINK_SCAN_BYTES)?;
+        Some(if file.is_markdown {
+            link_targets(&text)
+        } else {
+            html_link_targets(&text)
+        })
+    })
+}
+
+/// [`extract_links`] over link targets the caller found already (`targets_of` answers a file's raw targets once).
+fn links_between(
+    files: &[GraphFile],
+    mut targets_of: impl FnMut(&GraphFile) -> Option<Vec<String>>,
+) -> Vec<GraphLink> {
     let by_path: HashMap<String, &GraphFile> = files.iter().map(|f| (f.path.clone(), f)).collect();
     let mut by_stem: HashMap<String, Vec<&str>> = HashMap::new();
     for f in files {
@@ -224,13 +258,8 @@ pub fn extract_links(root: &Path, files: &[GraphFile]) -> Vec<GraphLink> {
     let mut seen = std::collections::HashSet::new();
     let mut links = Vec::new();
     for f in files.iter().filter(|f| f.is_markdown || is_html(&f.path)) {
-        let Some(text) = read_head(&root.join(&f.path), MAX_LINK_SCAN_BYTES) else {
+        let Some(targets) = targets_of(f) else {
             continue;
-        };
-        let targets = if f.is_markdown {
-            link_targets(&text)
-        } else {
-            html_link_targets(&text)
         };
         for target in targets {
             if let Some(to) = resolve(&f.path, &target)
@@ -250,7 +279,7 @@ pub fn extract_links(root: &Path, files: &[GraphFile]) -> Vec<GraphLink> {
 }
 
 /// `folder/../x.md` → `x.md`; keeps forward slashes; never escapes above "".
-fn normalise_rel(folder: &str, candidate: &str) -> String {
+pub(crate) fn normalise_rel(folder: &str, candidate: &str) -> String {
     let joined = if folder.is_empty() || candidate.starts_with('/') {
         candidate.trim_start_matches('/').to_string()
     } else {
@@ -419,6 +448,7 @@ mod tests {
                 modified: None,
                 created: None,
                 is_markdown: p.ends_with(".md"),
+                tags: Vec::new(),
             })
             .collect()
     }
@@ -597,8 +627,13 @@ mod tests {
         fs::create_dir_all(root.join("Dev")).unwrap();
         fs::write(root.join("CLAUDE.md"), "# hub").unwrap();
         fs::write(root.join("loose.md"), "# Loose\n[[One]]").unwrap();
-        fs::write(root.join("Dev/One.md"), "# One").unwrap();
-        fs::write(root.join("Dev/two.txt"), "plain").unwrap();
+        fs::write(
+            root.join("Dev/One.md"),
+            "---\ntags: [Rust]\n---\n# One\n#ki-news `#code`",
+        )
+        .unwrap();
+        fs::write(root.join("Dev/two.txt"), "plain #not").unwrap();
+        fs::write(root.join("TAGS.md"), "- #rust — Rust\n").unwrap();
         // SAFETY: serialized by `_guard`, see `paths::tests`.
         unsafe {
             std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
@@ -622,6 +657,9 @@ mod tests {
         );
         let one = graph.files.iter().find(|f| f.path == "Dev/One.md").unwrap();
         assert_eq!(one.title, "One");
+        assert_eq!(one.tags, vec!["ki-news", "rust"]);
+        let list = graph.files.iter().find(|f| f.path == "TAGS.md").unwrap();
+        assert!(list.tags.is_empty(), "the tag list names tags, it has none");
         assert!(one.is_markdown && one.bytes > 0 && one.modified.is_some());
         // Never later than the file's own times (G17): the earliest of what is known.
         assert!(one.created.is_some() && one.created <= one.modified);
@@ -631,6 +669,7 @@ mod tests {
             .find(|f| f.path == "Dev/two.txt")
             .unwrap();
         assert_eq!((txt.title.as_str(), txt.is_markdown), ("two", false));
+        assert!(txt.tags.is_empty());
         assert_eq!(
             graph.links,
             vec![GraphLink {
@@ -639,7 +678,7 @@ mod tests {
             }]
         );
         assert!(!graph.truncated);
-        assert_eq!(graph.total_files, 3, "router CLAUDE.md is not content");
+        assert_eq!(graph.total_files, 4, "router CLAUDE.md is not content");
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(home);
     }

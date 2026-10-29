@@ -373,6 +373,11 @@
   --ax-syntax-link: #7cb8ff;
   --ax-syntax-emphasis: #f2c79c;
   --ax-syntax-code: #9ad48a;
+  /* A note's wikilinks and tags (docs/plans/tags-links.md, TL2), derived so every theme has them: a wikilink in the
+     link colour, one into nothing faded, a tag in the type colour — neither is orange (the accent rule). */
+  --ax-syntax-wikilink: var(--ax-syntax-link);
+  --ax-syntax-wikilink-missing: color-mix(in srgb, var(--ax-syntax-link) 45%, transparent);
+  --ax-syntax-hashtag: var(--ax-syntax-type);
   /* The editor surface's own background and text: the app's, unless an editor theme (`editor-themes.css`) sets them. */
   --ax-editor-bg: var(--ax-surface-1);
   /* The theme's surfaces as they are here, at the root: a custom property resolves where it is declared, so these stay

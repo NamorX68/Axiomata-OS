@@ -12,6 +12,7 @@ import {
   routineItems,
   skillItems,
   suggestionItems,
+  tagItems,
   withContentHits,
 } from "./spotlightItems";
 
@@ -81,5 +82,22 @@ describe("spotlight items", () => {
     expect(merged[0].contentMatches).toBe(4);
     expect(merged[1]).toMatchObject({ id: "b/other.md", title: "other.md", subtitle: "b", detail: "the budget", contentMatches: 2 });
     expect(rankItems("budget", { file: merged }).map((r) => r.item.id)).toEqual(["a/notes.md", "b/other.md"]);
+  });
+
+  it("finds notes and the tag itself by #tag, and a tag opens the Second Brain filtered", () => {
+    const files = [
+      { path: "Dev/a.md", title: "Alpha", bytes: 1, tags: ["rust", "rust/async"] },
+      { path: "Dev/b.md", title: "Beta", bytes: 1, tags: ["rust"] },
+      { path: "c.md", title: "Gamma", bytes: 1 },
+    ] as GraphFile[];
+    const tags = tagItems(files);
+    expect(tags.map((t) => [t.title, t.subtitle])).toEqual([
+      ["#rust", "2 notes"],
+      ["#rust/async", "1 note"],
+    ]);
+    expect(tags[0].payload).toEqual({ type: "tag", tag: "rust" });
+    const rows = rankItems("#rust/async", { tag: tags, file: fileNameItems(files) });
+    expect(rows.map((r) => `${r.group}:${r.item.id}`)).toEqual(["tag:rust/async", "file:Dev/a.md"]);
+    expect(rankItems("#gamma", { file: fileNameItems(files) })).toHaveLength(0);
   });
 });

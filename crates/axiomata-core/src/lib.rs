@@ -54,6 +54,7 @@ pub mod session_mail;
 pub mod skills;
 pub mod spend;
 pub mod studio_spend;
+pub mod tags;
 pub mod terminal_settings;
 pub mod web_search;
 pub mod workspace;

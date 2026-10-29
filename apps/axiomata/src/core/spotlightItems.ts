@@ -15,6 +15,7 @@ export type SpotlightAction =
   | { type: "routines" }
   | { type: "kanban"; boardId?: number; cardId?: number }
   | { type: "file"; path: string }
+  | { type: "tag"; tag: string }
   | { type: "studio"; mode?: "editor" | "agents" | "flow"; projectId?: number };
 
 /** The slice of a module definition spotlight needs; a `ModuleDefinition` fits it. */
@@ -111,13 +112,27 @@ export function projectItems(projects: IdeProject[]): SpotlightItem[] {
 const baseName = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
 const dirName = (path: string): string => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 
-/** Every file of the workspace graph by name (its own title as a keyword): the search over names needs no round-trip. */
+/**
+ * Every file of the workspace graph by name, its own title and its tags (as `#tag`) as keywords: the search over names
+ * needs no round-trip, and `#rust` finds the notes tagged so (`docs/plans/tags-links.md` Q5).
+ */
 export function fileNameItems(files: GraphFile[]): SpotlightItem[] {
   return files.map((file) =>
     item("file", file.path, baseName(file.path), { type: "file", path: file.path }, {
       subtitle: dirName(file.path),
-      keywords: file.title,
+      keywords: [file.title, ...(file.tags ?? []).map((tag) => `#${tag}`)].join(" "),
     }),
+  );
+}
+
+/** Every tag the vault's notes carry, with how many carry it; choosing one shows them in the Second Brain (Q5). */
+export function tagItems(files: GraphFile[]): SpotlightItem[] {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    for (const tag of file.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([tag, count]) =>
+    item("tag", tag, `#${tag}`, { type: "tag", tag }, { subtitle: count === 1 ? "1 note" : `${count} notes` }),
   );
 }
 

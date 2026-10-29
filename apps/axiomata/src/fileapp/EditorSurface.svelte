@@ -96,6 +96,7 @@
   import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
   import { textClipPath } from "./textClip";
+  import { cellWidth } from "./cellWidth";
   import FindBar from "./FindBar.svelte";
   import Minimap from "./Minimap.svelte";
   import { lastFind, rememberFind } from "./findShared";
@@ -165,8 +166,16 @@
     diagnosticsInline?: boolean;
     /** What the language server says about the symbol at a position (ED6.2), as Markdown. */
     hoverAt?: (at: Pos) => Promise<string | null>;
-    /** ⌘-click (ED6.2, L7): go to the definition of the symbol there. */
-    onDefinitionAt?: (at: Pos) => void;
+    /**
+     * ⌘-click (ED6.2, L7): go to the definition of the symbol there — or follow a note's wikilink (TL2). `false`
+     * says nothing was there: the click places the cursor as a plain one would.
+     */
+    onDefinitionAt?: (at: Pos) => boolean | void;
+    /**
+     * Vi's `<C-o>`/`<C-i>` past the ends of this document's jump list (TL2): the owner's history across files;
+     * whether it went anywhere. Without it, or when it did not, the bell rings.
+     */
+    onJumpOut?: (dir: 1 | -1) => boolean;
     /** The language server's completion (ED6.4); without it the menu offers the file's words alone (#36). */
     completion?: CompletionPort | null;
     /** The language server's signature help (ED6.6); without it there is no hint. */
@@ -209,6 +218,7 @@
     diagnosticsInline = false,
     hoverAt,
     onDefinitionAt,
+    onJumpOut,
     completion = null,
     signature = null,
     codeActions = null,
@@ -376,12 +386,13 @@
 
   /** What Vi asks for: scrolling and the bell are the surface's; everything else the owner's. */
   function viEffect(effect: ViEffect): void {
-    if (effect.type === "bell") {
+    if (effect.type === "bell" || (effect.type === "jumpOut" && !onJumpOut?.(effect.dir))) {
       bell = true;
       clearTimeout(bellTimer);
       bellTimer = setTimeout(() => (bell = false), 150);
       return;
     }
+    if (effect.type === "jumpOut") return;
     if (effect.type === "scrollLines") {
       if (scroller) scroller.scrollTop += effect.delta * rowH;
       return;
@@ -1545,7 +1556,9 @@
     input.focus();
     const unit = e.detail >= 3 ? lineRange : e.detail === 2 ? wordRange : null;
     const start = posAt(e);
-    if (primaryHeld(e, $platform) && !e.altKey && !e.shiftKey && onDefinitionAt && !unit) return onDefinitionAt(start);
+    if (primaryHeld(e, $platform) && !e.altKey && !e.shiftKey && onDefinitionAt && !unit) {
+      if (onDefinitionAt(start) !== false) return;
+    }
     if (vi) return viMousedown(start);
     if (e.altKey && !unit) return altMousedown(start);
     const origin = unit ? unit(start) : { start, end: start };
@@ -1643,8 +1656,9 @@
 
   function measure(): void {
     if (!measurer) return;
-    const w = measurer.getBoundingClientRect().width / 64;
-    if (w > 0) charW = w;
+    // Layout pixels, not the drawn box: the panel around it may still be growing in (`cellWidth.ts`).
+    const w = cellWidth(measurer, 64);
+    if (w !== null) charW = w;
   }
 
   // Re-measure whenever the font changes, once the face has loaded.
@@ -2238,6 +2252,10 @@
   .tk-attribute { color: var(--ax-syntax-attribute); }
   .tk-heading { color: var(--ax-syntax-heading); }
   .tk-link { color: var(--ax-syntax-link); text-decoration: underline; }
+  /* A note's wikilinks and tags (TL2): a link into nothing is dimmed, a tag is no link. */
+  .tk-note-link { color: var(--ax-syntax-wikilink); text-decoration: underline; }
+  .tk-note-link-missing { color: var(--ax-syntax-wikilink-missing); text-decoration: underline dotted; }
+  .tk-note-tag { color: var(--ax-syntax-hashtag); }
   .tk-emphasis { color: var(--ax-syntax-emphasis); }
   .tk-code { color: var(--ax-syntax-code); }
   .tk-bracket-1 { color: var(--ax-editor-bracket-1); }

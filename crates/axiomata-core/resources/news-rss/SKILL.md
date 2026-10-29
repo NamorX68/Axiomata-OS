@@ -37,7 +37,7 @@ Steps:
      ```
      ---
      title: "KI-News (RSS)"
-     tags: [ki-news]
+     tags: [ai/news]
      ---
 
      # KI-News (RSS)
@@ -60,7 +60,7 @@ Steps:
 
      ### <title as the source has it>
 
-     <Source name> · <publication date YYYY-MM-DD> · [Original](<link>) · #ki-news
+     <Source name> · <publication date YYYY-MM-DD> · [Original](<link>)
 
      <2–4 sentences in German: what it is about, the key facts, any number, name or date it holds — not a
      restatement of the title.>
@@ -70,6 +70,8 @@ Steps:
 
      Order the items by source priority, then by date. The summary is German whatever the article's language.
    - Never invent a link or a fact: if the source does not say it, it is not in the entry.
+   - The file's tag stands only in its frontmatter (`tags: [ai/news]`): never write a `#tag` into the
+     text, not after an item and not on a line of its own.
 6. Do not touch `AGENTS.md` or `CLAUDE.md` files; the app regenerates the routers.
 
 Finish with a short report in German, exactly these three parts:

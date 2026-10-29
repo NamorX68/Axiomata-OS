@@ -19,14 +19,21 @@
     through `files:renamed`); a closed folder hovered for half a second opens.
     Pointer events, not HTML drag and drop, which the Tauri window may take for
     dropping files from Finder.
+  * **A renamed or moved note keeps its links** (`docs/plans/tags-links.md`,
+    V3): once a Markdown file of the vault (the workspace, or a project opened
+    on its folder) has its new name, the tree asks
+    `rename_note_links` (a dry run) how many `[[…]]` in other notes point at
+    it, and offers to update them; alias and `#Heading` stay as they are.
 -->
 <script lang="ts">
-  import type { FileRootInfo } from "../core/backend";
+  import { invokeBackend, type FileRootInfo, type RenameCount } from "../core/backend";
   import { messageOf } from "../core/errors";
+  import { toast } from "../core/toast";
   import { countTree, createFile, deleteTree, listDir, makeDir, renameEntry, type Listing } from "./backend";
   import type { FileRef } from "./tabs";
   import Icon from "../ui/Icon.svelte";
   import FileIcon from "./FileIcon.svelte";
+  import { invalidateNoteIndex, vaultPrefix, vaultRel } from "./noteIndex";
   import {
     baseName,
     expandedAfterDelete,
@@ -58,11 +65,22 @@
   /** A name being typed in place. */
   type Edit =
     | { kind: "new-file" | "new-dir"; root: string; dir: string; value: string }
-    | { kind: "rename"; root: string; rel: string; value: string };
+    | { kind: "rename"; root: string; rel: string; value: string; folder: boolean };
   let editing = $state<Edit | null>(null);
   let problem = $state<string | null>(null);
   /** Delete asked about: the entry and how many go with it. */
   let confirming = $state<{ root: string; rel: string; count: number | null } | null>(null);
+  /** A renamed note other notes link to (V3): the question whether their links follow. */
+  let relinking = $state<{
+    root: string;
+    from: string;
+    to: string;
+    /** `from` and `to` as paths of the vault, which `rename_note_links` speaks. */
+    oldRel: string;
+    newRel: string;
+    files: number;
+    links: number;
+  } | null>(null);
   /** The ⋯ / right-click menu. */
   let menu = $state<{ root: string; rel: string; kind: "root" | "dir" | "file"; x: number; y: number } | null>(null);
 
@@ -165,6 +183,7 @@
     }
     try {
       await renameEntry(from.root, from.rel, target.to);
+      void offerRelink(from.root, from.rel, target.to);
       expanded = expandedAfterRename(expanded, from.root, from.rel, target.to);
       if (!isOpen(dir.root, dir.rel)) expanded = [...expanded, folderKey(dir.root, dir.rel)];
     } catch (err) {
@@ -228,10 +247,10 @@
     editing = { kind, root, dir, value: "" };
   }
 
-  function startRename(root: string, rel: string): void {
+  function startRename(root: string, rel: string, folder: boolean): void {
     menu = null;
     problem = null;
-    editing = { kind: "rename", root, rel, value: baseName(rel) };
+    editing = { kind: "rename", root, rel, value: baseName(rel), folder };
   }
 
   async function startDelete(root: string, rel: string, isDir: boolean): Promise<void> {
@@ -259,6 +278,8 @@
         const to = joinRel(parentOf(edit.rel), name);
         if (to !== edit.rel) {
           await renameEntry(edit.root, edit.rel, to);
+          if (edit.folder) void sayFolderLinks(edit.root);
+          else void offerRelink(edit.root, edit.rel, to);
           expanded = expandedAfterRename(expanded, edit.root, edit.rel, to);
         }
         editing = null;
@@ -275,6 +296,48 @@
       problem = messageOf(err);
     }
   }
+
+  /** Whether the wikilinks to a note renamed from `from` to `to` should follow it (V3) — asked only when there are any. */
+  async function offerRelink(root: string, from: string, to: string): Promise<void> {
+    // Only a note stays a note: `rename_note_links` refuses a path that is no Markdown (a note renamed to `.txt`).
+    if (!/\.md$/i.test(from) || !/\.md$/i.test(to)) return;
+    const prefix = await vaultPrefix(root);
+    if (prefix === null) return;
+    invalidateNoteIndex();
+    const oldRel = vaultRel(prefix, from);
+    const newRel = vaultRel(prefix, to);
+    try {
+      const found = await invokeBackend<RenameCount>("rename_note_links", { oldRel, newRel, dryRun: true });
+      if (found.links > 0) relinking = { root, from, to, oldRel, newRel, ...found };
+    } catch (err) {
+      onError(`The links to ${baseName(from)} were not checked: ${messageOf(err)}`);
+    }
+  }
+
+  /** A renamed folder of the vault: its notes' links are not followed (`rename_note_links` takes one note) — say so. */
+  async function sayFolderLinks(root: string): Promise<void> {
+    if ((await vaultPrefix(root)) === null) return;
+    invalidateNoteIndex();
+    toast("Links into the renamed folder by path were not updated — links by note name still work", "info");
+  }
+
+  async function commitRelink(): Promise<void> {
+    const r = relinking;
+    if (!r) return;
+    relinking = null;
+    try {
+      const done = await invokeBackend<RenameCount>("rename_note_links", {
+        oldRel: r.oldRel,
+        newRel: r.newRel,
+        dryRun: false,
+      });
+      toast(`Updated ${plural(done.links, "link")} in ${plural(done.files, "note")}`, "info");
+    } catch (err) {
+      onError(`The links were not updated: ${messageOf(err)}`);
+    }
+  }
+
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   async function commitDelete(): Promise<void> {
     const c = confirming;
@@ -390,6 +453,13 @@
           <button type="button" onclick={() => (confirming = null)}>Cancel</button>
         </div>
       {/if}
+      {#if relinking && relinking.root === root && relinking.to === path}
+        <div class="row confirm" style:--depth={depth}>
+          <span>Update {plural(relinking.links, "link")} in {plural(relinking.files, "note")}?</span>
+          <button type="button" onclick={() => void commitRelink()}>Update</button>
+          <button type="button" onclick={() => (relinking = null)}>Keep</button>
+        </div>
+      {/if}
       {#if entry.kind === "dir" && isOpen(root, path)}
         {@render folder(root, path, depth + 1)}
       {/if}
@@ -463,7 +533,7 @@
       <button type="button" role="menuitem" onclick={() => startNew("new-dir", m.root, m.rel)}>New folder</button>
     {/if}
     {#if m.kind !== "root"}
-      <button type="button" role="menuitem" onclick={() => startRename(m.root, m.rel)}>Rename</button>
+      <button type="button" role="menuitem" onclick={() => startRename(m.root, m.rel, m.kind === "dir")}>Rename</button>
       <button type="button" role="menuitem" class="danger" onclick={() => void startDelete(m.root, m.rel, m.kind === "dir")}
         >Delete…</button
       >

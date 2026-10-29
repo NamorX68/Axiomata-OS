@@ -19,6 +19,11 @@
     editor; Markdown, HTML and SVG with a rendered view beside or instead of
     the source (⌘⇧V), opened on it when the owner opens to read; raster images
     as a picture; and a new note (`newNote`) that ⌘S files with `create_note`.
+  * **A note's wikilinks and tags** (`docs/plans/tags-links.md`, TL2): coloured
+    in the source, links in the reading view; ⌘-click, Vi's `gd` or a click
+    there follows a link (a link into nothing creates its note beside this
+    one), and every jump into another file is kept in the app-wide history
+    that ⌃- / ⌃⇧- walk (`jumpHistory.ts`). `[[` and `#` complete.
 -->
 <script lang="ts" module>
   /** What the owner shows about the open file (a title, the unsaved dot). */
@@ -44,6 +49,8 @@
   import { onMount, tick as nextTick, untrack, type Snippet } from "svelte";
 
   import { invokeBackend, listenBackend, type FileChange } from "../core/backend";
+  import { emit } from "../core/bus";
+  import type { NoteLinkRendering } from "../core/markdown";
   import { messageOf } from "../core/errors";
   import { hunksFromTexts } from "../editor/diff/hunks";
   import { DiffModel, textLines } from "../editor/diff/model";
@@ -52,7 +59,21 @@
   import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import { symbolsOf, type OutlineInfo } from "./outlineModel";
   import type { OutlineSymbol } from "../editor/syntax/outline";
-  import { fileBackend, type FileRemoved, type Formatted, type FileRenamed } from "./backend";
+  import { createFile, fileBackend, type FileRemoved, type Formatted, type FileRenamed } from "./backend";
+  import { jumpHistory, jumpKey, type JumpPlace } from "./jumpHistory";
+  import { noteCompletion } from "./noteCompletion";
+  import { noteMarkAt, withNoteMarks } from "./noteHighlight";
+  import {
+    invalidateNoteIndex,
+    loadNoteIndex,
+    loadTagList,
+    onNoteIndex,
+    peekNoteIndex,
+    rootRel,
+    vaultPrefix,
+    vaultRel,
+  } from "./noteIndex";
+  import { fileStem, headingLine, newNotePath, parseWikilink, type NoteMark } from "./noteLinks";
   import { markDirty } from "./dirtyFiles";
   import { foldKey, rememberedFolds, rememberFolds, updateRememberedFolds } from "./foldMemory";
   import DiffPanes from "./DiffPanes.svelte";
@@ -420,6 +441,8 @@
     await nextTick();
     if (line !== null) goToLine(line);
     else surface?.focus();
+    // Only the page shows: it takes the keys (⌃- back) the hidden source cannot.
+    if (viewMode === "preview") preview?.focus();
   }
 
   /**
@@ -487,7 +510,8 @@
   }
 
   export function focus(): void {
-    surface?.focus();
+    if (previewKind !== null && viewMode === "preview") preview?.focus();
+    else surface?.focus();
   }
 
   /**
@@ -589,7 +613,7 @@
    * The open file's completion (ED6.4), for the surface's menu: asked of its
    * server once the server is up — one that does not complete offers nothing.
    */
-  const completionPort = $derived.by((): CompletionPort | null => {
+  const serverCompletion = $derived.by((): CompletionPort | null => {
     const found = lspDoc;
     if (!found) return null;
     const { client } = found.connection;
@@ -601,6 +625,14 @@
       resolve: (item) => client.resolveCompletion(item),
       triggers: () => client.completionTriggers,
     };
+  });
+
+  /** In a vault note, notes after `[[` and tags after `#` beside the server's completion (TL2, Q4). */
+  const completionPort = $derived.by((): CompletionPort | null => {
+    const s = session;
+    const from = linkFrom;
+    if (!s || from === null) return serverCompletion;
+    return noteCompletion(serverCompletion, s.doc, from, { notes: loadNoteIndex, tagList: loadTagList });
   });
 
   /** The open file's signature help (ED6.6), for the surface's hint. */
@@ -792,8 +824,221 @@
       surface?.goTo(location.at);
       return;
     }
+    if (!s.untitled) jumpHistory.record(placeOf(s));
     if (onOpenFile) onOpenFile(file, location.at.line);
     else void open(file, location.at.line);
+  }
+
+  // ------------------------------------------------------------ wikilinks and tags (TL2)
+
+  /**
+   * Where the open file's root lies in the vault (`noteIndex.ts`, `vaultPrefix`): `""` for the workspace or a project
+   * opened on the vault's folder, a folder inside it for one opened deeper; `null` outside the vault. Asked once per
+   * opened file.
+   */
+  let vaultAt = $state.raw<{ session: FileSession; prefix: string } | null>(null);
+  $effect(() => {
+    const s = session;
+    if (!s || s.untitled || previewKind !== "markdown") return;
+    let stale = false;
+    void vaultPrefix(s.root).then((prefix) => {
+      if (!stale && session === s) vaultAt = prefix === null ? null : { session: s, prefix };
+    });
+    return () => {
+      stale = true;
+    };
+  });
+  /** The open file's place in the vault: its prefix there, if it is in the vault. */
+  const vaultPlace = $derived.by((): string | null => {
+    const s = session;
+    if (!s) return null;
+    if (s.root === "workspace" || s.untitled) return "";
+    return vaultAt?.session === s ? vaultAt.prefix : null;
+  });
+
+  /**
+   * Where this note's links start from: its path in the vault, `""` for a new note not filed yet (it will be a vault
+   * note); `null` for anything that is no Markdown of the vault — a code project's README has no wikilinks to follow.
+   */
+  const linkFrom = $derived.by((): string | null => {
+    const s = session;
+    const prefix = vaultPlace;
+    if (!s || previewKind !== "markdown" || prefix === null) return null;
+    return s.untitled ? "" : vaultRel(prefix, s.rel);
+  });
+
+  /** A note of the vault as a file to open: under this file's own root when it lies there (a vault project's tab). */
+  function vaultFile(path: string): { root: string; rel: string } {
+    const s = session;
+    const prefix = vaultPlace;
+    if (s && !s.untitled && s.root !== "workspace" && prefix !== null) {
+      const rel = rootRel(prefix, path);
+      if (rel !== null) return { root: s.root, rel };
+    }
+    return { root: "workspace", rel: path };
+  }
+
+  /** Bumped when the vault's notes were read again: dangling links are drawn anew. */
+  let notesTick = $state(0);
+
+  /** Whether the link `target` from the note `from` finds a note (`null` while the vault is not known yet). */
+  function linkExists(from: string, target: string): boolean | null {
+    if (!target) return true;
+    const index = peekNoteIndex();
+    return index ? index.resolve(from, target) !== null : null;
+  }
+
+  /** The surface's colours: in a note of the vault its links and tags over the grammar's. */
+  const shownHighlighter = $derived.by(() => {
+    const s = session;
+    const from = linkFrom;
+    if (!s || from === null || s.light) return highlighter;
+    return withNoteMarks(highlighter, s.doc, (m) => linkExists(from, m.target));
+  });
+
+  /** The reading view's links, for a vault note; a new object once the vault is known, so it renders again. */
+  const previewNotes = $derived.by((): NoteLinkRendering | null => {
+    void notesTick;
+    const from = linkFrom;
+    return from === null ? null : { exists: (target) => linkExists(from, target) };
+  });
+
+  /** Where the cursor of `s` is, as a place of the jump history. */
+  function placeOf(s: FileSession): JumpPlace {
+    const head = s.doc.selection.head;
+    return { root: s.root, rel: s.rel, line: head.line, col: head.col };
+  }
+
+  /** Another file at `line`: a tab where the host has them, else here (on its reading view from a reading view). */
+  function goToFile(file: { root: string; rel: string }, line: number | null, intent: OpenIntent = "edit"): void {
+    if (onOpenFile) onOpenFile(file, line ?? 0);
+    else void open(file, line, intent);
+  }
+
+  /** ⌃- / ⌃⇧- and Vi's `<C-o>`/`<C-i>` past this document's list: along the app-wide history; whether it moved. */
+  function walkHistory(dir: "back" | "forward"): boolean {
+    const s = session;
+    const place = dir === "back" ? jumpHistory.back(s && !s.untitled ? placeOf(s) : null) : jumpHistory.forward();
+    if (!place) return false;
+    if (s && place.root === s.root && place.rel === s.rel) {
+      surface?.goTo({ line: place.line, col: place.col });
+      if (viewMode !== "source") preview?.scrollToLine(place.line);
+    } else {
+      goToFile({ root: place.root, rel: place.rel }, place.line, viewMode === "preview" ? "read" : "edit");
+    }
+    return true;
+  }
+
+  /**
+   * ⌘-click and Vi's `gd` on a note's link or tag (TL2): follows it; whether there was one at `at`. Never in code
+   * (a fenced block, inline code, the frontmatter).
+   */
+  function followMarkAt(at: { line: number; col: number }): boolean {
+    const s = session;
+    // Outside the vault (a code project's README) a `#word` or `[[x]]` is no note's: the language server answers.
+    if (!s || linkFrom === null) return false;
+    const mark: NoteMark | null = noteMarkAt(s.doc, at);
+    if (!mark) return false;
+    if (mark.kind === "tag") showTag(mark.tag);
+    else void followLink(mark.target, mark.heading, "edit");
+    return true;
+  }
+
+  /** A tag was followed: the Second Brain, searching for it (its tag filter is TL3's). */
+  function showTag(tag: string): void {
+    emit("open-second-brain", { focus: null, query: `#${tag}` });
+  }
+
+  /**
+   * Follows a wikilink to `target` (at `heading`): the note it finds, a heading of this note (`[[#Heading]]`), or — a
+   * link into nothing — a new note beside this one, titled after the target (Q3). The place it left goes into the
+   * jump history first.
+   */
+  async function followLink(target: string, heading: string | null, intent: OpenIntent): Promise<void> {
+    const s = session;
+    const from = linkFrom;
+    if (!s) return;
+    // Where the jump starts, before anything is awaited: the cursor may move meanwhile.
+    const here = placeOf(s);
+    if (from === null) return void toast("Wikilinks lead to notes of the workspace", "info");
+    if (!target) {
+      const line = heading ? headingLine(s.doc.store.text(), heading) : null;
+      if (line === null) return void toast(`No heading “${heading ?? ""}” in this note`, "info");
+      if (!s.untitled) jumpHistory.record(here);
+      surface?.goTo({ line, col: 0 });
+      if (viewMode !== "source") preview?.scrollToLine(line);
+      return;
+    }
+    let index = await loadNoteIndex();
+    // A read that failed a while ago is not trusted for a click: the owner asks now, so ask the vault again.
+    if (!index) {
+      invalidateNoteIndex();
+      index = await loadNoteIndex();
+    }
+    if (session !== s) return;
+    if (!index) return void toast("The vault's notes could not be read", "danger");
+    const rel = index.resolve(from, target);
+    if (rel === null) {
+      const several = index.sameStem(target);
+      if (several.length > 1) {
+        const names = several.map((p) => p.replace(/\.md$/i, "")).join(", ");
+        return void toast(`“${target}” fits several notes — name its folder: ${names}`, "info");
+      }
+      return void createLinkedNote(s, from, target, here);
+    }
+    const file = vaultFile(rel);
+    let line: number | null = null;
+    if (heading) {
+      try {
+        line = headingLine((await fileBackend.read(file.root, file.rel)).content, heading);
+      } catch {
+        line = null;
+      }
+      if (session !== s) return;
+    }
+    if (!s.untitled) jumpHistory.record(here);
+    if (file.root === s.root && file.rel === s.rel) {
+      surface?.goTo({ line: line ?? 0, col: 0 });
+      if (viewMode !== "source" && line !== null) preview?.scrollToLine(line);
+      return;
+    }
+    goToFile(file, line, intent);
+  }
+
+  /** A link into nothing (Q3): its note, created beside `from` with the target as its title, then opened. */
+  async function createLinkedNote(s: FileSession, from: string, target: string, here: JumpPlace): Promise<void> {
+    if (s.untitled) return void toast("File this note first (⌘S) — a linked note is created beside it", "info");
+    const path = newNotePath(from, target);
+    if (!path) return void toast(`“${target}” is no usable file name`, "info");
+    const file = vaultFile(path);
+    try {
+      // `file_create` refuses to replace anything (`O_EXCL`); the title goes in against the version it made.
+      const version = await createFile(file.root, file.rel);
+      await fileBackend.write(file.root, file.rel, `# ${fileStem(path)}\n\n`, version);
+    } catch (err) {
+      return void toast(`Could not create ${path}: ${messageOf(err)}`, "danger");
+    }
+    invalidateNoteIndex();
+    void loadNoteIndex();
+    if (session !== s) return;
+    jumpHistory.record(here);
+    toast(`Created ${path}`, "info");
+    // Below the title, ready to write — in the source, since a new note has nothing to read yet.
+    goToFile(file, 2, "edit");
+  }
+
+  /** A click on a wikilink in the reading view (its inner text `Target#Heading|alias`). */
+  function onPreviewLink(inner: string): void {
+    const { target, heading } = parseWikilink(inner);
+    void followLink(target, heading, "read");
+  }
+
+  /** ⌘-click: a note's link or tag first, else the language server's definition; `false` lets the click through. */
+  function definitionAt(at: { line: number; col: number }): boolean {
+    if (followMarkAt(at)) return true;
+    if (!lspDoc) return false;
+    void goToDefinition(at);
+    return true;
   }
 
   /** The word at `at` in quotes (the list's title), `null` on no word. */
@@ -1007,6 +1252,8 @@
   function cyclePreview(): void {
     if (!previewKind) return;
     viewMode = nextViewMode(viewMode);
+    // The keys follow what shows: the page alone, or the source again.
+    void nextTick().then(() => focus());
   }
 
   /** The source scrolled: the preview follows, unless this is the echo of it following. */
@@ -1047,12 +1294,15 @@
       onQuit?.();
     } else if (effect.type === "fileMark") {
       const [root, rel] = effect.file.split("\0");
+      if (root && rel && session && !session.untitled) jumpHistory.record(placeOf(session));
       if (root && rel) void open({ root, rel }, effect.at.line);
     } else if (effect.type === "problem") {
       goToProblem(effect.dir);
     } else if (effect.type === "definition" || effect.type === "hover" || effect.type === "locations") {
       // Vi's keys exist for every file; say why nothing happens where no server runs.
       const head = session?.doc.selection.head ?? null;
+      // `gd` on a note's link follows it (TL2), before any server is asked.
+      if (effect.type === "definition" && head && followMarkAt(head)) return;
       if (!lspDoc) toast("No language server for this file", "info");
       else if (effect.type === "definition") void goToDefinition(head);
       else if (effect.type === "locations") void goToLocations(effect.kind, head);
@@ -1110,6 +1360,14 @@
    * ⌘+ ⌘- ⌘0 resize the text of the floating window, and only there.
    */
   function onKeydownCapture(e: KeyboardEvent): void {
+    // ⌃- / ⌃⇧- (Ctrl+Alt+← / → off the Mac): the app-wide jump history (TL2), from the source and the reading view.
+    const walk = jumpKey(e, $platform);
+    if (walk && (session || image)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!walkHistory(walk)) toast(walk === "back" ? "Nothing to go back to" : "Nothing to go forward to", "info");
+      return;
+    }
     const c = chord(e, $platform);
     if (!c.primary || c.alt || c.typing) return;
     const zoomStep = compact ? panelZoomStep(e, $platform) : null;
@@ -1135,6 +1393,11 @@
 
   onMount(() => {
     void ensureEditorSettingsLoaded();
+    // The vault's notes were read again: links into nothing are drawn (and rendered) anew.
+    const stopNotes = onNoteIndex(() => {
+      notesTick++;
+      outside++;
+    });
     const unlisten = listenBackend<FileChange>("files:changed", (change) => {
       const s = session;
       void s?.onExternalChange(change).then((shown) => {
@@ -1165,6 +1428,7 @@
     });
     window.addEventListener("blur", saveOnLeave);
     return () => {
+      stopNotes();
       window.removeEventListener("blur", saveOnLeave);
       void unlisten.then((off) => off());
       void unlistenRenamed.then((off) => off());
@@ -1236,7 +1500,7 @@
             {settings}
             fileName={session.fileName}
             revision={outside}
-            {highlighter}
+            highlighter={shownHighlighter}
             onTopLine={previewKind === "markdown" && viewMode === "split" ? onSourceTopLine : undefined}
             {onEffect}
             {onChange}
@@ -1251,7 +1515,8 @@
             diagnosticsInline={$editorSettings.diagnosticsInline}
             readOnly={session.readOnly}
             hoverAt={lspDoc ? hoverAt : undefined}
-            onDefinitionAt={lspDoc ? (at) => void goToDefinition(at) : undefined}
+            onDefinitionAt={definitionAt}
+            onJumpOut={(dir) => walkHistory(dir === -1 ? "back" : "forward")}
             completion={completionPort}
             signature={signaturePort}
             codeActions={codeActionPort}
@@ -1308,6 +1573,9 @@
               root={session.root}
               rel={session.rel}
               onTopLine={viewMode === "split" ? onPreviewTopLine : undefined}
+              notes={previewNotes}
+              onNoteLink={onPreviewLink}
+              onTag={showTag}
             />
           {:else if previewKind === "html"}
             <HtmlPreview
