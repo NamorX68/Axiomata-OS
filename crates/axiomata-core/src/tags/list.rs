@@ -185,10 +185,15 @@ pub fn save(config: &Config, entries: Vec<TagEntry>) -> Result<Vec<TagEntry>, Ax
 ///
 /// As [`load`] and [`save`].
 pub fn add(config: &Config, tag: &str, description: &str) -> Result<bool, AxiomataError> {
-    let mut entries = load(config)?;
     let Some(tag) = normalise(tag) else {
         return Err(refused(format!("{tag:?} is no tag")));
     };
+    // Written only while the file is as read: an accepted proposal never drops a tag the owner saved meanwhile.
+    load(config)?;
+    let Some(file) = workspace::read(config, TAGS_FILE)? else {
+        return Err(refused("TAGS.md went away while a tag was added"));
+    };
+    let mut entries = parse(&file.content);
     if entries.iter().any(|entry| entry.tag == tag) {
         return Ok(false);
     }
@@ -196,7 +201,8 @@ pub fn add(config: &Config, tag: &str, description: &str) -> Result<bool, Axioma
         tag,
         description: description.to_owned(),
     });
-    save(config, entries)?;
+    let entries = validated(entries)?;
+    workspace::write(config, TAGS_FILE, &render(&entries), Some(&file.version))?;
     Ok(true)
 }
 

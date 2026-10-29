@@ -882,7 +882,10 @@ export interface PlannedNote {
   note: string;
   tags: string[];
   related: string[];
+  /** Proposed to the owner when the plan is written; set on the note once accepted. */
   proposed: string[];
+  /** Why the run left the note out, if it did. */
+  skipped?: string | null;
 }
 
 /** The vault run as Settings → Workspace → Tags shows it (`vault_tagging_status`). */

@@ -4,7 +4,16 @@
  * tried in `vite` without the Rust side. `devmock.ts` hands every tag command here.
  */
 
-import type { PlannedNote, RenameCount, TagAnswer, TagEntry, TagProposal, VaultEstimate, VaultPhase, VaultTagging } from "./backend";
+import type {
+  PlannedNote,
+  RenameCount,
+  TagAnswer,
+  TagEntry,
+  TagProposal,
+  VaultEstimate,
+  VaultPhase,
+  VaultTagging,
+} from "./backend";
 
 let list: TagEntry[] = [
   { tag: "ki-modelle", description: "AI models and their releases, collected by the model-news skill" },
@@ -73,10 +82,15 @@ export function mockTagCommand(cmd: string, args: Record<string, unknown>): { va
     case "get_tag_list":
       return { value: sorted(list) };
     case "save_tag_list": {
-      const entries = (args.entries as TagEntry[]).map((e) => ({ tag: e.tag.replace(/^#/, "").toLowerCase(), description: e.description }));
+      const entries = (args.entries as TagEntry[]).map((e) => ({
+        tag: e.tag.replace(/^#/, "").toLowerCase(),
+        description: e.description,
+      }));
       const seen = new Set<string>();
       for (const entry of entries) {
-        if (!/^[\p{L}\p{N}_\-/]+$/u.test(entry.tag) || /^[\d/]+$/.test(entry.tag)) throw new Error(`tags: "${entry.tag}" is no tag`);
+        if (!/^[\p{L}\p{N}_\-/]+$/u.test(entry.tag) || /^[\d/]+$/.test(entry.tag)) {
+          throw new Error(`tags: "${entry.tag}" is no tag`);
+        }
         if (seen.has(entry.tag)) throw new Error(`tags: #${entry.tag} is on the list twice`);
         seen.add(entry.tag);
       }
@@ -92,10 +106,16 @@ export function mockTagCommand(cmd: string, args: Record<string, unknown>): { va
       proposals = proposals.filter((p) => p.id !== id);
       const accepted = Boolean(args.accept);
       if (accepted && !list.some((e) => e.tag === proposal.tag)) {
-        const description = typeof args.description === "string" && args.description.trim() ? args.description.trim() : proposal.description;
+        const typed = typeof args.description === "string" ? args.description.trim() : "";
+        const description = typed || proposal.description;
         list = sorted([...list, { tag: proposal.tag, description }]);
       }
-      const answer: TagAnswer = { tag: proposal.tag, accepted, notes_tagged: accepted ? proposal.notes.length : 0, notes_failed: [] };
+      const answer: TagAnswer = {
+        tag: proposal.tag,
+        accepted,
+        notes_tagged: accepted ? proposal.notes.length : 0,
+        notes_failed: [],
+      };
       return { value: answer };
     }
     case "rename_tag": {
@@ -105,7 +125,9 @@ export function mockTagCommand(cmd: string, args: Record<string, unknown>): { va
       if (!args.dryRun) {
         list = sorted(
           list
-            .map((e) => (e.tag === old || e.tag.startsWith(`${old}/`) ? { ...e, tag: next + e.tag.slice(old.length) } : e))
+            .map((e) =>
+              e.tag === old || e.tag.startsWith(`${old}/`) ? { ...e, tag: next + e.tag.slice(old.length) } : e,
+            )
             .filter((e, i, all) => all.findIndex((o) => o.tag === e.tag) === i),
         );
       }
@@ -125,14 +147,26 @@ export function mockTagCommand(cmd: string, args: Record<string, unknown>): { va
       const phase = args.phase as VaultPhase;
       if (phase === "notes") {
         plan = [
-          { note: "Entwicklung/Rust/Entwicklung Notiz 1.md", tags: ["rust"], related: ["Entwicklung Notiz 4"], proposed: [] },
+          {
+            note: "Entwicklung/Rust/Entwicklung Notiz 1.md",
+            tags: ["rust"],
+            related: ["Entwicklung Notiz 4"],
+            proposed: [],
+          },
           { note: "KI/KI Notiz 2.md", tags: ["ki-news"], related: [], proposed: ["ki/agenten"] },
           { note: "Persönlich/Persönlich Notiz 1.md", tags: [], related: [], proposed: [] },
         ];
       } else {
         proposals = [
           ...proposals,
-          { id: 90, tag: "werkzeuge", description: "Tools and their setup", notes: [], proposed_by: "a skill run", proposed_at: new Date().toISOString() },
+          {
+            id: 90,
+            tag: "werkzeuge",
+            description: "Tools and their setup",
+            notes: [],
+            proposed_by: "a skill run",
+            proposed_at: new Date().toISOString(),
+          },
         ];
       }
       vaultPhase = null;

@@ -25,7 +25,9 @@ use crate::error::AxiomataError;
 /// The bundled skill that does the run.
 pub const SKILL: &str = "vault-tagging";
 
-/// Notes the skill is given per `todo` call: a batch it can keep in mind; it asks again for the next.
+/// Notes the skill is given per `todo` call in the notes step: a batch it can keep in mind; it asks again for the next.
+/// The list step gets every note at once — it only needs their paths to choose what to read, and nothing marks a note
+/// as read there.
 pub const TODO_BATCH: usize = 40;
 
 /// Which step a vault run is in.
@@ -119,8 +121,8 @@ pub fn taggable_notes(config: &Config) -> Result<Vec<NoteSize>, AxiomataError> {
     Ok(notes)
 }
 
-/// What `notes tags todo` tells the skill: the step, and the notes still to do in it (for the list, all of them; for
-/// the notes, those without a plan yet), at most [`TODO_BATCH`].
+/// What `notes tags todo` tells the skill: the step, and the notes still to do in it (for the list, all of them at
+/// once; for the notes, those without a plan or a skip yet, at most [`TODO_BATCH`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Todo {
     pub phase: Option<Phase>,
@@ -151,10 +153,15 @@ pub fn todo(config: &Config, db: &Mutex<Connection>) -> Result<Todo, AxiomataErr
             .filter(|path| !planned.contains(&path.to_lowercase()))
             .collect(),
     };
-    let more = left.len().saturating_sub(TODO_BATCH);
+    let batch = if phase == Some(Phase::List) {
+        left.len()
+    } else {
+        TODO_BATCH
+    };
+    let more = left.len().saturating_sub(batch);
     Ok(Todo {
         phase,
-        notes: left.into_iter().take(TODO_BATCH).collect(),
+        notes: left.into_iter().take(batch).collect(),
         more,
     })
 }
@@ -177,32 +184,75 @@ pub struct PlannedNote {
     pub tags: Vec<String>,
     /// Link names it would get under `## Related`.
     pub related: Vec<String>,
-    /// Tags it asked for that are not on the list (proposed; set only once the owner accepts one).
+    /// Tags it asked for that are not on the list: proposed to the owner when the plan is written, and set on the note
+    /// once the owner accepts one.
     pub proposed: Vec<String>,
+    /// Why the run left the note out (a name not safe on a command line, a note it could not read), if it did.
+    pub skipped: Option<String>,
 }
 
 /// Records what a dry run of `notes tag` would set, while the run is in its notes step; outside of it a dry run
-/// records nothing. Returns whether it recorded.
+/// records nothing. `proposals` are the dry run's own `--propose` pairs, so a proposed tag keeps its description until
+/// the plan is written. Returns whether it recorded.
 ///
 /// # Errors
 ///
 /// The database fails.
-pub fn record(db: &Connection, outcome: &TagOutcome) -> Result<bool, AxiomataError> {
+pub fn record(
+    db: &Connection,
+    outcome: &TagOutcome,
+    proposals: &[(String, String)],
+) -> Result<bool, AxiomataError> {
     if phase(db)? != Some(Phase::Notes) {
         return Ok(false);
     }
+    let pairs: Vec<(String, String)> = outcome
+        .proposed
+        .iter()
+        .map(|tag| {
+            let description = proposals
+                .iter()
+                .find(|(raw, _)| super::detect::normalise(raw).as_deref() == Some(tag.as_str()))
+                .map(|(_, description)| description.clone())
+                .unwrap_or_default();
+            (tag.clone(), description)
+        })
+        .collect();
     let json = |list: &[String]| serde_json::to_string(list).unwrap_or_else(|_| "[]".into());
     db.execute(
-        "INSERT INTO tag_plan (note, tags, related, proposed, planned_at) VALUES (?1, ?2, ?3, ?4, ?5) \
+        "INSERT INTO tag_plan (note, tags, related, proposed, proposals, skipped, planned_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6) \
          ON CONFLICT(note) DO UPDATE SET tags = excluded.tags, related = excluded.related, \
-         proposed = excluded.proposed, planned_at = excluded.planned_at",
+         proposed = excluded.proposed, proposals = excluded.proposals, skipped = NULL, \
+         planned_at = excluded.planned_at",
         params![
             outcome.note,
             json(&outcome.tagged),
             json(&outcome.related),
             json(&outcome.proposed),
+            serde_json::to_string(&pairs).unwrap_or_else(|_| "[]".into()),
             Utc::now().to_rfc3339()
         ],
+    )?;
+    Ok(true)
+}
+
+/// Records that the run left `note` out, and why, so the notes step can finish without it (the preview shows it).
+/// Only in the notes step; returns whether it recorded.
+///
+/// # Errors
+///
+/// The database fails.
+pub fn record_skip(db: &Connection, note: &str, reason: &str) -> Result<bool, AxiomataError> {
+    if phase(db)? != Some(Phase::Notes) {
+        return Ok(false);
+    }
+    let reason: String = super::list::one_line(reason);
+    db.execute(
+        "INSERT INTO tag_plan (note, skipped, planned_at) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(note) DO UPDATE SET tags = '[]', related = '[]', proposed = '[]', proposals = '[]', \
+         skipped = excluded.skipped, planned_at = excluded.planned_at",
+        params![note, reason, Utc::now().to_rfc3339()],
     )?;
     Ok(true)
 }
@@ -214,7 +264,7 @@ pub fn record(db: &Connection, outcome: &TagOutcome) -> Result<bool, AxiomataErr
 /// The database fails.
 pub fn plan(db: &Connection) -> Result<Vec<PlannedNote>, AxiomataError> {
     let mut stmt =
-        db.prepare("SELECT note, tags, related, proposed FROM tag_plan ORDER BY note")?;
+        db.prepare("SELECT note, tags, related, proposed, skipped FROM tag_plan ORDER BY note")?;
     let parse = |text: String| serde_json::from_str::<Vec<String>>(&text).unwrap_or_default();
     let rows = stmt.query_map([], |row| {
         Ok(PlannedNote {
@@ -222,6 +272,7 @@ pub fn plan(db: &Connection) -> Result<Vec<PlannedNote>, AxiomataError> {
             tags: parse(row.get(1)?),
             related: parse(row.get(2)?),
             proposed: parse(row.get(3)?),
+            skipped: row.get(4)?,
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -249,35 +300,74 @@ pub struct Applied {
 }
 
 /// Writes the plan into the notes — the owner's step after the preview — each through `notes tag`'s own narrow path
-/// (tags from the list as it is now, related links that still resolve), then clears it. Proposed tags are not set:
-/// they wait for the owner's answer.
+/// (tags from the list as it is now, related links that still resolve, the planned proposals made now with the note,
+/// so an accepted one is set there). A written, unchanged or skipped note leaves the plan; one that failed stays in it
+/// for another try. The run's step ends either way.
 ///
 /// # Errors
 ///
 /// The database fails.
 pub fn apply(config: &Config, db: &Mutex<Connection>) -> Result<Applied, AxiomataError> {
-    let planned = {
-        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+    let lock = || db.lock().unwrap_or_else(|poison| poison.into_inner());
+    let planned: Vec<(PlannedNote, Vec<(String, String)>)> = {
+        let db = lock();
+        let proposals = planned_proposals(&db)?;
         plan(&db)?
+            .into_iter()
+            .map(|entry| {
+                let pairs = proposals.get(&entry.note).cloned().unwrap_or_default();
+                (entry, pairs)
+            })
+            .collect()
     };
     let mut applied = Applied::default();
-    for entry in planned {
-        let request = TagRequest {
-            note: entry.note.clone(),
-            tags: entry.tags,
-            related: entry.related,
-            proposals: Vec::new(),
-            dry_run: false,
+    for (entry, proposals) in planned {
+        let done = if entry.skipped.is_some() {
+            true
+        } else {
+            let request = TagRequest {
+                note: entry.note.clone(),
+                tags: entry.tags,
+                related: entry.related,
+                proposals,
+                dry_run: false,
+            };
+            match note::tag_note(config, db, "the vault run", &request) {
+                Ok(outcome) => {
+                    if outcome.written {
+                        applied.written += 1;
+                    } else {
+                        applied.unchanged += 1;
+                    }
+                    true
+                }
+                Err(err) => {
+                    applied.failed.push(format!("{}: {err}", entry.note));
+                    false
+                }
+            }
         };
-        match note::tag_note(config, db, "the vault run", &request) {
-            Ok(outcome) if outcome.written => applied.written += 1,
-            Ok(_) => applied.unchanged += 1,
-            Err(err) => applied.failed.push(format!("{}: {err}", entry.note)),
+        if done {
+            lock().execute("DELETE FROM tag_plan WHERE note = ?1", [&entry.note])?;
         }
     }
-    let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
-    discard(&db)?;
+    set_phase(&lock(), None)?;
     Ok(applied)
+}
+
+/// The planned proposals as `[tag, description]` pairs, by note.
+fn planned_proposals(
+    db: &Connection,
+) -> Result<std::collections::HashMap<String, Vec<(String, String)>>, AxiomataError> {
+    let mut stmt = db.prepare("SELECT note, proposals FROM tag_plan")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|(note, json)| (note, serde_json::from_str(&json).unwrap_or_default()))
+        .collect())
 }
 
 /// What a step is expected to cost, before the owner starts it.
@@ -388,8 +478,9 @@ mod tests {
             ..TagRequest::default()
         };
         let outcome = note::tag_note(&config, &db, "t", &dry).unwrap();
+        let pairs = vec![("neu".to_string(), "New things".to_string())];
         assert!(
-            !record(&db.lock().unwrap(), &outcome).unwrap(),
+            !record(&db.lock().unwrap(), &outcome, &pairs).unwrap(),
             "no run, no plan"
         );
 
@@ -400,8 +491,12 @@ mod tests {
             vec!["A/one.md", "A/two.md"],
             "Kanban/ and TAGS.md are no notes to tag"
         );
-        assert!(record(&db.lock().unwrap(), &outcome).unwrap());
-        assert_eq!(todo(&config, &db).unwrap().notes, vec!["A/two.md"]);
+        assert!(record(&db.lock().unwrap(), &outcome, &pairs).unwrap());
+        assert!(record_skip(&db.lock().unwrap(), "A/two.md", "name not safe").unwrap());
+        assert!(
+            todo(&config, &db).unwrap().notes.is_empty(),
+            "a skipped note counts as done"
+        );
         let planned = plan(&db.lock().unwrap()).unwrap();
         assert_eq!(planned[0].tags, vec!["rust"]);
         assert_eq!(planned[0].related, vec!["two"]);
@@ -412,17 +507,51 @@ mod tests {
             "the preview wrote nothing"
         );
 
+        assert!(
+            super::super::proposals::open(&db.lock().unwrap())
+                .unwrap()
+                .is_empty(),
+            "the preview proposed nothing"
+        );
         let applied = apply(&config, &db).unwrap();
         assert_eq!(applied.written, 1);
+        assert!(applied.failed.is_empty());
         assert_eq!(
             fs::read_to_string(root.join("A/one.md")).unwrap(),
             "---\ntags:\n  - rust\n---\n# One\n\n## Related\n\n- [[two]]\n"
         );
         let db = db.lock().unwrap();
         assert!(plan(&db).unwrap().is_empty() && phase(&db).unwrap().is_none());
-        assert!(
-            super::super::proposals::open(&db).unwrap().is_empty(),
-            "the preview proposed nothing"
+        let proposed = super::super::proposals::open(&db).unwrap();
+        assert_eq!(proposed.len(), 1, "writing the plan makes its proposals");
+        assert_eq!(proposed[0].description, "New things");
+        assert_eq!(proposed[0].notes, vec!["A/one.md".to_string()]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_list_step_gets_every_note_and_a_failed_note_stays_planned() {
+        let (root, config, db) = fixture();
+        for n in 0..(TODO_BATCH + 5) {
+            fs::write(root.join(format!("A/n{n:02}.md")), "# N\n").unwrap();
+        }
+        set_phase(&db.lock().unwrap(), Some(Phase::List)).unwrap();
+        let all = todo(&config, &db).unwrap();
+        assert_eq!((all.notes.len(), all.more), (TODO_BATCH + 7, 0));
+        set_phase(&db.lock().unwrap(), Some(Phase::Notes)).unwrap();
+        assert_eq!(todo(&config, &db).unwrap().notes.len(), TODO_BATCH);
+        let outcome = TagOutcome {
+            note: "A/gone.md".into(),
+            tagged: vec!["rust".into()],
+            ..TagOutcome::default()
+        };
+        record(&db.lock().unwrap(), &outcome, &[]).unwrap();
+        let applied = apply(&config, &db).unwrap();
+        assert_eq!(applied.failed.len(), 1);
+        assert_eq!(
+            plan(&db.lock().unwrap()).unwrap().len(),
+            1,
+            "kept for another try"
         );
         let _ = fs::remove_dir_all(root);
     }

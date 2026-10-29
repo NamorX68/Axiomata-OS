@@ -22,6 +22,8 @@ describe("tag proposals", () => {
     expect(tagProblem("a b", list)).toMatch(/Letters/);
     expect(tagProblem("2026", list)).toMatch(/digits/);
     expect(tagProblem("a//b", list)).toMatch(/between/);
+    expect(tagProblem("_x", list)).toMatch(/Start/);
+    expect(tagProblem("-x", list)).toMatch(/Start/);
     expect(tagProblem("Rust", list)).toMatch(/already/);
     expect(tagProblem("rust", list, "rust")).toBeNull();
     expect(tagProblem("x".repeat(65), list)).toMatch(/64/);

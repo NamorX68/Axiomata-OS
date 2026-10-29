@@ -60,12 +60,14 @@
 
   async function apply() {
     if (!status || status.plan.length === 0) return;
-    if (!confirm(`Write the planned tags and links into ${status.plan.length} notes? Only their tags: and ## Related change.`)) return;
+    const question = `Write the planned tags and links into ${status.plan.length} notes? Only their tags: and ## Related change.`;
+    if (!confirm(question)) return;
     busy = true;
     try {
       const done = await invokeBackend<VaultApplied>("vault_tagging_apply");
       toast(`Written into ${done.written} notes${done.unchanged ? `, ${done.unchanged} unchanged` : ""}`, "info");
-      for (const failure of done.failed.slice(0, 5)) toast(failure, "warning");
+      // The failed notes stay in the preview for another try; a few are named here.
+      if (done.failed.length > 0) toast(`${done.failed.length} notes not written (kept in the preview): ${done.failed[0]}`, "warning");
       await load();
     } catch (err) {
       toast(`Writing failed: ${String(err)}`, "danger");
@@ -141,8 +143,16 @@
           <span class="what">
             {#each row.tags as tag (tag)}<span class="chip">#{tag}</span>{/each}
             {#each row.related as name (name)}<span class="link">[[{name}]]</span>{/each}
-            {#each row.proposed as tag (tag)}<span class="chip proposed" title="Proposed; set once you accept it">#{tag}?</span>{/each}
-            {#if row.tags.length === 0 && row.related.length === 0 && row.proposed.length === 0}<span class="meta">nothing</span>{/if}
+            {#each row.proposed as tag (tag)}
+              <span class="chip proposed" title="Proposed to you when the plan is written; set once you accept it">
+                #{tag}?
+              </span>
+            {/each}
+            {#if row.skipped}
+              <span class="meta">left out: {row.skipped}</span>
+            {:else if row.tags.length === 0 && row.related.length === 0 && row.proposed.length === 0}
+              <span class="meta">nothing</span>
+            {/if}
           </span>
         </li>
       {/each}

@@ -159,6 +159,23 @@ pub fn open(db: &Connection) -> Result<Vec<TagProposal>, AxiomataError> {
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Closes the open proposals of tags that are on the list now — the owner added or renamed one by hand — so the badge
+/// does not ask about a tag already answered. Returns how many it closed; their notes are not tagged by this.
+///
+/// # Errors
+///
+/// The database fails.
+pub fn settle_listed(db: &Connection, listed: &[String]) -> Result<usize, AxiomataError> {
+    let mut closed = 0;
+    for tag in listed {
+        closed += db.execute(
+            "UPDATE tag_proposals SET decision = 'accepted', decided_at = ?1 WHERE tag = ?2 AND decision IS NULL",
+            params![Utc::now().to_rfc3339(), tag],
+        )?;
+    }
+    Ok(closed)
+}
+
 /// How many proposals wait: the number on the waiting badge.
 ///
 /// # Errors
@@ -328,6 +345,20 @@ mod tests {
             answer(&db_mutex, &config, id, true, None).is_err(),
             "answered once"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_tag_put_on_the_list_by_hand_settles_its_proposal() {
+        let (root, _config, db) = fixture();
+        let db = db.lock().unwrap();
+        propose(&db, "neu", "", Some("A/one.md"), "skill").unwrap();
+        propose(&db, "other", "", None, "skill").unwrap();
+        assert_eq!(
+            settle_listed(&db, &["neu".to_string(), "rust".to_string()]).unwrap(),
+            1
+        );
+        assert_eq!(open(&db).unwrap()[0].tag, "other");
         let _ = fs::remove_dir_all(root);
     }
 

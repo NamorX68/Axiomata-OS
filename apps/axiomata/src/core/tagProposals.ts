@@ -53,6 +53,7 @@ export function tagProblem(raw: string, list: readonly TagEntry[], except?: stri
   if (tag.length > 64) return "At most 64 characters.";
   if (!/^[\p{L}\p{N}_\-/]+$/u.test(tag)) return "Letters, digits, _ - and / only.";
   if (/^[\d/]+$/.test(tag)) return "Not only digits.";
+  if (!/^[\p{L}\p{N}]/u.test(tag)) return "Start with a letter or digit.";
   if (tag.startsWith("/") || tag.endsWith("/") || tag.includes("//")) return "A / only between two parts.";
   if (tag !== except && list.some((entry) => entry.tag === tag)) return `#${tag} is on the list already.`;
   return null;

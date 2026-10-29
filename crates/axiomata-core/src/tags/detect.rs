@@ -181,6 +181,10 @@ pub(crate) fn tags_key(text: &str) -> Option<TagsKey> {
                 push_item(&mut items, part);
             }
         }
+        // A second `tags:`/`tag:` key would be left beside the rewritten one: never write such a frontmatter.
+        if tag_keys(text, &fm) > 1 {
+            simple = false;
+        }
         return Some(TagsKey {
             lines: line.start..end,
             items,
@@ -188,6 +192,21 @@ pub(crate) fn tags_key(text: &str) -> Option<TagsKey> {
         });
     }
     None
+}
+
+/// How many `tags:` or `tag:` keys the frontmatter holds in its first column.
+fn tag_keys(text: &str, fm: &Frontmatter) -> usize {
+    LineIter::new(text, fm.body.start)
+        .take_while(|l| l.start < fm.body.end)
+        .filter(|line| {
+            let content = &text[line.content.clone()];
+            content.split_once(':').is_some_and(|(key, _)| {
+                !key.starts_with(char::is_whitespace)
+                    && (key.trim().eq_ignore_ascii_case("tags")
+                        || key.trim().eq_ignore_ascii_case("tag"))
+            })
+        })
+        .count()
 }
 
 /// Whether one written item reads back as itself: plain (no `:`, `#`, quote or YAML indicator) or, where `quoted_ok`,
@@ -557,6 +576,7 @@ mod tests {
             "tags:\n  - x: y",
             "tags: \"a\"",
             "tags: |",
+            "tag: x\ntags: [y]",
         ] {
             assert!(!simple(odd), "{odd:?}");
         }

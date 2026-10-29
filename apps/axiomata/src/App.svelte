@@ -161,7 +161,8 @@ import { emit, on } from "./core/bus";
       on("open-second-brain", (detail) => {
         const d = (detail ?? {}) as { focus?: string | null; query?: string };
         brainFocus = typeof d.focus === "string" ? d.focus : null;
-        if (typeof d.query === "string") brainQuery = { text: d.query, seq: (brainQuery?.seq ?? 0) + 1 };
+        // Only an asked-for filter is handed on: a plain open must not bring back the last one.
+        brainQuery = typeof d.query === "string" ? { text: d.query, seq: (brainQuery?.seq ?? 0) + 1 } : null;
         brainOpen = true;
       }),
     ];

@@ -180,7 +180,7 @@
             {relativeTime(proposal.proposed_at)}
           </span>
           <span class="buttons">
-            <button type="button" class="primary" disabled={busy} onclick={() => void answer(proposal, true)}>Accept</button>
+            <button type="button" disabled={busy} onclick={() => void answer(proposal, true)}>Accept</button>
             <button type="button" disabled={busy} onclick={() => void answer(proposal, false)}>Turn down</button>
           </span>
         </li>

@@ -85,7 +85,8 @@ pub fn with_tags(text: &str, tags: &[String]) -> Result<(String, Vec<String>), A
     }
     if key.as_ref().is_some_and(|key| !key.simple) {
         return Err(refused(
-            "the note's `tags:` is written in a form the app does not rewrite (a comment, a quoted item with a space, a \
+            "the note's `tags:` is written in a form the app does not rewrite (a comment, a quoted item with a \
+             space, a \
              list over several lines); its tags are set by hand",
         ));
     }
@@ -608,7 +609,8 @@ mod tests {
         let text = fs::read_to_string(f.root.join("Dev/Rust lernen.md")).unwrap();
         assert_eq!(
             text,
-            "---\ntags:\n  - rust\n---\n# Rust lernen\n\nSee [[Cargo]].\n\n## Related\n\n- [[Agenten]]\n- [[Other]]\n- [[Fourth]]\n"
+            "---\ntags:\n  - rust\n---\n# Rust lernen\n\nSee [[Cargo]].\n\n\
+             ## Related\n\n- [[Agenten]]\n- [[Other]]\n- [[Fourth]]\n"
         );
         let open = proposals::open(&f.db.lock().unwrap()).unwrap();
         assert_eq!(open.len(), 2);

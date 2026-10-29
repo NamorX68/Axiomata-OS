@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { VaultEstimate } from "./backend";
 import { estimateLine, tokenCount } from "./vaultTagging";
 
 describe("vault run estimate", () => {
@@ -19,7 +20,15 @@ describe("vault run estimate", () => {
     expect(line).toMatch(/^252 notes \(/);
     expect(line).toContain("about 1.2 M tokens in, 38 k out");
     expect(line).toContain("about $0.36");
-    expect(estimateLine({ phase: "list", notes: 1, bytes: 10, input_tokens: 5, output_tokens: 1, model: null, cost_usd: null }))
-      .toContain("no price for the skill model");
+    const unpriced: VaultEstimate = {
+      phase: "list",
+      notes: 1,
+      bytes: 10,
+      input_tokens: 5,
+      output_tokens: 1,
+      model: null,
+      cost_usd: null,
+    };
+    expect(estimateLine(unpriced)).toContain("no price for the skill model");
   });
 });

@@ -50,6 +50,13 @@ pub enum TagsAction {
     },
     /// The vault run's work (`vault-tagging`, tags-links.md TL6): which step it is in and the next notes to do.
     Todo,
+    /// Leave a note out of the vault run's notes step, with the reason (a name not safe on a command line, …).
+    Skip {
+        /// The note, relative to the vault.
+        file: String,
+        /// Why, in a few words.
+        reason: String,
+    },
     /// Propose a new tag for the list, with a line of description; the owner accepts or turns it down in the app.
     Propose {
         /// The tag, lower case (`rust/async`).
@@ -102,7 +109,7 @@ pub fn run(core: &AxiomataCore, action: NotesAction) -> Result<()> {
         action,
         NotesAction::Tag { .. }
             | NotesAction::Tags {
-                action: TagsAction::Propose { .. }
+                action: TagsAction::Propose { .. } | TagsAction::Skip { .. }
             }
     );
     // A studio card session works in its worktree; the vault is none of its business (security audit).
@@ -142,14 +149,39 @@ pub fn run(core: &AxiomataCore, action: NotesAction) -> Result<()> {
                 proposals,
                 dry_run,
             };
-            let outcome = tags::note::tag_note(&config, &core.db, &proposer(), &request)?;
+            let outcome = match tags::note::tag_note(&config, &core.db, &proposer(), &request) {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    // A note the vault run cannot plan is left out of it, so its notes step can still finish.
+                    if dry_run
+                        && tags::vault_run::record_skip(
+                            &core.db_lock(),
+                            &request.note,
+                            &err.to_string(),
+                        )?
+                    {
+                        println!("left out of the vault run: {err}");
+                        return Ok(());
+                    }
+                    return Err(err.into());
+                }
+            };
             print_outcome(&outcome, dry_run);
             // In the vault run's notes step a dry run is its plan: kept for the owner's preview, written only by them.
             if dry_run {
                 let db = core.db_lock();
-                if tags::vault_run::record(&db, &outcome)? {
+                if tags::vault_run::record(&db, &outcome, &request.proposals)? {
                     println!("planned for the owner's preview; nothing was written");
                 }
+            }
+        }
+        NotesAction::Tags {
+            action: TagsAction::Skip { file, reason },
+        } => {
+            if tags::vault_run::record_skip(&core.db_lock(), &file, &reason)? {
+                println!("left {file} out of the vault run");
+            } else {
+                println!("no vault run is in its notes step; nothing to skip");
             }
         }
         NotesAction::Tags {

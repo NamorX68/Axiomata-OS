@@ -41,7 +41,22 @@ pub async fn save_tag_list(
     entries: Vec<TagEntry>,
 ) -> Result<Vec<TagEntry>, String> {
     let config = state.config_read().clone();
-    blocking(move || tags::list::save(&config, entries)).await
+    let db = Arc::clone(&state.db);
+    blocking(move || {
+        let saved = tags::list::save(&config, entries)?;
+        settle(&db, &saved);
+        Ok(saved)
+    })
+    .await
+}
+
+/// Closes the proposals of tags the owner has put on the list himself; a failure only leaves the badge lit.
+fn settle(db: &std::sync::Mutex<rusqlite::Connection>, list: &[TagEntry]) {
+    let tags: Vec<String> = list.iter().map(|entry| entry.tag.clone()).collect();
+    let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+    if let Err(err) = tags::proposals::settle_listed(&db, &tags) {
+        tracing::warn!("tag proposals not settled: {err}");
+    }
 }
 
 /// The proposals waiting for the owner, oldest first.
@@ -79,7 +94,15 @@ pub async fn rename_tag(
     dry_run: bool,
 ) -> Result<RenameCount, String> {
     let config = state.config_read().clone();
-    blocking(move || tags::rename::rename_tag(&config, &old, &new, dry_run)).await
+    let db = Arc::clone(&state.db);
+    blocking(move || {
+        let count = tags::rename::rename_tag(&config, &old, &new, dry_run)?;
+        if !dry_run {
+            settle(&db, &tags::list::load(&config)?);
+        }
+        Ok(count)
+    })
+    .await
 }
 
 /// Rewrites the `[[links]]` to the note `old_rel` in every note so they point to `new_rel` (V3); with `dry_run`, only

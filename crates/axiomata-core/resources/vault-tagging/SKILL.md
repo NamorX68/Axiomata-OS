@@ -18,9 +18,8 @@ Start with `axiomata-cli notes tags todo`. Its first line says which step this r
 Propose the vault's tag list.
 
 1. Run `axiomata-cli notes tags list` for the tags that are already on it.
-2. Read the notes the todo lists (it gives them in batches; run `axiomata-cli notes tags todo` again for the next
-   ones — it lists the same notes again only when nothing is left to read, so stop when you have seen them all). Read
-   enough of each note to know what it is about.
+2. The todo lists every note of the vault. Read enough of them to know what the vault is about — all of them in a small
+   vault; in a large one a broad sample of every area.
 3. Propose tags so that the vault ends up with **30–60 tags in all** (the ones already on the list count): broad,
    durable topics many notes share — not one tag per note. Nest where it helps: `rust/async` under `rust`. Tags are
    lower case; letters, digits, `-`, and `/` for nesting. One command per tag, with one line of description:
@@ -41,7 +40,9 @@ Plan the tags and links of every note. Nothing you plan is written until the own
    It answers what it would set and that it was planned for the owner's preview.
 3. Run `axiomata-cli notes tags todo` again for the next batch, until it says the step is done.
 
-A note whose path holds `$`, `` ` ``, `"`, `\` or `!` is skipped (such a name is not safe on a command line).
+A note whose path holds `$`, `` ` ``, `"`, `\` or `!` is not safe on a command line: leave it out with
+`axiomata-cli notes tags skip '<path>' "name not safe on a command line"` (in single quotes), and the same for a note
+you cannot read. A note the command refuses is left out by itself.
 
 Finish with a short report in German: how many notes you planned (or tags you proposed), and the notes you skipped
 and why.
