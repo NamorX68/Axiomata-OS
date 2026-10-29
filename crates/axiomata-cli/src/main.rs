@@ -163,7 +163,8 @@ enum Command {
         #[command(subcommand)]
         action: harness_cmd::HarnessAction,
     },
-    /// What the app's chat reads about Axiomata, read-only (`docs/plans/chat-knows-app.md`): `app handbook [name]`.
+    /// What the app's chat reads about Axiomata, read-only (`docs/plans/chat-knows-app.md`):
+    /// studio | spend | runs | routines | board | storage | settings | tags | handbook [name], each with `--json`.
     App {
         #[command(subcommand)]
         action: app_cmd::AppAction,
@@ -839,9 +840,7 @@ async fn main() -> Result<()> {
         Command::Maintenance { action } => maintenance_cmd::run(&core, action)?,
         Command::Notes { action } => notes_cmd::run(&core, action)?,
         Command::Inbox { .. } => unreachable!("answered before the core starts"),
-        Command::App { .. } => {
-            unreachable!("every `app` command is answered before the core starts")
-        }
+        Command::App { action } => app_cmd::run(&core, action)?,
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
         Command::Harness { action } => return harness_cmd::run(&core, action).await,
@@ -3311,6 +3310,10 @@ mod tests {
             &["notes", "tags", "rename", "a", "b", "--dry-run"],
             &["notes", "tags", "describe", "a", "A"],
             &["notes", "tags", "lift-inline", "--dry-run"],
+            // The app's views are the chat's (chat-knows-app CH3): a skill run's list stays as it was.
+            &["app", "settings"],
+            &["app", "studio", "--json"],
+            &["app", "handbook"],
         ] {
             assert!(!may(refused), "{refused:?}");
         }

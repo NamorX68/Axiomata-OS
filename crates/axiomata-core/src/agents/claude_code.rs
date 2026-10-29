@@ -99,6 +99,7 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         context_file: setup.context_file.as_deref(),
         resume: None,
         stream: false,
+        views: None,
     };
     let program = Path::new(CLAUDE_BIN);
     let first = invoke(
@@ -163,6 +164,7 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
     }
     let model = run_model(request.model.as_deref())?;
     let declared = declared_tools(None, request.allowed_tools.as_deref())?;
+    let views = bash_rule(&format!("{} app *", crate::bridge::cli_invocation()));
     let servers = owner_servers()?;
     let _permit = agent_slots()
         .acquire()
@@ -208,6 +210,7 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         context_file: setup.context_file.as_deref(),
         resume,
         stream: true,
+        views: Some(&views),
     };
     let outcome = turn_or_start_anew(
         Path::new(CLAUDE_BIN),
@@ -687,6 +690,9 @@ struct Invocation<'a> {
     /// `stream-json` instead of `json` (#108, the chat only): its first event lists the commands, its last is the
     /// same `result` [`parse_result`] reads.
     stream: bool,
+    /// The chat's rule for `axiomata-cli app …` (chat-knows-app CH3): the read-only views and the handbook, allowed in
+    /// every chat mode a declaration does not narrow. `None` for a skill run.
+    views: Option<&'a str>,
 }
 
 /// The permission mode and the allow and deny lists of a run — see the module doc.
@@ -707,6 +713,8 @@ fn permissions(invocation: &Invocation) -> Permissions {
             .filter(|rule| !is_shell_rule(rule))
             .cloned()
             .chain(READ_COMMANDS.iter().map(|command| bash_rule(command)))
+            // The app's views only read: the plan switch keeps them.
+            .chain(invocation.views.map(str::to_owned))
             .collect();
         let disallowed = EDIT_TOOLS
             .iter()
@@ -740,9 +748,16 @@ fn permissions(invocation: &Invocation) -> Permissions {
             disallowed: Vec::new(),
         };
     }
+    // Without pre-approved tools the chat still reads the app's views; a declaration (an instruct turn) is its whole
+    // set and gets nothing beside it.
+    let allowed = if invocation.declared.is_empty() {
+        invocation.views.map(str::to_owned).into_iter().collect()
+    } else {
+        invocation.declared.to_vec()
+    };
     Permissions {
         mode: None,
-        allowed: invocation.declared.to_vec(),
+        allowed,
         disallowed: Vec::new(),
     }
 }
@@ -1142,7 +1157,38 @@ mod tests {
             context_file: None,
             resume: None,
             stream: false,
+            views: None,
         }
+    }
+
+    #[test]
+    fn the_chat_reads_the_app_views_in_every_mode_a_declaration_leaves_open() {
+        let rule = bash_rule("/opt/axiomata-cli app *");
+        assert_eq!(rule, "Bash(/opt/axiomata-cli app:*)");
+        let chat = |declared, auto_approve, read_only| {
+            permissions(&Invocation {
+                auto_approve,
+                read_only,
+                views: Some(&rule),
+                ..invocation(declared, &[])
+            })
+        };
+        assert_eq!(chat(&[], false, false).allowed, vec![rule.clone()]);
+        assert!(
+            chat(&[], false, true).allowed.contains(&rule),
+            "plan mode reads them too"
+        );
+        assert!(chat(&[], true, false).allowed.contains(&"Bash".to_owned()));
+        let declared = strings(&["mcp__apple-reminders__reminders_tasks"]);
+        assert_eq!(
+            chat(&declared, false, false).allowed,
+            declared,
+            "an instruct turn gets nothing beside"
+        );
+        assert!(
+            !permissions(&invocation(&[], &[])).allowed.contains(&rule),
+            "a skill run has none"
+        );
     }
 
     fn strings(items: &[&str]) -> Vec<String> {

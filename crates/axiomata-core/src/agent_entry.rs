@@ -149,10 +149,16 @@ const DIRECT_COMMANDS: [&[&str]; 8] = [
     &["notes", "tags", "skip"],
 ];
 
+/// What a chat turn may start directly beside [`DIRECT_COMMANDS`]: the read-only views and the handbook
+/// (`docs/plans/chat-knows-app.md`, CH3). A skill run's list stays as it was; its CLI refuses `app` anyway
+/// (`skill_run_may`). Glut still starts one only when the turn declares it — an undeclared chat turn reads the same
+/// through the `axiomata_app` tool (`agents::app_tools`).
+const CHAT_DIRECT_COMMANDS: [&[&str]; 1] = [&["app"]];
+
 /// The app's CLI as a program a Glut run starts directly when its declaration names the exact command (glut-round
-/// W8): `axiomata-cli`, from [`cli_path`], for [`DIRECT_COMMANDS`] only, marked by [`HARNESS_RUN_ENV`] as `kind`, with the
-/// app's `AXIOMATA_HOME` when one is set — the sandbox hides `~/.axiomata`, where the CLI's database is. `None` without
-/// a CLI.
+/// W8): `axiomata-cli`, from [`cli_path`], for [`DIRECT_COMMANDS`] only (a chat turn also
+/// [`CHAT_DIRECT_COMMANDS`]), marked by [`HARNESS_RUN_ENV`] as `kind`, with the app's `AXIOMATA_HOME` when one is
+/// set — the sandbox hides `~/.axiomata`, where the CLI's database is. `None` without a CLI.
 pub fn cli_direct_program(kind: &str) -> Option<glut::tools::shell::DirectProgram> {
     let mut env = vec![(HARNESS_RUN_ENV.into(), kind.into())];
     if let Some(home) = std::env::var_os(crate::paths::AXIOMATA_HOME_ENV) {
@@ -162,11 +168,20 @@ pub fn cli_direct_program(kind: &str) -> Option<glut::tools::shell::DirectProgra
         name: CLI_NAME.to_owned(),
         path: cli_path()?,
         env,
-        allowed: DIRECT_COMMANDS
-            .iter()
+        allowed: direct_commands(kind)
             .map(|words| words.iter().map(|word| (*word).to_owned()).collect())
             .collect(),
     })
+}
+
+/// The command prefixes a run of `kind` may start directly.
+fn direct_commands(kind: &str) -> impl Iterator<Item = &'static &'static [&'static str]> {
+    let chat: &[&[&str]] = if kind == HARNESS_RUN_CHAT {
+        &CHAT_DIRECT_COMMANDS
+    } else {
+        &[]
+    };
+    DIRECT_COMMANDS.iter().chain(chat)
 }
 
 fn cli_path_from(override_path: Option<OsString>, exe: Option<PathBuf>) -> Option<PathBuf> {
@@ -904,6 +919,18 @@ mod tests {
     use crate::ide::agent_store;
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    #[test]
+    fn only_a_chat_turn_may_start_the_app_views_directly() {
+        let has_app = |kind| direct_commands(kind).any(|words| words.first() == Some(&"app"));
+        assert!(has_app(HARNESS_RUN_CHAT));
+        assert!(!has_app(HARNESS_RUN_SKILL));
+        assert!(!has_app("anything else"));
+        assert_eq!(
+            direct_commands(HARNESS_RUN_SKILL).count(),
+            DIRECT_COMMANDS.len()
+        );
+    }
 
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

@@ -9,6 +9,7 @@
 pub mod agent_entry;
 pub mod agent_mcp;
 pub mod agents;
+pub mod app_state;
 /// The Kanban board core, re-exported so callers reach it as
 /// `axiomata_core::board::…` without taking a direct dependency on the crate.
 /// It is a plain re-export, not a wrapper: the board owns its own types and
