@@ -149,8 +149,11 @@ export function renderMarkdown(source: string): string {
  * every `[data-line]` in the result is one of these wrappers (ED2 audit).
  */
 export function renderMarkdownBlocks(source: string): string {
-  const tokens = marked.lexer(source);
-  let line = 0;
+  // A leading YAML frontmatter (`tags:`, `created:` …) is the note's metadata, not its text: it is not drawn (it would
+  // read as a heading), and the line numbers still count it (`docs/plans/tags-links.md` TL5).
+  const front = leadingFrontmatter(source);
+  const tokens = marked.lexer(source.slice(front.length));
+  let line = (front.match(/\n/g) ?? []).length;
   const parts: string[] = [];
   for (const token of tokens) {
     if (token.type !== "space") {
@@ -160,6 +163,12 @@ export function renderMarkdownBlocks(source: string): string {
     line += (token.raw.match(/\n/g) ?? []).length;
   }
   return parts.join("");
+}
+
+/** The `---` … `---` (or `...`) block at the very top of `source`, with its closing line break; `""` without one. */
+export function leadingFrontmatter(source: string): string {
+  const match = /^\uFEFF?---\r?\n(?:.*\r?\n)*?(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(source);
+  return match ? match[0] : "";
 }
 
 /** Word/line-boundary truncation for a plain-text preview — `core/mail.ts`'s

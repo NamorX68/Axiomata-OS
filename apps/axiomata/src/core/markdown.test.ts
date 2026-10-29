@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cut, renderMarkdown, renderMarkdownBlocks } from "./markdown";
+import { cut, leadingFrontmatter, renderMarkdown, renderMarkdownBlocks } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("renders task-list items as read-only checkboxes, not text fields", () => {
@@ -68,6 +68,14 @@ describe("renderMarkdown", () => {
 });
 
 describe("renderMarkdownBlocks", () => {
+  it("leaves a leading frontmatter out but keeps counting its lines", () => {
+    const html = renderMarkdownBlocks("---\ntags:\n  - rust\n---\n# Title\n");
+    expect(html).not.toContain("tags");
+    expect(html).toContain('data-line="4"');
+    expect(leadingFrontmatter("text\n---\na: 1\n---\n")).toBe("");
+    expect(leadingFrontmatter("---\r\na: 1\r\n...\r\nbody")).toBe("---\r\na: 1\r\n...\r\n");
+  });
+
   it("marks every top-level block with its source line", () => {
     const html = renderMarkdownBlocks("# Title\n\nA paragraph\nwrapped.\n\n- one\n- two\n\n```ts\nconst x = 1;\n```\n");
     const lines = [...html.matchAll(/data-line="(\d+)"/g)].map((m) => Number(m[1]));
