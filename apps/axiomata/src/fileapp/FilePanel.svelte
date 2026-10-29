@@ -19,7 +19,7 @@
   import { keyHints } from "../core/keyHints";
   import { onMount, tick, untrack } from "svelte";
 
-  import { closeStaged, requestClose, setCloseGuard } from "../core/staging";
+  import { closeStaged, requestClose, setCloseGuard, setLossProbe } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import {
     DEFAULT_EDITOR_SETTINGS,
@@ -155,7 +155,16 @@
       if (panel && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
     });
     setCloseGuard(ctx.instanceId, async () => (editor?.hasUnsaved() ? ask() : true));
-    return () => setCloseGuard(ctx.instanceId, null);
+    // The same question, asked ahead for a close nobody's hand started (the chat's `close_view`): what the guard
+    // would ask about, said for the owner.
+    setLossProbe(ctx.instanceId, () => {
+      if (!editor?.hasUnsaved()) return null;
+      return current?.untitled || !current ? "a new note that was never saved" : `unsaved changes to ${current.rel}`;
+    });
+    return () => {
+      setCloseGuard(ctx.instanceId, null);
+      setLossProbe(ctx.instanceId, null);
+    };
   });
 </script>
 

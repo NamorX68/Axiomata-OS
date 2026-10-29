@@ -39,12 +39,16 @@ Kosten des Zugs.
 - **Sofort:** Ansichten öffnen (Studio, ein Projekt, Kanban, eine Karte, das Second Brain mit `#tag`-Filter, eine
   Handbuchseite, einen Reiter der Einstellungen, eine Datei) und die Darstellung umstellen (Theme, Layout des Second
   Brain, Glas-Blur und -Abdunklung, Bewegung); einfache Karten anlegen und verschieben, ToDo, die lesenden Aktionen der
-  Kacheln.
+  Kacheln. Sagen, was offen ist, und schließen, was dabei nichts verliert: ein Kanban- oder Datei-Panel, eine
+  Terminal-Kachel mit wartender Shell, das Second Brain, das Handbuch, die Einstellungen.
 - **Nur nach deinem Ja:** einen Skill starten, eine Routine anlegen oder ändern, eine Karte starten, einen Digest
-  auffrischen, in Kalender oder Erinnerungen schreiben. Die Frage erscheint als Leiste in der App mit allem, was er tun
+  auffrischen, in Kalender oder Erinnerungen schreiben; etwas schließen, das dabei etwas verlöre — eine Datei mit
+  ungespeichertem Text (danach fragt das Panel selbst: speichern oder verwerfen), ein getippter, noch nicht
+  abgeschickter Kartentitel oder Verlaufseintrag, ein offenes Formular einer Karte, ein Terminal, in dem ein Programm
+  läuft, auch im Hintergrund (es endet mit der Kachel). Die Frage erscheint als Leiste in der App mit allem, was er tun
   will; „Allow“ führt genau das aus, „Deny“ nichts. Eine Frage verfällt nach 2 Minuten.
-- **Nie:** etwas löschen, Schlüssel oder Provider ändern, Agenten im Studio steuern, deine Schritte auf dem Board
-  (Freigeben, Review, Übernehmen, Integrieren).
+- **Nie:** etwas löschen, Schlüssel oder Provider ändern, Agenten im Studio steuern oder seine Panes schließen, deine
+  Schritte auf dem Board (Freigeben, Review, Übernehmen, Integrieren).
 - Im Plan-Modus ändert er nichts.
 
 ## Fallen

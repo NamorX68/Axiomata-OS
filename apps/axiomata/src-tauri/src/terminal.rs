@@ -588,6 +588,91 @@ pub fn terminal_close(sessions: State<'_, TerminalSessions>, id: String) -> Resu
     Ok(())
 }
 
+/// What would end with the pane (`docs/plans/chat-knows-app.md`, CH5): the program in the terminal's foreground when
+/// that is not the shell at its prompt, else the programs still on its terminal in the background (`sleep 600 &`, a
+/// dev server sent off with `&`) — closing ends them all (`SIGHUP`) — else `None`. The chat closes a Terminal tile by
+/// itself only when this is `None`; otherwise it asks the owner, naming them. When it cannot be told the answer is an
+/// error, never `None`, and the chat asks. An unknown id is an error, as for `terminal_write`.
+#[tauri::command]
+pub fn terminal_foreground(
+    sessions: State<'_, TerminalSessions>,
+    id: String,
+) -> Result<Option<String>, String> {
+    let (job, tty, shell) = {
+        let guard = sessions.lock();
+        let session = guard
+            .get(&id)
+            .ok_or_else(|| format!("unknown terminal session: {id}"))?;
+        (
+            session.pty.foreground_job(),
+            session.pty.tty_name(),
+            session.pty.shell_pid(),
+        )
+    };
+    if let Some(pid) = job.map_err(|err| err.to_string())? {
+        return Ok(Some(program_name(pid)));
+    }
+    let (Some(tty), Some(shell)) = (tty, shell) else {
+        return Err("cannot tell what runs in the terminal: no terminal device".to_owned());
+    };
+    let names = background_programs(&tty, shell)?;
+    Ok((!names.is_empty()).then(|| format!("{} (in the background)", names.join(", "))))
+}
+
+/// The programs on terminal `tty` other than its shell (`ps -o pid=,comm= -t`), read after the registry's lock is let
+/// go. An error when `ps` cannot be run — not knowing is no "nothing".
+fn background_programs(tty: &Path, shell: u32) -> Result<Vec<String>, String> {
+    let device = tty.strip_prefix("/dev").unwrap_or(tty);
+    let out = std::process::Command::new("/bin/ps")
+        .args(["-o", "pid=,comm=", "-t"])
+        .arg(device)
+        .output()
+        .map_err(|err| format!("cannot tell what runs in the terminal: {err}"))?;
+    // `ps` exits non-zero when nothing matched; its output is then empty, which reads as "nothing".
+    Ok(others_on_tty(&String::from_utf8_lossy(&out.stdout), shell))
+}
+
+/// The command names in `ps -o pid=,comm=` lines, the shell's own line left out, each named once.
+fn others_on_tty(listing: &str, shell: u32) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for line in listing.lines() {
+        let mut parts = line.split_whitespace();
+        let (Some(pid), Some(comm)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if pid.parse::<u32>().ok() == Some(shell) {
+            continue;
+        }
+        let name = command_name(comm);
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// A `comm` as the owner reads it: the last path part, a login shell's leading `-` dropped.
+fn command_name(comm: &str) -> String {
+    comm.rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .trim_start_matches('-')
+        .to_owned()
+}
+
+/// A process's command name (`ps -o comm=`, the last path part), or its id when it cannot be read. Read after the
+/// registry's lock is let go: `ps` takes a moment, and the panes' output must not wait on it.
+fn program_name(pid: u32) -> String {
+    std::process::Command::new("/bin/ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| command_name(String::from_utf8_lossy(&out.stdout).trim()))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| format!("process {pid}"))
+}
+
 /// Fetches a scrollback viewport on demand: `offset` lines up from the live
 /// bottom (see `Screen::visible_rows`'s own doc comment for the exact
 /// semantics). Deliberately a separate, pull-based command rather than
@@ -616,6 +701,18 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
     use tauri::ipc::InvokeResponseBody;
+
+    /// What `ps -t` lists for a terminal: the shell is left out, everything else is named once, as the owner reads it.
+    #[test]
+    fn the_programs_on_a_terminal_leave_out_its_shell() {
+        let listing = "  101 -zsh\n  202 sleep\n  203 /usr/local/bin/node\n  204 sleep\n\n bad\n";
+        assert_eq!(others_on_tty(listing, 101), ["sleep", "node"]);
+        assert!(
+            others_on_tty("  101 -zsh\n", 101).is_empty(),
+            "an idle shell runs nothing"
+        );
+        assert!(others_on_tty("", 101).is_empty());
+    }
 
     /// Builds a `Channel<TerminalEvent>` that records every event it's sent
     /// (as parsed JSON, so assertions can read `TerminalEvent`'s fields

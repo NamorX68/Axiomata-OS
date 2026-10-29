@@ -401,6 +401,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            terminal::terminal_foreground,
             terminal::terminal_scrollback,
             terminal::terminal_set_colors,
         ])

@@ -9,6 +9,7 @@
 <script lang="ts">
   import { renderMarkdown } from "../core/markdown";
   import { listHandbook, pageOfLink, readHandbookPage, withPageLinks, type HandbookEntry } from "../core/handbook";
+  import { registerShellView } from "../core/openViews";
   import Window from "./Window.svelte";
 
   let {
@@ -35,6 +36,11 @@
 
   const known = $derived(new Set(entries.map((entry) => entry.name)));
   const title = $derived(entries.find((entry) => entry.name === current)?.title ?? "Handbook");
+
+  // Known as open to the chat's `close_view` (CH5); a page being read loses nothing by closing.
+  $effect(() =>
+    open ? registerShellView("handbook", { title: `Handbook — ${title}`, close: () => (open = false) }) : undefined,
+  );
 
   $effect(() => {
     if (!open || entries.length > 0) return;

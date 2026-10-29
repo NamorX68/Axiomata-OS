@@ -29,11 +29,14 @@ pub const APP_TOOL: &str = "axiomata_app";
 pub const ACTION_TOOL: &str = "axiomata_action";
 
 /// The shell actions the operating tool may call (`apps/axiomata/src/modules/chatActions.ts` and `openFile`): views
-/// and display at once, a skill, a routine and a card only after the owner's yes in the app — the app decides that by
-/// each action's `chat` mark, whoever calls. Nothing that deletes or steers is in the list, and a tile's own actions
-/// stay where they were (the Claude Code chat's `module-action`).
-pub const CHAT_SHELL_ACTIONS: [&str; 6] = [
+/// and display at once, closing a view at once only when nothing would be lost (else after the owner's yes), a skill,
+/// a routine and a card only after the owner's yes in the app — the app decides that by each action's `chat` mark,
+/// whoever calls. Nothing that deletes or steers is in the list (the Studio's panes are never closed), and a tile's own
+/// actions stay where they were (the Claude Code chat's `module-action`).
+pub const CHAT_SHELL_ACTIONS: [&str; 8] = [
     "open_view",
+    "open_views",
+    "close_view",
     "set_display",
     "openFile",
     "start_skill",
@@ -103,9 +106,10 @@ impl Tool for ActionTool {
             name: ACTION_TOOL.to_owned(),
             description: format!(
                 "Operate the Axiomata app for the owner: one of the Shell actions of your instructions ({}), with its \
-                 params as a JSON object. open_view and set_display act at once; start_skill, save_routine and \
+                 params as a JSON object. open_view, open_views and set_display act at once; close_view closes at \
+                 once when nothing would be lost, otherwise it asks the owner; start_skill, save_routine and \
                  start_card ask the owner in the app and run only on their yes — say that you asked. Deleting, keys, \
-                 the Studio's agents and the owner's board steps are not yours.",
+                 the Studio's agents and panes and the owner's board steps are not yours.",
                 CHAT_SHELL_ACTIONS.join(", ")
             ),
             parameters: json!({

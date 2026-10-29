@@ -22,6 +22,7 @@
     isEffortLevel,
   } from "../core/backend";
   import { emit } from "../core/bus";
+  import { registerShellView } from "../core/openViews";
   import { HARNESSES, providerAfterHarnessChange, providersFor, usesClaudeCode } from "../core/harness";
   import { WEB_KEYS, type WebKeyId, webUpdate } from "../core/webSettings";
   import { BRAIN_LAYOUTS, brainView, SHINES, SPEED_MAX } from "../core/brainView";
@@ -57,6 +58,10 @@
   const TABS = SETTINGS_TABS;
   let tab = $state<TabId>("appearance");
   // Opened for one place (the Dock's tag badge opens Workspace): that tab, each time it is opened so.
+  // Known as open to the chat's `close_view` (CH5). Closing loses nothing: this component stays mounted while the
+  // window is closed, so a field typed but not saved is still there when it opens again.
+  $effect(() => (open ? registerShellView("settings", { title: "Settings", close: () => (open = false) }) : undefined));
+
   $effect(() => {
     const wanted = TABS.find((t) => t.id === initialTab);
     if (open && wanted) tab = wanted.id;

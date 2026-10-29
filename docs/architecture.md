@@ -1084,7 +1084,8 @@ view right, links between pages in place), ⌘K has a Handbook group, `/help <to
 **Operating** (`modules/chatActions.ts`, shell actions): every `ModuleAction` carries a required `chat` mark, and the
 bridge (`registry.ts` `invokeAgentAction`) is fail-closed — `direct` runs, `ask` asks, anything else is refused and not
 listed. Direct: `open_view` (studio/project/mode, kanban/card, second-brain with `#tag` or query, handbook page,
-settings tab), `set_display` (theme, brain layout, glass knobs, motion), `openFile`, the tiles' reads, ToDo, the
+settings tab), `set_display` (theme, brain layout, glass knobs, motion), `openFile`, `open_views` (what is open and
+what closing it would lose), the tiles' reads, ToDo, the
 memory sync and the plain-card `kanban_*`. Ask: `start_skill`, `save_routine`, `start_card`, the tiles' skill run,
 digest refreshes, routine add/edit/enable and the calendar/reminder writes. An ask action's `ask()` checks the params,
 builds the question with the whole detail (a routine's prompt, the routine it replaces, a card's text, a skill's
@@ -1092,7 +1093,13 @@ description) and freezes the params it will run with (a card whose text changed 
 holds the question (at most 5, the same one once, stale after 2 min, format characters dropped, a detail over 4000
 characters cannot be allowed) and `shell/ChatAsks.svelte` shows it with who asks (`ActionRequest.origin`: `chat`,
 `agent:<name>`, `terminal` — informative only) and takes the owner's Allow only after 400 ms. The agent hears at once
-that the owner was asked. Never (the delete actions): refused. The owner's own `/` commands keep `invokeAction`. In the
+that the owner was asked. Never (the delete actions): refused. Guarded (`chat: "guarded"`, its `ask()` may answer `null` =
+nothing to ask): `close_view` (Kanban/file panels, Terminal tiles, Second Brain, handbook, Settings — never the
+Studio) closes at once when nothing would be lost, else asks saying what: a panel's `setLossProbe` (a file's unsaved
+text, Kanban's unsent title, note or open step form), a terminal's program (`terminal_foreground`: the PTY's
+foreground process group ≠ the shell, or a background job still on its tty via `ps -t`; unknown = ask; `run` checks
+again unless the owner was asked); it closes through the view's own path (`requestClose` + guard, the tile's
+×, the window's registered `close`, `core/openViews.ts`). The owner's own `/` commands keep `invokeAction`. In the
 CLI a chat turn (`AXIOMATA_HARNESS_RUN=chat`) passes `chat_turn_refusal`, an allow-list checked before the core starts:
 looking (status, skills, runs, `app`, the board, routines, the Studio's lists, storage status and dry runs), plain
 cards, note tags, the inbox, the router, `module-action`; `run-skill`, routine changes and `board start` point to the

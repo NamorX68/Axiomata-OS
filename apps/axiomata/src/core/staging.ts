@@ -174,6 +174,7 @@ export function bringToFront(id: string): void {
 
 export function closeStaged(id: string): void {
   closeGuards.delete(id);
+  lossProbes.delete(id);
   staged.update((list) => list.filter((p) => p.id !== id));
 }
 
@@ -190,6 +191,27 @@ const closeGuards = new Map<string, CloseGuard>();
 export function setCloseGuard(id: string, guard: CloseGuard | null): void {
   if (guard) closeGuards.set(id, guard);
   else closeGuards.delete(id);
+}
+
+/**
+ * What panel `id` would lose if it closed now, said for the owner ("unsaved changes to Notes/a.md"), or `null` for
+ * nothing. Asked *before* a close nobody's hand started — the chat's `close_view` (`docs/plans/chat-knows-app.md`,
+ * CH5) closes by itself only when this is `null`, and asks the owner otherwise. Synchronous on purpose: it reads
+ * state, it never asks anything itself — that stays the guard's.
+ */
+export type LossProbe = () => string | null;
+
+const lossProbes = new Map<string, LossProbe>();
+
+/** Registers (or with `null` removes) what panel `id` would lose by closing — beside its guard, not instead of it. */
+export function setLossProbe(id: string, probe: LossProbe | null): void {
+  if (probe) lossProbes.set(id, probe);
+  else lossProbes.delete(id);
+}
+
+/** What panel `id` would lose by closing now; `null` for nothing (or a panel that registered no probe). */
+export function pendingLoss(id: string): string | null {
+  return lossProbes.get(id)?.() ?? null;
 }
 
 /** Closes panel `id` once its guard, if any, agrees. */

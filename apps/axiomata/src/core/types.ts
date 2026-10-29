@@ -21,16 +21,18 @@ export interface ModuleAction {
   /**
    * What an agent may do with the action through the bridge (`docs/plans/chat-knows-app.md`, CH5, Q8) — required, so
    * every new action decides (security audit). `direct`: it runs at once. `ask`: the owner is asked in the app first
-   * (`ask` below, `core/chatAsks.ts`) and it runs only on yes. `never`: not offered in the manifest and refused from
-   * the bridge. The owner's own `/` commands reach every action regardless.
+   * (`ask` below, `core/chatAsks.ts`) and it runs only on yes. `guarded`: it runs at once unless its `ask` finds
+   * something it would lose (closing a file with unsaved text) — then the owner is asked as for `ask`. `never`: not
+   * offered in the manifest and refused from the bridge. The owner's own `/` commands reach every action regardless.
    */
-  chat: "direct" | "ask" | "never";
+  chat: "direct" | "ask" | "guarded" | "never";
   /**
-   * For `chat: "ask"`: the question the owner reads (plain text), an optional longer detail (a prompt, a card's body),
-   * and the params the action will run with — checked and frozen now, so what runs is what was shown. Throws on bad
-   * params. An `ask` action without it is refused.
+   * For `chat: "ask"` and `"guarded"`: the question the owner reads (plain text), an optional longer detail (a prompt,
+   * a card's body, what would be lost), and the params the action will run with — checked and frozen now, so what runs
+   * is what was shown. Throws on bad params. A `guarded` action answers `null` when there is nothing to ask (it then
+   * runs at once); for an `ask` action `null` is refused, as is an `ask` or `guarded` action without it.
    */
-  ask?(params: unknown, ctx: ModuleContext): Promise<PreparedAsk>;
+  ask?(params: unknown, ctx: ModuleContext): Promise<PreparedAsk | null>;
 }
 
 /** What an `ask` action shows the owner and runs with on yes. */

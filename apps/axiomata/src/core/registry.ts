@@ -64,13 +64,19 @@ export function manifest(): ManifestEntry[] {
 }
 
 /** Whether an agent is shown the action at all: a `never` one is the owner's alone (CH5). */
-const isOffered = (a: ModuleAction): boolean => a.chat === "direct" || a.chat === "ask";
+const isOffered = (a: ModuleAction): boolean => a.chat === "direct" || a.chat === "ask" || a.chat === "guarded";
 
 /** Said after an `ask` action's description, so the agent knows its call only asks the owner. */
 export const ASKS_SUFFIX = " Asks the owner in the app first; it runs only if they say yes.";
 
+/** Said after a `guarded` action's description: it acts at once only when nothing would be lost. */
+export const GUARDED_SUFFIX =
+  " Acts at once when nothing would be lost; otherwise it asks the owner in the app, saying what, and acts only if " +
+  "they say yes.";
+
 function describe(a: ModuleAction): ManifestEntry["actions"][number] {
-  const description = a.chat === "ask" ? `${a.description}${ASKS_SUFFIX}` : a.description;
+  const suffix = a.chat === "ask" ? ASKS_SUFFIX : a.chat === "guarded" ? GUARDED_SUFFIX : "";
+  const description = `${a.description}${suffix}`;
   return { name: a.name, description, params: a.params };
 }
 
@@ -155,7 +161,8 @@ export async function invokeAction(
 /**
  * Dispatch an action an agent asked for through the bridge (`core/agent-bridge.ts`) by its `chat` mark (CH5, Q8):
  * `direct`, it runs; `ask`, the owner is asked in the app and the agent hears at once that it was asked — it runs
- * only on the owner's yes, with the params shown then; anything else is refused. `origin` is who the request says it
+ * only on the owner's yes, with the params shown then; `guarded`, it runs at once when its `ask` finds nothing to ask,
+ * else as `ask`; anything else is refused. `origin` is who the request says it
  * comes from (`chat`, `agent:<name>`, …), shown with the question.
  */
 export async function invokeAgentAction(
@@ -168,9 +175,15 @@ export async function invokeAgentAction(
   switch (act.chat) {
     case "direct":
       return act.run(params, ctx);
-    case "ask": {
+    case "ask":
+    case "guarded": {
       if (!act.ask) throw new Error(`"${action}" cannot be asked for`);
       const prepared = await act.ask(params, ctx);
+      if (!prepared) {
+        // Only a guarded action may find nothing to ask; an ask action that does is refused rather than run.
+        if (act.chat === "guarded") return act.run(params, ctx);
+        throw new Error(`"${action}" found nothing to ask; it does not run without the owner's yes`);
+      }
       const frozen = prepared.params ?? params;
       return askOwner({ ...prepared, source: action, origin }, () => act.run(frozen, ctx));
     }

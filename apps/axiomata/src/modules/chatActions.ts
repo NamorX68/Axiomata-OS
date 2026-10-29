@@ -7,8 +7,12 @@
  *   knobs, the motion level). Nothing of it changes data.
  * - **After asking** (`chat: "ask"`, `core/chatAsks.ts`): start a skill, create or change a routine, start a card. The
  *   bridge asks the owner in the app; only a yes runs the action.
- * - **Never** — deleting, keys and secrets, steering the Studio's agents, the owner's steps on the board — has no
- *   action here at all, and the CLI refuses it for a chat turn (`axiomata-cli`'s `chat_turn_refusal`).
+ * - **At once unless something would be lost** (`chat: "guarded"`): close a view (`open_views` lists them). A file
+ *   with unsaved text, a Kanban field typed but not sent, a terminal running a program — then the owner is asked,
+ *   told exactly what would be lost, and the view closes through its own close path, guard included.
+ * - **Never** — deleting, keys and secrets, steering the Studio's agents (its panes are not closed either), the
+ *   owner's steps on the board — has no action here at all, and the CLI refuses it for a chat turn
+ *   (`axiomata-cli`'s `chat_turn_refusal`).
  */
 
 import {
@@ -24,9 +28,11 @@ import { emit } from "../core/bus";
 import { MAX_GROUND_BLUR, MAX_GROUND_DIM } from "../core/glass";
 import { listHandbook, openHandbook } from "../core/handbook";
 import { MOTION_LEVELS, motionSetting, type MotionLevel } from "../core/motion";
-import { registerShellAction } from "../core/registry";
+import { openShellViews, terminalSession } from "../core/openViews";
+import { getModule, registerShellAction } from "../core/registry";
 import { SETTINGS_TABS } from "../core/settingsTabs";
-import { glassBlur, glassDim } from "../core/stores";
+import { FILE_PANEL, pendingLoss, requestClose, staged } from "../core/staging";
+import { glassBlur, glassDim, instances, removeInstance } from "../core/stores";
 import { THEMES, applyTheme, isTheme } from "../core/themes";
 import type { ModuleAction, PreparedAsk } from "../core/types";
 import { startableProjects } from "../ide/cardStart";
@@ -34,6 +40,8 @@ import { requestMode } from "../ide/modeRequest";
 import { showPlanInFlow } from "../ide/planRequest";
 import { requestProject } from "../ide/projectRequest";
 import { listProjects } from "../ide/projects";
+import { get } from "svelte/store";
+
 import { openKanban } from "./kanbanApp";
 
 /** The views `open_view` opens. */
@@ -357,8 +365,201 @@ const startCard: ModuleAction = {
   },
 };
 
+/** The kinds of view `close_view` closes. The Studio is not one: its panes and agents are never the chat's to close. */
+export const CLOSABLE_VIEWS = ["kanban", "file", "terminal", "second-brain", "handbook", "settings"] as const;
+type ClosableKind = (typeof CLOSABLE_VIEWS)[number];
+
+/** One open view the chat may close, with what closing it would lose and its own way to close. */
+interface Closable {
+  kind: ClosableKind;
+  /** What `close_view` names it by: the panel's or tile's id, or the kind for a window there is one of. */
+  id: string;
+  title: string;
+  /** A staged panel's path (a file's, `board:<id>`, `card:<id>`), for naming it by path. */
+  path?: string;
+  /** What closing now would lose, for the owner; `null` for nothing. */
+  loss: () => Promise<string | null>;
+  /** What happens once the owner said yes, told with the question. */
+  onYes: string;
+  close: () => void | Promise<void>;
+}
+
+/** What closing a Terminal tile would end: the program in its foreground; a shell at its prompt ends nothing. */
+async function terminalLoss(instanceId: string): Promise<string | null> {
+  const session = terminalSession(instanceId);
+  if (!session) return null; // its shell has ended, or never started: nothing runs
+  try {
+    const program = await invokeBackend<string | null>("terminal_foreground", { id: session });
+    return program ? `the running program “${program}”, which closing ends` : null;
+  } catch {
+    // Not knowing is no "nothing": the owner decides.
+    return "whatever runs in it (it could not be checked)";
+  }
+}
+
+/**
+ * Closes staged panel `id` the way its × does: the focused field inside it gets its blur first (a Kanban card field
+ * saves on blur, which a panel taken away under it would never fire), then `requestClose` — so the panel's own guard
+ * still decides (a file with unsaved text asks to save or discard).
+ */
+async function closeStagedPanel(id: string): Promise<void> {
+  const focused = document.activeElement;
+  if (focused instanceof HTMLElement && focused.closest(`[data-staged="${CSS.escape(id)}"]`)) focused.blur();
+  await requestClose(id);
+}
+
+/** Everything open the chat may close, in a stable order: staged panels, Terminal tiles, the shell's windows. */
+function closables(): Closable[] {
+  const found: Closable[] = [];
+  for (const panel of get(staged)) {
+    const kind = panel.type === FILE_PANEL ? "file" : panel.type === "kanban" ? "kanban" : null;
+    if (!kind) continue;
+    const path = typeof panel.config.path === "string" && panel.config.path ? panel.config.path : undefined;
+    found.push({
+      kind,
+      id: panel.id,
+      title: kind === "file" ? (path ?? "a new note") : `Kanban (${path ?? "board"})`,
+      path,
+      loss: async () => pendingLoss(panel.id),
+      onYes:
+        kind === "file"
+          ? " On yes the panel itself asks you whether to save or discard."
+          : " On yes the panel closes and that text is gone.",
+      close: () => closeStagedPanel(panel.id),
+    });
+  }
+  for (const inst of get(instances)) {
+    if (inst.type !== "terminal") continue;
+    const cwd = typeof inst.config.cwd === "string" && inst.config.cwd ? ` in ${inst.config.cwd}` : "";
+    found.push({
+      kind: "terminal",
+      id: inst.id,
+      title: `${getModule("terminal")?.title ?? "Terminal"} tile${cwd}`,
+      loss: () => terminalLoss(inst.id),
+      onYes: " On yes the tile is removed and the program ends with it.",
+      // The tile's own × (`canvas/Tile.svelte`): the tile goes, and its shell with it.
+      close: () => removeInstance(inst.id),
+    });
+  }
+  for (const [kind, view] of openShellViews()) {
+    found.push({
+      kind,
+      id: kind,
+      title: view.title,
+      loss: async () => view.loss?.() ?? null,
+      onYes: "",
+      close: () => view.close(),
+    });
+  }
+  return found;
+}
+
+/** The one open view the params name: by `id`, else by `path`, else the only one of its kind. */
+function closeTarget(params: unknown): Closable {
+  const p = (params ?? {}) as Record<string, unknown>;
+  const kind = CLOSABLE_VIEWS.find((k) => k === p.view);
+  if (!kind) {
+    throw new Error(
+      `close_view closes one of ${CLOSABLE_VIEWS.join(", ")}; the Studio and its agents are the owner's to close`,
+    );
+  }
+  const id = text(p.id);
+  const path = text(p.path);
+  const open = closables().filter((view) => view.kind === kind);
+  const named = open.filter((view) => (id ? view.id === id : path ? view.path === path : true));
+  if (named.length === 1) return named[0];
+  if (named.length === 0) {
+    throw new Error(`no open ${kind}${id ? ` "${id}"` : path ? ` at ${path}` : ""}; open_views lists what is open`);
+  }
+  throw new Error(
+    `${named.length} ${kind} views are open (${named.map((view) => `${view.id}: ${view.title}`).join("; ")}); ` +
+      "name one by id",
+  );
+}
+
+const openViews: ModuleAction = {
+  name: "open_views",
+  chat: "direct",
+  description:
+    "List the views open now that close_view can close — Kanban panels, file panels, Terminal tiles, the Second " +
+    "Brain, the handbook, Settings — each with its id, title, path and what closing it would lose (null: nothing). " +
+    "Changes nothing.",
+  params: { type: "object", properties: {} },
+  run: async () =>
+    Promise.all(
+      closables().map(async (view) => ({
+        view: view.kind,
+        id: view.id,
+        title: view.title,
+        path: view.path ?? null,
+        wouldLose: await view.loss(),
+      })),
+    ),
+};
+
+/**
+ * The params of the closes the owner was asked about and said yes to — the very objects `ask` froze, which no caller
+ * can forge (the bridge hands `run` that object, never a copy). Any other call is checked again inside `run`.
+ */
+const shownToOwner = new WeakSet<object>();
+
+const closeView: ModuleAction = {
+  name: "close_view",
+  chat: "guarded",
+  description:
+    "Close an open view for the owner: view kanban|file|terminal|second-brain|handbook|settings, with id (from " +
+    "open_views) or path when more than one of that kind is open. Never the Studio, its panes or its agents.",
+  params: {
+    type: "object",
+    properties: {
+      view: { type: "string", enum: [...CLOSABLE_VIEWS] },
+      id: { type: "string" },
+      path: { type: "string" },
+    },
+    required: ["view"],
+  },
+  // Nothing lost: no question, it closes at once. Something lost: the owner is told exactly what, and the params are
+  // frozen to the one view shown — a yes never closes another one opened since.
+  ask: async (params) => {
+    const target = closeTarget(params);
+    const loss = await target.loss();
+    if (!loss) return null;
+    const frozen = { view: target.kind, id: target.id };
+    shownToOwner.add(frozen);
+    return {
+      question: `Close ${target.title}`,
+      detail: `Closing it would lose ${loss}.${target.onYes}`,
+      params: frozen,
+    };
+  },
+  run: async (params) => {
+    const target = closeTarget(params);
+    // Not a close the owner said yes to (nothing was lost when it was checked, or the owner's own command): checked
+    // again here, so a text typed or a program started in between is never closed away unasked.
+    if (!(typeof params === "object" && params !== null && shownToOwner.has(params))) {
+      const loss = await target.loss();
+      if (loss) throw new Error(`closing ${target.title} would lose ${loss}; call close_view again to ask the owner`);
+    }
+    await target.close();
+    // A staged panel's own guard may have kept it (the owner chose Cancel at its unsaved-text question): say so. Only a
+    // staged panel is gone as soon as its close returns; a window leaves the list when its component next updates.
+    const isPanel = target.kind === "file" || target.kind === "kanban";
+    const kept = isPanel && get(staged).some((panel) => panel.id === target.id);
+    if (kept) return { closed: false, id: target.id, reason: "the owner kept it open" };
+    return { closed: target.kind, id: target.id };
+  },
+};
+
 /** The chat's actions, in the order the manifest lists them. */
-export const CHAT_ACTIONS: readonly ModuleAction[] = [openView, setDisplay, startSkill, saveRoutine, startCard];
+export const CHAT_ACTIONS: readonly ModuleAction[] = [
+  openView,
+  openViews,
+  closeView,
+  setDisplay,
+  startSkill,
+  saveRoutine,
+  startCard,
+];
 
 export function registerChatActions(): void {
   for (const action of CHAT_ACTIONS) registerShellAction(action);

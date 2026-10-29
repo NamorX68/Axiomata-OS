@@ -113,6 +113,7 @@
   import { Channel } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
+  import { setTerminalSession } from "../core/openViews";
   import type { ModuleContext } from "../core/types";
   import {
     cellFont,
@@ -751,6 +752,7 @@
     if (!sessionId) return;
     void ctx.invoke("terminal_write", { id: sessionId, data: Array.from(bytes) }).catch(() => {
       sessionId = null;
+      setTerminalSession(ctx.instanceId, null);
       ended = true;
     });
   }
@@ -794,6 +796,7 @@
     onOutput.onmessage = (event) => {
       if (event.type === "exited") {
         sessionId = null;
+        setTerminalSession(ctx.instanceId, null);
         ended = true;
         needsRedraw = true;
         return;
@@ -857,6 +860,8 @@
         options: { shell, cwd, env, scrollbackLimit, colors: paneColors() },
         onOutput,
       });
+      // The chat's `close_view` asks this session what would end with the tile (`core/openViews.ts`).
+      if (!destroyed) setTerminalSession(ctx.instanceId, sessionId);
       // Bug found on a genuine app restart (not reproducible via dev
       // hot-reload, where the bundled font is already warm in
       // `document.fonts` from a previous load): `measureAndSize()`'s own
@@ -1458,6 +1463,7 @@
     themeObserver?.disconnect();
     flipObserver?.disconnect();
     clearTimeout(copyNoteTimeout);
+    setTerminalSession(ctx.instanceId, null);
     if (sessionId) void ctx.invoke("terminal_close", { id: sessionId });
   });
 </script>

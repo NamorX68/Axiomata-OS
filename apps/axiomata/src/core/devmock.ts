@@ -1657,6 +1657,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "save_editor_vi_state":
       editorViJson = String(args.json);
       return undefined as T;
+    // No shell runs under the mock (`terminal_spawn` is not served), so nothing is ever in a terminal's foreground.
+    case "terminal_foreground":
+      return null as T;
     case "get_terminal_settings":
       return {
         json: terminalSettingsJson ?? '{"version":1}',
