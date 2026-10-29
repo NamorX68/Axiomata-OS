@@ -16,6 +16,9 @@
   import { platform } from "../core/keys";
   import { studioActivity, watchActivity } from "../core/studioActivity";
   import { waitingAgents } from "../core/agentWaiting";
+  import { tagProposals, waitingLabel, watchTagProposals } from "../core/tagProposals";
+  import type { TagProposal } from "../core/backend";
+  import HexCount from "../ui/HexCount.svelte";
   import { focusMode, toggleFocus } from "../core/focusMode";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -58,6 +61,8 @@
   // The Dock is always there, so it keeps the one poll of the card sessions running for the whole app (the Studio mark
   // here, the Orbit's pulse, the Kanban's glowing cards).
   onMount(() => watchActivity(() => invoke("open_card_sessions")));
+  // The tags agents proposed wait for the owner beside the settings, where they are answered (tags-links.md TL4).
+  onMount(() => watchTagProposals(() => invoke<TagProposal[]>("tag_proposals")));
 </script>
 
 <header class="dock-row">
@@ -111,6 +116,11 @@
       {#if themeOpen}<ThemePicker onClose={() => (themeOpen = false)} />{/if}
     </span>
     <IconButton icon="settings" label="Settings ({settingsKey})" onclick={() => emit("shell:settings")} />
+    <HexCount
+      count={$tagProposals.length}
+      label={waitingLabel($tagProposals.length)}
+      onclick={() => emit("shell:settings", { tab: "workspace" })}
+    />
   </nav>
 </header>
 

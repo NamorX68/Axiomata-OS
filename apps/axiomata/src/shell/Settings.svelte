@@ -45,9 +45,12 @@
   import { toast } from "../core/toast";
   import { TEMPLATE } from "../theme/validator";
   import StorageSettings from "./StorageSettings.svelte";
+  import TagsSettings from "./TagsSettings.svelte";
+  import { tagProposals, waitingLabel } from "../core/tagProposals";
+  import HexCount from "../ui/HexCount.svelte";
   import Window from "./Window.svelte";
 
-  let { open = $bindable(false) }: { open?: boolean } = $props();
+  let { open = $bindable(false), initialTab = null }: { open?: boolean; initialTab?: string | null } = $props();
 
   type TabId = "appearance" | "workspace" | "providers" | "storage" | "about";
   const TABS: { id: TabId; label: string }[] = [
@@ -58,6 +61,11 @@
     { id: "about", label: "About" },
   ];
   let tab = $state<TabId>("appearance");
+  // Opened for one place (the Dock's tag badge opens Workspace): that tab, each time it is opened so.
+  $effect(() => {
+    const wanted = TABS.find((t) => t.id === initialTab);
+    if (open && wanted) tab = wanted.id;
+  });
 
   // What "Auto" comes to here, and the slider's value while it is dragged (it follows the setting otherwise).
   const autoPercent = $derived(Math.round($uiScaleAuto * 100));
@@ -425,6 +433,7 @@
       {#each TABS as t (t.id)}
         <button type="button" class="tab" class:active={tab === t.id} onclick={() => (tab = t.id)}>
           {t.label}
+          {#if t.id === "workspace"}<HexCount count={$tagProposals.length} label={waitingLabel($tagProposals.length)} />{/if}
         </button>
       {/each}
     </nav>
@@ -724,6 +733,7 @@
             </div>
           </section>
         {/if}
+        <TagsSettings />
       {:else if tab === "providers"}
         {#if config}
           <section>
