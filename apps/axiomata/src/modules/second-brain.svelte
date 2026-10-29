@@ -456,8 +456,11 @@
       pulse: animates($motion),
       snapRest: $systemReducesMotion,
       shine: $brainView.shine,
+      hideHive: $brainActive,
     };
     if (renderer) renderer.options = { ...renderer.options, ...next };
+    // The frame without the sphere must be drawn once even while the Orbit holds still (below).
+    redraw = true;
   });
 
   $effect(() => {
@@ -499,7 +502,8 @@
     // Under the Studio, a panel or a window nobody sees the Orbit, and a panel's glass would blur it again on every
     // frame it moved (core/cover.ts): it holds still there, drawing again only after a change.
     const tick = (now: number) => {
-      if (!get(groundCovered) || redraw) {
+      // Under the open Second Brain too: its own view moves, the Orbit beneath holds still.
+      if ((!get(groundCovered) && !get(brainActive)) || redraw) {
         renderer?.frame(now);
         redraw = false;
       }

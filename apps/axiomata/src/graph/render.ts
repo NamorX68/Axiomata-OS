@@ -47,6 +47,9 @@ export interface RenderOptions {
   /** Fade the drawing out towards the canvas's inscribed circle from this share of its radius on (0…1): the Second
    *  Brain's lens has no hard rim, it thins out into the Orbit beneath. Unset, nothing fades. */
   fadeFrom?: number;
+  /** Orbit only: leave the hive sphere out — the Second Brain lies over the Orbit and draws the vault itself; its
+   *  see-through layouts (Bundle, Hex) would show the sphere through their ring (owner, 2026-10-29). */
+  hideHive?: boolean;
 }
 
 /** Where the shimmer's light stands for the flat cells of a frame (`GraphRenderer.cellLight`). */
@@ -848,7 +851,7 @@ export class GraphRenderer {
       return { x: cx + x1 * R, y: cy + y1 * R, z: z2 };
     };
 
-    this.drawHive(cx, cy, R, t, project);
+    if (!this.options.hideHive) this.drawHive(cx, cy, R, t, project);
 
     // Hub.
     const hub = model.byId.get("hub");
