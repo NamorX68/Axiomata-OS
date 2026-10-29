@@ -1017,19 +1017,8 @@ export class GraphRenderer {
         ctx.globalAlpha = front ? (tone.settled ? 1 : 0.55) : 0.13;
         ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
         ctx.fill();
-        if (front && tone.heat > GraphRenderer.EMBER_FROM) {
-          // A fresh note's glow: an ember in the middle of its cell, which itself keeps its area's colour.
-          ctx.beginPath();
-          ctx.arc(0, 0, size * 0.22, 0, TWO_PI);
-          ctx.globalAlpha = Math.min(1, 0.35 + tone.heat);
-          if (tone.blur) {
-            // On a light ground a shine only looks dirty: a tighter shadow there.
-            ctx.shadowBlur = (this.lightScheme ? 6 : 14) * tone.heat;
-            ctx.shadowColor = this.glowColor;
-          }
-          ctx.fillStyle = this.glowColor;
-          ctx.fill();
-        }
+        // A fresh note's glow: an ember in the middle of its cell, which itself keeps its area's colour.
+        if (front) this.drawEmber(ctx, 0, 0, size, 1, tone);
         ctx.restore();
         // Only a front cell of a note that exists can be pointed at (`hitCell`).
         this.hivePickable[i] = node && front && tone.settled ? 1 : 0;
@@ -1401,6 +1390,33 @@ export class GraphRenderer {
   private static readonly MAP_COOLING = 0.5;
   /** The least heat (0…1) a field or cell shows as an ember core. */
   private static readonly EMBER_FROM = 0.05;
+  /** An ember's radius as a share of its cell's: a hint of heat, not a second mark over the area's colour (owner,
+   *  2026-10-29: at 0.22 it was far too big). */
+  private static readonly EMBER_SIZE = 0.09;
+
+  /** A fresh note's ember at `(x, y)` in a cell of radius `cell`, as bright as the note is fresh; nothing for a cool
+   *  one. Returns whether it drew (it leaves `globalAlpha` changed). */
+  private drawEmber(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    cell: number,
+    alpha: number,
+    tone: { heat: number; blur: boolean },
+  ): boolean {
+    if (tone.heat <= GraphRenderer.EMBER_FROM) return false;
+    ctx.beginPath();
+    ctx.arc(x, y, cell * GraphRenderer.EMBER_SIZE, 0, TWO_PI);
+    ctx.globalAlpha = alpha * Math.min(0.8, 0.25 + 0.55 * tone.heat);
+    if (tone.blur) {
+      // On a light ground a shine only looks dirty: a tighter shadow there.
+      ctx.shadowBlur = (this.lightScheme ? 2 : 5) * tone.heat;
+      ctx.shadowColor = this.glowColor;
+    }
+    ctx.fillStyle = this.glowColor;
+    ctx.fill();
+    return true;
+  }
   /** How fast a field breathes on the map (radians per second) — slower than the hive's 1.7, a map is read. */
   private static readonly MAP_BREATH = 0.8;
   /** How fast the metal's light wanders across the map (radians per second). */
@@ -1488,16 +1504,7 @@ export class GraphRenderer {
     ctx.strokeStyle = hot === "selected" ? this.glowColor : hot === "hover" ? this.textColor : this.surfaceColor;
     ctx.lineWidth = hot ? 1.8 : 1;
     ctx.stroke();
-    if (tone.heat > GraphRenderer.EMBER_FROM) {
-      ctx.beginPath();
-      ctx.arc(x, y, r * 0.22, 0, TWO_PI);
-      ctx.globalAlpha = alpha * Math.min(1, 0.35 + tone.heat);
-      if (tone.blur) {
-        ctx.shadowBlur = (this.lightScheme ? 4 : 12) * tone.heat;
-        ctx.shadowColor = this.glowColor;
-      }
-      ctx.fillStyle = this.glowColor;
-      ctx.fill();
+    if (this.drawEmber(ctx, x, y, r, alpha, tone)) {
       ctx.shadowBlur = 0;
     }
     ctx.globalAlpha = 1;
@@ -1581,19 +1588,8 @@ export class GraphRenderer {
       ctx.globalAlpha = alpha;
       ctx.fillStyle = fill;
       ctx.fill();
-      if (tone.heat > GraphRenderer.EMBER_FROM) {
-        // A fresh note's glow: an ember in the middle of its field, as bright as the note is fresh.
-        ctx.beginPath();
-        ctx.arc(0, 0, s * 0.13, 0, TWO_PI);
-        ctx.globalAlpha = alpha * Math.min(1, 0.35 + tone.heat);
-        if (tone.blur) {
-          ctx.shadowBlur = (this.lightScheme ? 4 : 12) * tone.heat;
-          ctx.shadowColor = this.glowColor;
-        }
-        ctx.fillStyle = this.glowColor;
-        ctx.fill();
-        ctx.globalAlpha = alpha;
-      }
+      // A fresh note's glow: an ember in the middle of its field, as bright as the note is fresh.
+      if (this.drawEmber(ctx, 0, 0, s, alpha, tone)) ctx.globalAlpha = alpha;
       if (shine === "metal") {
         // A plate's lit upper rim — upper-left corner, top, upper-right corner (y points down): what makes the
         // fields read as tilted metal.

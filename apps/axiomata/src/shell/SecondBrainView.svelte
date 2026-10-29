@@ -124,7 +124,7 @@
     ],
     [
       "Hex",
-      "Honeycomb instead of arcs: every note its own hex cell, packed tight, in the same area segment as in Rings, the oldest nearest the middle. Skills and areas stay as in Rings.",
+      "Honeycomb instead of arcs: every note its own hex cell, packed tight, in the same area segment as in Rings, the newest nearest the middle. Skills and areas stay as in Rings.",
     ],
     ["Areas", "One segment per top-level vault folder."],
     ["Folders", "One segment per deepest folder, e.g. Learning/Rust/lessons. A finer split of large areas."],

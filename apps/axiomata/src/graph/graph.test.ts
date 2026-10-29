@@ -171,7 +171,7 @@ describe("layouts", () => {
     }
   });
 
-  it("hex lays an area's oldest notes nearest the middle", () => {
+  it("hex lays an area's newest notes nearest the middle", () => {
     const graph = fixture();
     graph.files = graph.files.map((f) => ({ ...f, created: "2025-01-01T00:00:00Z", modified: null }));
     // Dev's notes born one day apart, the last one first in the list.
@@ -184,7 +184,7 @@ describe("layouts", () => {
       .filter((n) => n.kind === "file" && n.area === "Dev")
       .sort((a, b) => Date.parse(a.created!) - Date.parse(b.created!));
     const radius = (n: { x: number; y: number }) => Math.hypot(n.x, n.y);
-    expect(radius(dev[0]!)).toBeLessThan(radius(dev[dev.length - 1]!));
+    expect(radius(dev[dev.length - 1]!)).toBeLessThan(radius(dev[0]!));
   });
 
   it("map gives every file its own field inside the lens, skills ringing it, areas at their country's middle", () => {

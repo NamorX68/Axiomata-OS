@@ -361,8 +361,8 @@ function generateHexCells(unit: number, kStart: number, targetCount: number): He
 }
 
 /** Hands each area's files the nearest free cells inside its own angular
- *  wedge, in birth order (innermost ring first, so the oldest notes sit
- *  nearest the hub and an area darkens inward as it ages, as on the map;
+ *  wedge, newest first (innermost ring first, so the newest notes sit
+ *  nearest the hub and an area darkens outward as it ages — owner, 2026-10-29; a note without a time goes last;
  *  ties by name, so the layout is stable), then spills any leftovers — a wedge that ran short
  *  because of the discretisation above, not a real area imbalance — onto
  *  whatever cells are still free, nearest first. Mutates each file node's
@@ -386,7 +386,7 @@ function assignFilesToCells(files: GraphNode[], areas: AreaSegment[], cells: Hex
   for (const w of wedges) {
     const mine = (byArea.get(w.area) ?? [])
       .slice()
-      .sort((a, b) => (bornOf(a) ?? Infinity) - (bornOf(b) ?? Infinity) || a.label.localeCompare(b.label));
+      .sort((a, b) => (bornOf(b) ?? -Infinity) - (bornOf(a) ?? -Infinity) || a.label.localeCompare(b.label));
     if (mine.length === 0) continue;
     const candidates = cells
       .map((c, i) => ({ c, i }))
