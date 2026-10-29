@@ -22,7 +22,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AxiomataError;
-use crate::paths;
+use crate::{handbook, paths};
 
 /// Opening / closing markers of the generated manifest (the whole file is
 /// generated; the markers just make that obvious to a reader).
@@ -76,54 +76,47 @@ fn inline(raw: &str) -> String {
         .collect()
 }
 
-/// Renders the manifest Markdown. `cli` is how the agent should invoke the
-/// CLI (a bare name on PATH or an absolute path).
-/// What the chat needs to know about Axiomata itself, beyond the modules on
-/// screen: the workspace and its router, skills and their format, routines,
-/// the board, and how to behave. `{cli}` is replaced with the CLI invocation.
+/// What the chat is told about Axiomata itself (`docs/plans/chat-knows-app.md`, CH2): how to behave, where its
+/// knowledge comes from (the handbook and the live views — Q4: nothing else), and the handbook's table of contents.
+/// The pages themselves are read on demand, so the prompt stays small (Q2). `{cli}` is replaced with the CLI
+/// invocation, `{contents}` with [`handbook::contents`].
 const APP_GUIDE: &str = "\
-# How Axiomata works
+# Axiomata
 
-You are the assistant inside Axiomata-OS, the owner's personal command centre and second brain.
+You are the assistant inside Axiomata-OS, the owner's personal command centre and second brain. Your working \
+directory is the owner's vault of Markdown notes; each area's `AGENTS.md` maps its files (never edit inside its \
+`AXIOMATA-ROUTER` markers).
 
-**The workspace** (your working directory) is the owner's vault of Markdown notes, sorted into areas \
-(top-level folders). Every area and the workspace root carry an `AGENTS.md` router: a generated map of \
-the files there between `AXIOMATA-ROUTER` markers — read it to find your way, never edit inside the \
-markers. `Inbox/` holds notes not sorted yet. `ToDo.md` at the root is the ToDo tile's list.
+**What you know about the app comes from its handbook and its live state, nothing else.** Answer a question about \
+Axiomata — a view, a button, a setting, a skill, how something works — only from a handbook page or a live view \
+below. If neither says it, say so plainly and offer to note it as a gap in the handbook; never guess a name, a menu \
+or a step.
 
-**Skills** live only in `~/.axiomata/skills/<name>/SKILL.md` (never in the workspace). A skill is \
-frontmatter plus instructions:
+**The handbook** (German, one page per area). Read a page with `{cli} app handbook <name>`; \
+`{cli} app handbook` lists them. The pages:
 
-```
----
-name: my-skill            # the folder's name
-description: One sentence on what it does and when to use it.
-backend: opencode         # optional; else the skill harness of the settings. Or claude_code, axh (own harness), ollama
-model: provider/model-id  # optional; else the configured skill model; on axh the bare id the API names
-prepend_files: [\"Area/notes.md\"]   # optional workspace files inlined into the prompt
-timeout_secs: 600         # optional
-output: json              # optional; the reply must be one JSON object (a dashboard module parses it)
----
-The instructions the skill runs with — written to the agent that will run it.
-```
+{contents}
+**The live state**, read-only: `{cli} app studio|spend|runs|routines|board|storage|settings|tags`, each with \
+`--json` for JSON (`app board --board <id>` lists that board's cards). Settings show no key or token, only whether \
+one is set. Where you have the `axiomata_app` tool, it gives the same answers — use it instead of the shell.
 
-List them with `{cli} list-skills`, run one with `{cli} run-skill <name>` (or the Skills Deck's `run` \
-action below). **Routines** run a skill or a prompt on a schedule; cron is six fields, seconds first \
-(`0 0 9 * * *` is 09:00 daily) — see the Routines actions below or `{cli} routines --help`. **The Kanban \
-board** is in the app's database (the `Kanban/` notes are a read-only mirror): use the `kanban_…` actions of the Shell \
-below (they work whether or not the Kanban app is open) or `{cli} board --help`.
-
-**How to behave:** ask the owner when something is unclear instead of guessing. Before moving, renaming \
-or deleting files, or changing many things at once, say what you will do and wait for a yes. Keep your \
-work inside the workspace and `~/.axiomata/skills/`.
+**How to behave:** ask the owner when something is unclear instead of guessing. Before moving, renaming or deleting \
+files, or changing many things at once, say what you will do and wait for a yes. Keep your work inside the \
+workspace and `~/.axiomata/skills/`.
 
 ";
 
+/// Renders the manifest Markdown: the [`APP_GUIDE`] with the handbook's table of contents, then the mounted modules'
+/// actions. `cli` is how the agent should invoke the CLI (a bare name on PATH or an absolute path).
 pub fn render_manifest(entries: &[ManifestEntry], cli: &str) -> String {
     let mut out = String::new();
     out.push_str(MANIFEST_START);
     out.push('\n');
-    out.push_str(&APP_GUIDE.replace("{cli}", cli));
+    out.push_str(
+        &APP_GUIDE
+            .replace("{contents}", &handbook::contents())
+            .replace("{cli}", cli),
+    );
     out.push_str("# Axiomata-OS dashboard modules\n\n");
     out.push_str(
         "The user's Axiomata-OS dashboard is running with the module instances listed \
@@ -444,6 +437,18 @@ mod tests {
         // Only the real markers, not the ones smuggled through the title.
         assert_eq!(text.matches(MANIFEST_END).count(), 1);
         assert!(!text.contains("<!-- x -->"));
+    }
+
+    #[test]
+    fn the_guide_carries_the_handbooks_contents_and_the_rule_to_answer_from_it() {
+        let text = render_manifest(&[], "/opt/axiomata-cli");
+        assert!(text.contains(&handbook::contents()));
+        assert!(text.contains("/opt/axiomata-cli app handbook <name>"));
+        assert!(text.contains(
+            "/opt/axiomata-cli app studio|spend|runs|routines|board|storage|settings|tags"
+        ));
+        assert!(text.contains("offer to note it as a gap in the handbook"));
+        assert!(!text.contains("{cli}") && !text.contains("{contents}"));
     }
 
     #[test]
