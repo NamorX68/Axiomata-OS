@@ -1688,10 +1688,24 @@ mod tests {
                 .await
                 .is_ok()
         );
+        for allowed in [
+            "axiomata-cli notes tag \"Arbeit/a.md\" --tag rust --related \"Cargo\"",
+            "axiomata-cli notes tags list",
+        ] {
+            assert!(
+                inbox.judge("bash", &bash(allowed)).await.is_ok(),
+                "{allowed}"
+            );
+        }
         for refused in [
             "mv -n -f \"Inbox/a.md\" AGENTS.md",
             "mv \"Inbox/a.md\" x",
             "rm Inbox/a.md",
+            "axiomata-cli notes tag a.md; rm a.md",
+            "axiomata-cli notes tag \"$(id).md\" --tag x",
+            "axiomata-cli notes tag `id`.md",
+            "axiomata-cli notes tags list > AGENTS.md",
+            "axiomata-cli board add --column 1 x",
         ] {
             assert!(
                 inbox.judge("bash", &bash(refused)).await.is_err(),

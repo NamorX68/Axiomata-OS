@@ -1687,23 +1687,65 @@ pub fn delete_workspace_file(state: State<'_, CoreState>, rel: String) -> Result
 /// overwriting), the same "agent decides, code writes" split
 /// `axiomata-cli import obsidian` uses. Returns the workspace-relative path
 /// written.
+/// The placement turn's whole rights: reading, never writing or running anything.
+const PLACEMENT_TOOLS: &str = "Read";
+
 #[tauri::command]
 pub async fn create_note(state: State<'_, CoreState>, content: String) -> Result<String, String> {
     let config = read_config(&state.config);
     let existing = importer::existing_areas(&config.workspace_root);
-    let prompt = notes::placement_prompt(&content, &existing);
-    let reply = agents::chat_and_record(&config, &state.db, prompt, None, ChatMode::Instruct, None)
-        .await
-        .map_err(|err| err.to_string())?;
+    // The tag list and the note names, read off the main thread: the walk may wait on iCloud. A failed lookup only
+    // costs the tags; the note is still placed and saved.
+    let lookup = config.clone();
+    let text = content.clone();
+    let (tag_list, note_names) = tauri::async_runtime::spawn_blocking(move || {
+        (
+            axiomata_core::tags::list::load(&lookup).unwrap_or_default(),
+            notes::note_names(&lookup, &text),
+        )
+    })
+    .await
+    .unwrap_or_default();
+    let prompt = notes::placement_prompt(&content, &existing, &tag_list, &note_names);
+    // The turn only answers with JSON: it may read, nothing else — the prompt carries file names and tag descriptions
+    // from the vault, which must not be able to steer a turn that could run commands (security audit, TL5).
+    let reply = agents::chat_and_record(
+        &config,
+        &state.db,
+        prompt,
+        None,
+        ChatMode::Chat,
+        Some(PLACEMENT_TOOLS.to_owned()),
+    )
+    .await
+    .map_err(|err| err.to_string())?;
     let placement = notes::parse_placement(&reply.reply_markdown).map_err(|err| err.to_string())?;
-    notes::write_placed_note(
+    let rel = notes::write_placed_note(
         &config.workspace_root,
         &content,
         &placement.area,
         &placement.file_name,
         placement.title.as_deref(),
     )
-    .map_err(|err| err.to_string())
+    .map_err(|err| err.to_string())?;
+    // Tags and related links are the placement's second half (tags-links.md TL5): the note is saved either way, so a
+    // tag that cannot be set is logged, never a failed save.
+    let db = std::sync::Arc::clone(&state.db);
+    let written = rel.clone();
+    let tagged = tauri::async_runtime::spawn_blocking(move || {
+        notes::tag_placed_note(&config, &db, &written, &placement)
+    })
+    .await;
+    match tagged {
+        Ok(Ok(outcome)) => {
+            for reason in &outcome.refused {
+                tracing::info!(note = %rel, "placement tag not set: {reason}");
+            }
+        }
+        Ok(Err(err)) => tracing::warn!(note = %rel, "the new note's tags were not set: {err}"),
+        Err(err) => tracing::warn!(note = %rel, "the tagging task failed: {err}"),
+    }
+    Ok(rel)
 }
 
 /// A skill as the dashboard lists it: with the harness a run takes — its own `backend:`, else the configured skill
