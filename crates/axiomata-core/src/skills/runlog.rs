@@ -7,8 +7,10 @@
 //!
 //! Implemented in M1.
 
-use std::fs::OpenOptions;
+use std::ffi::OsString;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -27,14 +29,21 @@ use crate::skills::model::{RunRecord, RunSource, RunStatus, RunSummary};
 /// legitimate "show me the last `MAX_RUN_LIMIT`" query.
 const RUNS_RETENTION_LIMIT: usize = MAX_RUN_LIMIT * 4;
 
+/// The size from which `runs.log` is rotated before the next line is appended (`docs/plans/maintenance.md` §3): it is
+/// a mirror for `tail -f`, not the record — the database is — so its old lines need not stay forever.
+pub const RUNS_LOG_ROTATE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// How many rotated generations of `runs.log` stay beside it (`runs.log.1` the newer, `runs.log.2` the older).
+pub const RUNS_LOG_GENERATIONS: u32 = 2;
+
 /// Persists `record` to both the database and the JSONL log, then prunes
 /// `runs` back down to [`RUNS_RETENTION_LIMIT`] rows if this write pushed it
 /// over (see [`RUNS_RETENTION_LIMIT`]'s docs).
 ///
 /// The database row is written first; on success the JSONL line is appended.
 /// Returns the record with its assigned [`RunRecord::id`] set. The JSONL log
-/// itself is intentionally never pruned — it is an append-only audit trail,
-/// not something the app queries back.
+/// is an append-only trail the app never queries back; it is rotated at
+/// [`RUNS_LOG_ROTATE_BYTES`] rather than pruned line by line.
 ///
 /// Errors:
 ///     [`AxiomataError::Database`] if the row insert or the prune fails;
@@ -261,9 +270,10 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
     Ok(db.last_insert_rowid())
 }
 
-/// Appends `record` as one JSON line to `~/.axiomata/logs/runs.log`.
+/// Appends `record` as one JSON line to `~/.axiomata/logs/runs.log`, rotating the file first when it is full.
 fn append_jsonl(record: &RunRecord) -> Result<(), AxiomataError> {
     let path = paths::runs_log_path();
+    rotate_if_full(&path, RUNS_LOG_ROTATE_BYTES);
     let line = serde_json::to_string(record).map_err(|err| AxiomataError::Io {
         path: path.clone(),
         source: std::io::Error::other(err),
@@ -282,6 +292,37 @@ fn append_jsonl(record: &RunRecord) -> Result<(), AxiomataError> {
         source,
     })?;
     writeln!(file, "{line}").map_err(|source| AxiomataError::Io { path, source })
+}
+
+/// `runs.log.<n>` beside `log`.
+pub fn rotated_log_path(log: &Path, generation: u32) -> PathBuf {
+    let mut name = OsString::from(log.as_os_str());
+    name.push(format!(".{generation}"));
+    PathBuf::from(name)
+}
+
+/// Moves `log` to `log.1` (and `log.1` to `log.2`, dropping the oldest) once it holds `limit` bytes or more.
+///
+/// Best effort: a failed rename is logged and the line is appended to the full file anyway — losing a line of the
+/// mirror would be worse than a file that grew past its limit. Two processes rotating at the same moment can drop one
+/// generation; the database still has every run. A link in place of the log is left alone.
+fn rotate_if_full(log: &Path, limit: u64) {
+    match fs::symlink_metadata(log) {
+        Ok(meta) if meta.is_file() && meta.len() >= limit => {}
+        _ => return,
+    }
+    for generation in (1..RUNS_LOG_GENERATIONS).rev() {
+        let older = rotated_log_path(log, generation);
+        if fs::symlink_metadata(&older).is_ok_and(|meta| meta.is_file()) {
+            let target = rotated_log_path(log, generation + 1);
+            if let Err(err) = fs::rename(&older, &target) {
+                tracing::warn!(%err, path = %older.display(), "could not rotate a run log generation");
+            }
+        }
+    }
+    if let Err(err) = fs::rename(log, rotated_log_path(log, 1)) {
+        tracing::warn!(%err, path = %log.display(), "could not rotate the run log");
+    }
 }
 
 /// Hard upper bound on how many rows [`list_runs`] will return, whatever
@@ -766,5 +807,42 @@ mod tests {
             env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
         }
         let _ = fs::remove_dir_all(&home);
+    }
+    #[test]
+    fn a_full_run_log_rotates_into_two_generations_and_drops_the_oldest() {
+        let dir = unique_temp_dir("axiomata-test-runlog-rotate");
+        fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("runs.log");
+
+        // Below the limit nothing moves.
+        fs::write(&log, "small\n").unwrap();
+        rotate_if_full(&log, 100);
+        assert!(log.exists());
+        assert!(!rotated_log_path(&log, 1).exists());
+
+        fs::write(&log, "first\n".repeat(20)).unwrap();
+        rotate_if_full(&log, 100);
+        assert!(!log.exists(), "the full log moved away");
+        assert!(rotated_log_path(&log, 1).exists());
+
+        fs::write(&log, "second\n".repeat(20)).unwrap();
+        rotate_if_full(&log, 100);
+        fs::write(&log, "third\n".repeat(20)).unwrap();
+        rotate_if_full(&log, 100);
+        assert!(
+            fs::read_to_string(rotated_log_path(&log, 1))
+                .unwrap()
+                .starts_with("third")
+        );
+        assert!(
+            fs::read_to_string(rotated_log_path(&log, 2))
+                .unwrap()
+                .starts_with("second")
+        );
+        assert!(
+            !rotated_log_path(&log, 3).exists(),
+            "only two generations stay"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

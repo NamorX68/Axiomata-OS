@@ -37,8 +37,9 @@ mod wallpaper;
 /// touches the run log that lives in the same directory.
 const APP_LOG_PREFIX: &str = "app.log";
 
-/// How many daily app-log files are kept; older ones are deleted by the appender on rotation.
-const APP_LOG_MAX_FILES: usize = 7;
+/// How many daily app-log files are kept; older ones are deleted by the appender on rotation. Two weeks, the same as
+/// the maintenance's default age for them (`[maintenance] app_log_days`, `docs/plans/maintenance.md` §3).
+const APP_LOG_MAX_FILES: usize = 14;
 
 /// Keeps the file writer's background thread alive until the process ends: dropping the guard
 /// stops it and loses the lines still queued.

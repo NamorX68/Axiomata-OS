@@ -707,6 +707,11 @@ pub struct Config {
     /// Defaults for the built-in agent backends.
     #[serde(default)]
     pub agents: AgentDefaults,
+
+    /// How long Axiomata keeps its own data before the maintenance cleans it up (`[maintenance]`,
+    /// `docs/plans/maintenance.md` §3).
+    #[serde(default)]
+    pub maintenance: MaintenanceSettings,
 }
 
 impl Default for Config {
@@ -715,7 +720,101 @@ impl Default for Config {
             owner: String::new(),
             workspace_root: default_workspace_root(),
             agents: AgentDefaults::default(),
+            maintenance: MaintenanceSettings::default(),
         }
+    }
+}
+
+/// The retention rules of the built-in maintenance (`[maintenance]`, `docs/plans/maintenance.md` §3, A4).
+///
+/// Every field falls back to the plan's value on its own (`#[serde(default)]` on the struct), so a config that names
+/// only one rule keeps the others. Ages are whole days; the owner changes them in Settings → Storage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MaintenanceSettings {
+    /// The weekly clean-up at start. Off stops only that run — "Clean up now" and `maintenance clean` still work.
+    pub enabled: bool,
+    /// Skill and routine runs (`runs`) older than this go …
+    pub runs_days: u32,
+    /// … except the newest this many, whatever their age.
+    pub runs_keep: u32,
+    /// A routine's firing history (`routine_runs`).
+    pub routine_runs_days: u32,
+    /// The chat's turns (`chat_turns`).
+    pub chat_turns_days: u32,
+    /// Glut's counted web searches (`web_searches`); the limits count a day and a month, so anything older is history.
+    pub web_searches_days: u32,
+    /// The history of an archived card (`card_events`), counted from the archiving; a living card keeps all of it.
+    pub card_events_days: u32,
+    /// What the studio's sessions spent (`session_spend`).
+    pub session_spend_days: u32,
+    /// The daily app log files (`logs/app.log.<date>`).
+    pub app_log_days: u32,
+    /// How many `*.backup-*` copies of each file in `~/.axiomata` stay, the newest first.
+    pub backups_keep: u32,
+    /// The app's own Claude Code sessions (`claude/projects`, `runs`, `shell-snapshots`, `session-env`).
+    pub claude_sessions_days: u32,
+}
+
+impl Default for MaintenanceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            runs_days: 90,
+            runs_keep: 200,
+            routine_runs_days: 30,
+            chat_turns_days: 90,
+            web_searches_days: 90,
+            card_events_days: 90,
+            session_spend_days: 365,
+            app_log_days: 14,
+            backups_keep: 2,
+            claude_sessions_days: 30,
+        }
+    }
+}
+
+/// The longest age a retention rule may name: ten years, far beyond any real wish, short of an overflowing date.
+pub const MAINTENANCE_MAX_DAYS: u32 = 3650;
+
+impl MaintenanceSettings {
+    /// Checks every rule: an age of zero would delete everything at the next clean-up, so each age is at least one
+    /// day, and at least one backup of a file stays.
+    ///
+    /// # Errors
+    ///
+    /// A sentence naming the first rule out of range, for the Settings toast.
+    pub fn validate(&self) -> Result<(), String> {
+        let ages = [
+            ("runs", self.runs_days),
+            ("routine firings", self.routine_runs_days),
+            ("chat turns", self.chat_turns_days),
+            ("web searches", self.web_searches_days),
+            ("archived card history", self.card_events_days),
+            ("session spend", self.session_spend_days),
+            ("app log", self.app_log_days),
+            ("Claude sessions", self.claude_sessions_days),
+        ];
+        for (name, days) in ages {
+            if !(1..=MAINTENANCE_MAX_DAYS).contains(&days) {
+                return Err(format!(
+                    "the {name} age must be between 1 and {MAINTENANCE_MAX_DAYS} days (got {days})"
+                ));
+            }
+        }
+        if !(1..=100).contains(&self.backups_keep) {
+            return Err(format!(
+                "between 1 and 100 backups per file must stay (got {})",
+                self.backups_keep
+            ));
+        }
+        if self.runs_keep > 100_000 {
+            return Err(format!(
+                "at most 100000 runs can be kept regardless of age (got {})",
+                self.runs_keep
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -857,6 +956,8 @@ impl Config {
                 "the studio's daily cap must be a positive dollar amount (got {cap}) — leave it unset to disable it"
             ));
         }
+
+        self.maintenance.validate()?;
 
         // Per-model metering prices: a model may be missing (falls back to the
         // CLI's own estimate), but a present entry must be a sane, finite,
@@ -1111,6 +1212,10 @@ mod tests {
                 ollama_model: "llama3.2:latest".to_string(),
                 skill_timeout_secs: 120,
                 ..AgentDefaults::default()
+            },
+            maintenance: MaintenanceSettings {
+                runs_days: 45,
+                ..MaintenanceSettings::default()
             },
         };
         custom.save().expect("save should succeed");
@@ -1931,5 +2036,43 @@ mod tests {
         assert!(validate_base_url("openrouter.ai/api").is_err());
         assert!(validate_base_url("https://").is_err());
         assert!(validate_base_url("").is_err());
+    }
+    #[test]
+    fn maintenance_rules_default_to_the_plan_and_a_partial_section_keeps_the_rest() {
+        let old: Config = toml::from_str("owner = \"x\"\n").unwrap();
+        assert_eq!(old.maintenance, MaintenanceSettings::default());
+        assert!(old.maintenance.enabled);
+        assert_eq!(old.maintenance.runs_days, 90);
+        assert_eq!(old.maintenance.runs_keep, 200);
+        assert_eq!(old.maintenance.session_spend_days, 365);
+
+        let partial: Config =
+            toml::from_str("[maintenance]\nenabled = false\napp_log_days = 21\n").unwrap();
+        assert!(!partial.maintenance.enabled);
+        assert_eq!(partial.maintenance.app_log_days, 21);
+        assert_eq!(partial.maintenance.claude_sessions_days, 30);
+
+        let back: Config = toml::from_str(&toml::to_string_pretty(&partial).unwrap()).unwrap();
+        assert_eq!(back.maintenance, partial.maintenance);
+    }
+
+    #[test]
+    fn a_maintenance_age_of_zero_or_no_backup_is_refused() {
+        assert!(MaintenanceSettings::default().validate().is_ok());
+        let zero = MaintenanceSettings {
+            chat_turns_days: 0,
+            ..MaintenanceSettings::default()
+        };
+        assert!(zero.validate().unwrap_err().contains("chat turns"));
+        let no_backup = MaintenanceSettings {
+            backups_keep: 0,
+            ..MaintenanceSettings::default()
+        };
+        assert!(no_backup.validate().is_err());
+        let config = Config {
+            maintenance: zero,
+            ..Config::default()
+        };
+        assert!(config.validate_for_save().is_err());
     }
 }
