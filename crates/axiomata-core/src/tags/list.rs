@@ -1,7 +1,8 @@
 //! The vault's one tag list, `<workspace>/TAGS.md` (`docs/plans/tags-links.md` Q6, V1): a line per tag,
 //! `- #tag — description`, readable without the app and read by the agents, but written only by the app (Settings →
-//! Workspace → Tags) — "nothing by hand in files". A list that is not there yet starts as the news skills' two tags
-//! (V4) and is written the first time it is asked for, so an agent that reads the file finds it.
+//! Workspace → Tags, or `axiomata-cli notes tags rename|describe`) — "nothing by hand in files". A list that is not
+//! there yet starts as the news skills' two tags (V4) and is written the first time it is asked for, so an agent that
+//! reads the file finds it.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,16 +26,19 @@ pub struct TagEntry {
     pub description: String,
 }
 
-/// The list a vault starts with (V4): the tags the news skills already write.
+/// The list a vault starts with (V4): the tags the news skills write into their notes' frontmatter. The names follow
+/// the vault's nested scheme (owner, 2026-10-29: `#ki-news` became `ai/news`, `#ki-modelle` `ai/models`); the
+/// descriptions are German like the rest of the owner's list.
 pub fn seed() -> Vec<TagEntry> {
     vec![
         TagEntry {
-            tag: "ki-news".into(),
-            description: "AI news, collected by the news skills".into(),
+            tag: "ai/models".into(),
+            description:
+                "Neue KI-Modelle und ihre Veröffentlichungen, gesammelt vom Skill model-news".into(),
         },
         TagEntry {
-            tag: "ki-modelle".into(),
-            description: "AI models and their releases, collected by the model-news skill".into(),
+            tag: "ai/news".into(),
+            description: "KI-Nachrichten, gesammelt von den News-Skills (RSS und Web)".into(),
         },
     ]
 }
@@ -136,6 +140,16 @@ pub fn load(config: &Config) -> Result<Vec<TagEntry>, AxiomataError> {
     }
 }
 
+/// The vault's tag list without writing anything: a vault without a `TAGS.md` reads as the [`seed`] (a dry run must
+/// not create the file — security audit).
+///
+/// # Errors
+///
+/// As [`load`], short of the write.
+pub fn current(config: &Config) -> Result<Vec<TagEntry>, AxiomataError> {
+    Ok(workspace::read(config, TAGS_FILE)?.map_or_else(seed, |file| parse(&file.content)))
+}
+
 /// Checks and orders a list the owner saved: every tag normalised, none twice, descriptions on one line, at most
 /// [`MAX_TAGS`]. Sorted by tag, so the file reads like an index.
 ///
@@ -179,31 +193,102 @@ pub fn save(config: &Config, entries: Vec<TagEntry>) -> Result<Vec<TagEntry>, Ax
     Ok(entries)
 }
 
+/// Changes the list as `change` says, written only while `TAGS.md` is as read: an accepted proposal, a rename or a
+/// description never drops a tag the owner saved meanwhile. A list that is not there yet is seeded first ([`load`]).
+/// Returns the list as stored.
+///
+/// # Errors
+///
+/// As [`load`] and [`validated`], what `change` returns, and a conflict when the file changed in between.
+pub fn update(
+    config: &Config,
+    change: impl FnOnce(&mut Vec<TagEntry>) -> Result<(), AxiomataError>,
+) -> Result<Vec<TagEntry>, AxiomataError> {
+    load(config)?;
+    let Some(file) = workspace::read(config, TAGS_FILE)? else {
+        return Err(refused("TAGS.md went away while the list was changed"));
+    };
+    let mut entries = parse(&file.content);
+    change(&mut entries)?;
+    let entries = validated(entries)?;
+    let text = render(&entries);
+    if text != file.content {
+        workspace::write(config, TAGS_FILE, &text, Some(&file.version))?;
+    }
+    Ok(entries)
+}
+
 /// Adds `tag` to the list unless it is there; returns whether it was added.
 ///
 /// # Errors
 ///
-/// As [`load`] and [`save`].
+/// As [`update`].
 pub fn add(config: &Config, tag: &str, description: &str) -> Result<bool, AxiomataError> {
     let Some(tag) = normalise(tag) else {
         return Err(refused(format!("{tag:?} is no tag")));
     };
-    // Written only while the file is as read: an accepted proposal never drops a tag the owner saved meanwhile.
-    load(config)?;
-    let Some(file) = workspace::read(config, TAGS_FILE)? else {
-        return Err(refused("TAGS.md went away while a tag was added"));
+    let mut added = false;
+    update(config, |entries| {
+        if !entries.iter().any(|entry| entry.tag == tag) {
+            entries.push(TagEntry {
+                tag: tag.clone(),
+                description: description.to_owned(),
+            });
+            added = true;
+        }
+        Ok(())
+    })?;
+    Ok(added)
+}
+
+/// What [`describe`] did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Described {
+    /// The tag, normalised.
+    pub tag: String,
+    /// The description as stored (one line, capped).
+    pub description: String,
+    /// Whether the tag was not on the list before and was put there with it.
+    pub added: bool,
+    /// Whether the stored description differs from the one before.
+    pub changed: bool,
+}
+
+/// Sets `tag`'s description on the list — the owner's `notes tags describe`. A tag that is not on the list yet is
+/// added with it: the owner naming a tag and what it is for is the decision a proposal waits for.
+///
+/// # Errors
+///
+/// `tag` is no tag, and as [`update`].
+pub fn describe(config: &Config, tag: &str, description: &str) -> Result<Described, AxiomataError> {
+    let Some(tag) = normalise(tag) else {
+        return Err(refused(format!("{tag:?} is no tag")));
     };
-    let mut entries = parse(&file.content);
-    if entries.iter().any(|entry| entry.tag == tag) {
-        return Ok(false);
-    }
-    entries.push(TagEntry {
-        tag,
-        description: description.to_owned(),
-    });
-    let entries = validated(entries)?;
-    workspace::write(config, TAGS_FILE, &render(&entries), Some(&file.version))?;
-    Ok(true)
+    let description = one_line(description);
+    let mut outcome = Described {
+        tag: tag.clone(),
+        description: description.clone(),
+        added: false,
+        changed: false,
+    };
+    update(config, |entries| {
+        match entries.iter_mut().find(|entry| entry.tag == tag) {
+            Some(entry) => {
+                outcome.changed = entry.description != description;
+                entry.description = description.clone();
+            }
+            None => {
+                outcome.added = true;
+                outcome.changed = true;
+                entries.push(TagEntry {
+                    tag: tag.clone(),
+                    description: description.clone(),
+                });
+            }
+        }
+        Ok(())
+    })?;
+    Ok(outcome)
 }
 
 #[cfg(test)]

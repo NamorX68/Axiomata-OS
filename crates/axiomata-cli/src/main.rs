@@ -2787,10 +2787,17 @@ fn skill_run_may(command: &Command) -> bool {
         Command::Board { action } => {
             matches!(action, BoardAction::List { .. } | BoardAction::Add { .. })
         }
-        // `notes tags` is the list, the vault run's todo and a proposal — nothing that writes a note.
+        // Of `notes tags` the list, the vault run's todo, a skip and a proposal — nothing that writes a note. Renaming,
+        // describing and lifting are the owner's.
         Command::Notes { action } => matches!(
             action,
-            notes_cmd::NotesAction::Tag { .. } | notes_cmd::NotesAction::Tags { .. }
+            notes_cmd::NotesAction::Tag { .. }
+                | notes_cmd::NotesAction::Tags {
+                    action: notes_cmd::TagsAction::List { .. }
+                        | notes_cmd::TagsAction::Todo
+                        | notes_cmd::TagsAction::Skip { .. }
+                        | notes_cmd::TagsAction::Propose { .. }
+                }
         ),
         _ => false,
     }
@@ -3284,6 +3291,10 @@ mod tests {
             &["modules"],
             &["maintenance", "clean"],
             &["maintenance", "status"],
+            &["notes", "tags", "rename", "a", "b"],
+            &["notes", "tags", "rename", "a", "b", "--dry-run"],
+            &["notes", "tags", "describe", "a", "A"],
+            &["notes", "tags", "lift-inline", "--dry-run"],
         ] {
             assert!(!may(refused), "{refused:?}");
         }

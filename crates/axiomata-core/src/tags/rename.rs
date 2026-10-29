@@ -1,6 +1,7 @@
 //! Renames that pull their uses along, as Obsidian does: a note renamed in the app gets every `[[link]]` to it
 //! rewritten in the other notes — alias and `#heading` kept (`docs/plans/tags-links.md` V3) — and a tag renamed in the
-//! settings is rewritten in every note's text and frontmatter, its nested tags with it (TL4).
+//! settings (or with `axiomata-cli notes tags rename`) is rewritten in every note's text and frontmatter, its nested
+//! tags with it, merging into a tag that is listed already (TL4).
 //!
 //! Both walk the vault's Markdown notes once, read and write each through the workspace's guard (a note the owner
 //! changed in between is skipped, never overwritten), and can count first without writing (`dry_run`). Code (fenced
@@ -182,48 +183,158 @@ fn apply_edits(text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> 
     out
 }
 
+/// A note a rename or a lift left alone, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkippedNote {
+    pub note: String,
+    pub reason: String,
+}
+
+/// What [`rename_tag`] changed (or, in a dry run, would change).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct TagRename {
+    /// The two names, normalised.
+    pub old: String,
+    pub new: String,
+    /// Notes rewritten.
+    pub files: usize,
+    /// Uses of the tag rewritten: each `#tag` in a text and each frontmatter item, nested tags included.
+    pub uses: usize,
+    /// Notes that use the tag but were not (fully) rewritten: a `tags:` the app does not rewrite (its text's `#tag`s
+    /// are renamed all the same), a note that changed while it was edited, one that could not be read.
+    pub skipped: Vec<SkippedNote>,
+    /// `new` was on the list already: `old` merges into it and the entry's description stays (unless one was given).
+    pub merged: bool,
+    /// The list's entry for `new` after the rename, as stored (or as it would be, in a dry run).
+    pub description: String,
+}
+
+impl TagRename {
+    /// The counts the settings' rename shows.
+    pub fn count(&self) -> RenameCount {
+        RenameCount {
+            files: self.files,
+            links: self.uses,
+        }
+    }
+}
+
 /// Renames the tag `old` to `new` in every note — `#old` and `#old/child` in the text, `old` and `old/child` in the
-/// frontmatter — and on the tag list (an entry already called `new` keeps its description). Nested tags follow their
-/// parent, as in Obsidian.
+/// frontmatter — and on the tag list. Nested tags follow their parent, as in Obsidian. When `new` is on the list
+/// already, `old` merges into it: a note that had both keeps one, and the entry keeps its description. After the
+/// rename `new` is on the list — with `description` when given, else with the merged entry's or `old`'s.
 ///
 /// # Errors
 ///
-/// `old` or `new` is no tag, both are the same, the vault cannot be walked, or the list cannot be written.
+/// `old` or `new` is no tag, both are the same, `new` lies below `old` (its own uses would be renamed again), `old` is
+/// on no note and not on the list (a typo), the vault cannot be walked, or the list cannot be written.
 pub fn rename_tag(
     config: &Config,
     old: &str,
     new: &str,
+    description: Option<&str>,
     dry_run: bool,
-) -> Result<RenameCount, AxiomataError> {
+) -> Result<TagRename, AxiomataError> {
     let (Some(old), Some(new)) = (normalise(old), normalise(new)) else {
         return Err(refused("both names must be tags"));
     };
     if old == new {
         return Err(refused("the old and the new tag are the same"));
     }
-    let mut count = RenameCount::default();
+    if is_within(&new, &old) {
+        return Err(refused(format!(
+            "#{new} lies below #{old}: its notes would be renamed twice; rename to a tag outside #{old}"
+        )));
+    }
+    let listed = list::current(config)?;
+    let given = description.map(list::one_line);
+    let renamed = |entries: Vec<TagEntry>| {
+        with_new(renamed_list(entries, &old, &new), &new, given.as_deref())
+    };
+    // The list as it will be is checked before any note is written: a list that cannot be stored stops the rename
+    // while the notes are still as they were.
+    let planned = list::validated(renamed(listed.clone()))?;
+    let mut outcome = TagRename {
+        old: old.clone(),
+        new: new.clone(),
+        merged: listed.iter().any(|entry| entry.tag == new),
+        ..TagRename::default()
+    };
     for rel in crate::memory::walker::file_paths(config)? {
         if !rel.to_lowercase().ends_with(".md") || !rewritable(&rel) {
             continue;
         }
-        let Ok(Some(file)) = workspace::read(config, &rel) else {
-            continue;
+        let file = match workspace::read(config, &rel) {
+            Ok(Some(file)) => file,
+            Ok(None) => continue,
+            Err(err) => {
+                outcome.skipped.push(SkippedNote {
+                    note: rel,
+                    reason: err.to_string(),
+                });
+                continue;
+            }
         };
-        let (text, uses) = rewrite_tag(&file.content, &old, &new);
-        if uses == 0 {
+        let rewrite = rewrite_tag(&file.content, &old, &new);
+        if rewrite.kept_key {
+            outcome.skipped.push(SkippedNote {
+                note: rel.clone(),
+                reason: "its `tags:` is written in a form the app does not rewrite; change it there by hand"
+                    .to_owned(),
+            });
+        }
+        if rewrite.uses == 0 {
             continue;
         }
-        if !dry_run && workspace::write(config, &rel, &text, Some(&file.version)).is_err() {
+        if !dry_run
+            && let Err(err) = workspace::write(config, &rel, &rewrite.text, Some(&file.version))
+        {
+            outcome.skipped.push(SkippedNote {
+                note: rel,
+                reason: err.to_string(),
+            });
             continue;
         }
-        count.files += 1;
-        count.links += uses;
+        outcome.files += 1;
+        outcome.uses += rewrite.uses;
     }
-    if !dry_run {
-        let renamed = renamed_list(list::load(config)?, &old, &new);
-        list::save(config, renamed)?;
+    let on_list = listed.iter().any(|entry| is_within(&entry.tag, &old));
+    if outcome.uses == 0 && !on_list && outcome.skipped.is_empty() {
+        return Err(refused(format!(
+            "#{old} is on no note and not on the list; nothing to rename"
+        )));
     }
-    Ok(count)
+    let stored = if dry_run {
+        planned
+    } else {
+        list::update(config, |entries| {
+            *entries = renamed(std::mem::take(entries));
+            Ok(())
+        })?
+    };
+    outcome.description = stored
+        .iter()
+        .find(|entry| entry.tag == new)
+        .map(|entry| entry.description.clone())
+        .unwrap_or_default();
+    Ok(outcome)
+}
+
+/// `entries` with `new` on it: an entry of that name gets `description` when one is given; a missing one is added
+/// with it (or without a description).
+fn with_new(mut entries: Vec<TagEntry>, new: &str, description: Option<&str>) -> Vec<TagEntry> {
+    match entries.iter_mut().find(|entry| entry.tag == new) {
+        Some(entry) => {
+            if let Some(description) = description {
+                entry.description = description.to_owned();
+            }
+        }
+        None => entries.push(TagEntry {
+            tag: new.to_owned(),
+            description: description.unwrap_or_default().to_owned(),
+        }),
+    }
+    entries
 }
 
 /// `tag` with its `old` part (the tag itself or a parent of it) replaced by `new`.
@@ -231,8 +342,17 @@ fn renamed(tag: &str, old: &str, new: &str) -> String {
     format!("{new}{}", &tag[old.len()..])
 }
 
+/// A note's text after a tag rename.
+struct TagRewrite {
+    text: String,
+    /// Uses of the tag rewritten.
+    uses: usize,
+    /// The frontmatter's `tags:` holds the tag but is written in a form the app does not rewrite, so it kept it.
+    kept_key: bool,
+}
+
 /// `text` with the tag renamed, and how many uses there were.
-fn rewrite_tag(text: &str, old: &str, new: &str) -> (String, usize) {
+fn rewrite_tag(text: &str, old: &str, new: &str) -> TagRewrite {
     let mut edits = Vec::new();
     for (range, raw) in inline_tags(text) {
         if let Some(tag) = normalise(&raw)
@@ -244,10 +364,27 @@ fn rewrite_tag(text: &str, old: &str, new: &str) -> (String, usize) {
     let inline = edits.len();
     // The inline tags lie after the frontmatter, so the frontmatter's offsets hold after their edits.
     let text = apply_edits(text, edits);
-    // A key the app cannot write back unchanged keeps its old tag; only the text's uses are renamed then.
-    let Some(key) = tags_key(&text).filter(|key| key.simple) else {
-        return (text, inline);
+    let holds_old = |key: &super::detect::TagsKey| {
+        key.items
+            .iter()
+            .any(|item| normalise(&item.value).is_some_and(|tag| is_within(&tag, old)))
     };
+    let Some(key) = tags_key(&text) else {
+        return TagRewrite {
+            text,
+            uses: inline,
+            kept_key: false,
+        };
+    };
+    // A key the app cannot write back unchanged keeps its old tag; only the text's uses are renamed then.
+    if !key.simple {
+        let kept_key = holds_old(&key);
+        return TagRewrite {
+            text,
+            uses: inline,
+            kept_key,
+        };
+    }
     let mut uses = 0;
     let mut seen = HashSet::new();
     let mut items = Vec::new();
@@ -264,9 +401,17 @@ fn rewrite_tag(text: &str, old: &str, new: &str) -> (String, usize) {
         }
     }
     if uses == 0 {
-        return (text, inline);
+        return TagRewrite {
+            text,
+            uses: inline,
+            kept_key: false,
+        };
     }
-    (write_tags_key(&text, &items), inline + uses)
+    TagRewrite {
+        text: write_tags_key(&text, &items),
+        uses: inline + uses,
+        kept_key: false,
+    }
 }
 
 /// The list with `old` (and its nested entries) renamed; a renamed entry whose new name is listed already goes.
@@ -345,13 +490,24 @@ mod tests {
     fn a_tag_renames_in_text_and_frontmatter_with_its_children() {
         let text =
             "---\ntags: [Rust, rust/async, other, neu]\n---\n#rust #Rust/Async #rusty `#rust`\n";
-        let (out, uses) = rewrite_tag(text, "rust", "neu");
+        let TagRewrite {
+            text: out, uses, ..
+        } = rewrite_tag(text, "rust", "neu");
         assert_eq!(
             out,
             "---\ntags:\n  - neu\n  - neu/async\n  - other\n---\n#neu #neu/async #rusty `#rust`\n"
         );
         assert_eq!(uses, 4);
-        assert_eq!(rewrite_tag("nothing #here", "rust", "neu").1, 0);
+        assert_eq!(rewrite_tag("nothing #here", "rust", "neu").uses, 0);
+        // A key the app does not rewrite keeps the old tag (and says so); the text's use is renamed all the same.
+        let odd = rewrite_tag(
+            "---\ntags: [\"rust\", \"my tag\"]\n---\n#rust\n",
+            "rust",
+            "neu",
+        );
+        assert_eq!(odd.text, "---\ntags: [\"rust\", \"my tag\"]\n---\n#neu\n");
+        assert!(odd.kept_key);
+        assert_eq!(odd.uses, 1);
     }
 
     #[test]
@@ -401,14 +557,16 @@ mod tests {
             "[[New]] and [[New|o]] #rust\n"
         );
 
-        let tags = rename_tag(&config, "#Rust", "lang/rust", false).unwrap();
-        assert_eq!(tags, RenameCount { files: 3, links: 3 });
+        let tags = rename_tag(&config, "#Rust", "lang/rust", None, false).unwrap();
+        assert_eq!(tags.count(), RenameCount { files: 3, links: 3 });
+        assert!(!tags.merged);
+        assert_eq!(tags.description, "Rust");
         assert_eq!(
             fs::read_to_string(root.join("b.md")).unwrap(),
             "---\ntags:\n  - lang/rust\n---\n[[Dev/New]]\n"
         );
         assert_eq!(list::load(&config).unwrap()[0].tag, "lang/rust");
-        assert!(rename_tag(&config, "a", "A", true).is_err());
+        assert!(rename_tag(&config, "a", "A", None, true).is_err());
         assert!(rename_note_links(&config, "../x.md", "y.md", true).is_err());
         assert!(
             rename_note_links(&config, "a.md", "b.md", true).is_err(),
@@ -423,6 +581,121 @@ mod tests {
             fs::read_to_string(root.join("GEMINI.md")).unwrap(),
             "[[Old]] #rust\n"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The owner's cleanup of 2026-10-29, on a fixture: nested targets not yet listed, a merge into a listed tag, a
+    /// tag only the notes know, descriptions given or kept.
+    #[test]
+    fn the_owners_cleanup_renames_nests_and_merges() {
+        let root = unique_temp_dir("axiomata-tags-cleanup");
+        fs::create_dir_all(root.join("News")).unwrap();
+        fs::write(
+            root.join("TAGS.md"),
+            "- #ki-news — News\n- #ki-modelle — Modelle\n- #tauri — Tauri\n- #rust/gui — GUIs in Rust\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("News/KI-News RSS.md"),
+            "---\ntitle: \"KI-News (RSS)\"\ntags: [ki-news]\n---\n\nHeise · [Original](https://x.org) · #ki-news\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("app.md"),
+            "---\ntags:\n  - tauri\n  - rust/gui\n---\n#tauri and #tauri/v2\n",
+        )
+        .unwrap();
+        fs::write(root.join("tools.md"), "#rust-tools here\n").unwrap();
+        let config = Config {
+            workspace_root: root.clone(),
+            ..Config::default()
+        };
+
+        let dry = rename_tag(&config, "ki-news", "ai/news", None, true).unwrap();
+        assert_eq!((dry.files, dry.uses, dry.merged), (1, 2, false));
+        assert_eq!(dry.description, "News");
+        assert!(
+            fs::read_to_string(root.join("TAGS.md"))
+                .unwrap()
+                .contains("#ki-news")
+        );
+
+        let news = rename_tag(&config, "ki-news", "ai/news", None, false).unwrap();
+        assert_eq!(news.count(), dry.count());
+        assert_eq!(
+            fs::read_to_string(root.join("News/KI-News RSS.md")).unwrap(),
+            "---\ntitle: \"KI-News (RSS)\"\ntags:\n  - ai/news\n---\n\nHeise · [Original](https://x.org) · #ai/news\n"
+        );
+        let models = rename_tag(
+            &config,
+            "ki-modelle",
+            "ai/models",
+            Some("KI-Modelle"),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            (models.files, models.description.as_str()),
+            (0, "KI-Modelle")
+        );
+
+        // A merge: the note that had both keeps one, the child follows, the listed entry keeps its description.
+        let gui = rename_tag(&config, "#Tauri", "rust/gui", None, false).unwrap();
+        assert!(gui.merged);
+        assert_eq!((gui.files, gui.uses), (1, 3));
+        assert_eq!(gui.description, "GUIs in Rust");
+        assert_eq!(
+            fs::read_to_string(root.join("app.md")).unwrap(),
+            "---\ntags:\n  - rust/gui\n---\n#rust/gui and #rust/gui/v2\n"
+        );
+
+        // A tag only the notes know goes onto the list under its new name.
+        let tools = rename_tag(
+            &config,
+            "rust-tools",
+            "rust/tools",
+            Some("Werkzeuge"),
+            false,
+        )
+        .unwrap();
+        assert_eq!((tools.files, tools.merged), (1, false));
+        assert_eq!(
+            list::load(&config).unwrap(),
+            vec![
+                TagEntry {
+                    tag: "ai/models".into(),
+                    description: "KI-Modelle".into()
+                },
+                TagEntry {
+                    tag: "ai/news".into(),
+                    description: "News".into()
+                },
+                TagEntry {
+                    tag: "rust/gui".into(),
+                    description: "GUIs in Rust".into()
+                },
+                TagEntry {
+                    tag: "rust/tools".into(),
+                    description: "Werkzeuge".into()
+                },
+            ]
+        );
+        assert!(
+            rename_tag(&config, "nowhere", "ai/x", None, true).is_err(),
+            "a typo"
+        );
+        assert!(
+            rename_tag(&config, "ai", "ai/old", None, true).is_err(),
+            "into itself"
+        );
+        let described = list::describe(&config, "#AI/News", "KI-Nachrichten").unwrap();
+        assert!(described.changed && !described.added);
+        assert!(
+            list::describe(&config, "system/cli", "Kommandozeile")
+                .unwrap()
+                .added
+        );
+        assert!(list::describe(&config, "a b", "x").is_err());
         let _ = fs::remove_dir_all(root);
     }
 }

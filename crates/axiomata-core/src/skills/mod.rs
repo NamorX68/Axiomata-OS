@@ -386,6 +386,22 @@ mod tests {
                 rules.iter().any(|rule| rule.text().starts_with("Read")),
                 "{name} cannot read"
             );
+            // The owner's list cleanup rewrites many notes at once: no skill declares a command that covers it (the
+            // CLI refuses it in a skill run as well; this keeps the declaration from inviting it — security audit).
+            for pattern in declared
+                .split("Bash(")
+                .skip(1)
+                .filter_map(|rest| rest.split_once(')').map(|(inner, _)| inner))
+            {
+                let words: Vec<&str> = pattern.trim_end_matches(":*").split_whitespace().collect();
+                for owner in ["rename", "describe", "lift-inline"] {
+                    let command = ["axiomata-cli", "notes", "tags", owner];
+                    assert!(
+                        !command.starts_with(&words),
+                        "{name} declares {pattern:?}, which covers `notes tags {owner}`"
+                    );
+                }
+            }
         }
 
         unsafe {

@@ -2,7 +2,7 @@
 name: vault-tagging
 description: The one run over the whole vault (started from Settings → Workspace → Tags) — first proposes the vault's tag list, then plans tags and related links for every note as a preview the owner writes; it never changes a note itself.
 timeout_secs: 3600
-allowed_tools: "Read Bash(axiomata-cli notes tags:*) Bash(axiomata-cli notes tag --dry-run:*)"
+allowed_tools: "Read Bash(axiomata-cli notes tags list:*) Bash(axiomata-cli notes tags todo:*) Bash(axiomata-cli notes tags propose:*) Bash(axiomata-cli notes tags skip:*) Bash(axiomata-cli notes tag --dry-run:*)"
 ---
 
 # Vault tagging

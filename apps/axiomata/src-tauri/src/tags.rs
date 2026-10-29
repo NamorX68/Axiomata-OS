@@ -85,7 +85,8 @@ pub async fn answer_tag_proposal(
         .await
 }
 
-/// Renames a tag in every note and on the list; with `dry_run`, only counts what it would change.
+/// Renames a tag in every note and on the list (merging into a listed tag of the new name); with `dry_run`, only
+/// counts what it would change.
 #[tauri::command]
 pub async fn rename_tag(
     state: State<'_, CoreState>,
@@ -96,11 +97,11 @@ pub async fn rename_tag(
     let config = state.config_read().clone();
     let db = Arc::clone(&state.db);
     blocking(move || {
-        let count = tags::rename::rename_tag(&config, &old, &new, dry_run)?;
+        let renamed = tags::rename::rename_tag(&config, &old, &new, None, dry_run)?;
         if !dry_run {
             settle(&db, &tags::list::load(&config)?);
         }
-        Ok(count)
+        Ok(renamed.count())
     })
     .await
 }

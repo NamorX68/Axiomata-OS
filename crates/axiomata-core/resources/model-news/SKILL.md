@@ -58,7 +58,7 @@ Steps:
      ```
      ---
      title: "KI-Modelle"
-     tags: [ki-modelle]
+     tags: [ai/models]
      ---
 
      # KI-Modelle
@@ -80,7 +80,7 @@ Steps:
 
      ### <model name as the source has it>
 
-     <Maker> · <LLM|Bild|Video> · <release date YYYY-MM-DD> · [Modell](<link>) · #ki-modelle
+     <Maker> · <LLM|Bild|Video> · <release date YYYY-MM-DD> · [Modell](<link>)
 
      <2–4 sentences in German: what the model is for, its size or parameter count and context length where
      the source gives them, and what is new about it — not a restatement of the name.>
@@ -89,6 +89,8 @@ Steps:
      Order the models by the maker's weight, then by release date. The note is German whatever the source's
      language.
    - Never invent a link, a date or a fact: if the source does not say it, it is not in the entry.
+   - The file's tag stands only in its frontmatter (`tags: [ai/models]`): never write a `#tag` into the
+     text, not after an item and not on a line of its own.
 6. Do not touch `AGENTS.md` or `CLAUDE.md` files; the app regenerates the routers.
 
 Finish with a short report in German, exactly these three parts:

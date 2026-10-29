@@ -1029,8 +1029,9 @@ rules, "Clean up now" and Glut's row from `glut clean --dry-run --json` (format 
 Tags as Obsidian has them (`axiomata_core::tags`): `#tag` in the text and `tags:` in the frontmatter (block list, flow
 list or text), nested `a/b`, compared without case; not in headings, code, links or URLs, never a bare number
 (`tags::detect`). The graph carries them per note (`GraphFile.tags`, read once per file with its link targets; the tag
-list itself has none). **One tag list**, `<workspace>/TAGS.md` (`- #tag — description`, seeded with `#ki-news` and
-`#ki-modelle`), written only by the app (Settings → Workspace → Tags, `shell/TagsSettings.svelte`); a description is
+list itself has none). **One tag list**, `<workspace>/TAGS.md` (`- #tag — description`, seeded with `#ai/news` and
+`#ai/models`), written only by the app (Settings → Workspace → Tags, `shell/TagsSettings.svelte`, or the owner's
+`notes tags rename|describe`, every list change checked against the version read); a description is
 one visible line (format characters dropped). **An agent's one write into a note** is `axiomata-cli notes tag <file>
 --tag … --related … --propose tag:"…" [--dry-run]` (`tags::note::tag_note`): only the frontmatter's `tags:` (rewritten
 only when its form reads back unchanged; ambiguous YAML items quoted) and `- [[Note]]` lines under `## Related` (at most
@@ -1046,9 +1047,15 @@ to 4 tags / 1 proposal / 3 related), `inbox-sort` after each move, and `vault-ta
 (`tag_plan`; a note it cannot plan is skipped with its reason), which the owner writes (or throws away) after an
 estimate of each step's cost (note sizes × the skill model's price); the planned proposals go to the owner then, and a
 note that fails to write stays in the preview. Renames pull their uses along: `rename_note_links` (V3, for the file app; refuses names that cannot be a
-link and requires one side to exist) and `rename_tag` (nested tags follow). The spotlight finds `#tag` (a group of
+link and requires one side to exist) and `rename_tag` (nested tags follow; a new name already listed is a merge that keeps its description; notes it could
+not rewrite are reported). The owner's cleanup from a terminal: `notes tags rename <old> <new> [--description]
+[--dry-run] [--json]`, `notes tags describe <tag> "<text>"`, `notes tags lift-inline [--tag t]… [--dry-run] [--json]`
+(`tags::lift`: inline `#tags` into the frontmatter; a run at a line's start or end goes with its separator, a tag inside
+a sentence keeps its word) — `owner_only`, closed to sessions, skill runs and chat turns, and no direct commands. The
+news skills write their tag only into the frontmatter. The spotlight finds `#tag` (a group of
 tags, opening the Second Brain filtered), the Second Brain has a filter field (words and `#tag`s dim the rest) and tag
-chips; a waiting proposal is a hex badge beside the Dock's settings. The reading view leaves a note's frontmatter out.
+chips; a waiting proposal is a hex badge beside the Dock's settings. The reading view leaves a note's frontmatter out and shows its `tags:` as chips at the top (a click opens the Second
+Brain filtered, `core/frontmatterTags.ts`).
 
 ### Model providers (`config.agents.providers`)
 

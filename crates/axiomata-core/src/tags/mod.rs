@@ -1,6 +1,7 @@
 //! Tags and links in the vault, the way Obsidian has them (`docs/plans/tags-links.md`, card #75).
 //!
 //! - [`detect`]: which `#tag`s and `tags:` a note has (Q1), and where its `[[links]]` are.
+//! - [`lift`]: moving a note's inline `#tags` into its frontmatter, once, for the owner (concept note Q7).
 //! - [`list`]: the one tag list, `<workspace>/TAGS.md` (Q6, V1), written only by the app.
 //! - [`note`]: setting a note's `tags:` and its `## Related` links (V2, Q8) without touching the rest of it.
 //! - [`proposals`]: a tag an agent wants that is not on the list waits for the owner (Q10).
@@ -12,6 +13,7 @@
 //! owner saved in between is not overwritten.
 
 pub mod detect;
+pub mod lift;
 pub mod list;
 pub mod note;
 pub mod proposals;
