@@ -3,6 +3,7 @@
 //! sync the memory router, send an assistant turn, call a dashboard module
 //! action through the file queue.
 
+mod app_cmd;
 mod files_cmd;
 mod harness_card;
 mod harness_cmd;
@@ -161,6 +162,11 @@ enum Command {
     Harness {
         #[command(subcommand)]
         action: harness_cmd::HarnessAction,
+    },
+    /// What the app's chat reads about Axiomata, read-only (`docs/plans/chat-knows-app.md`): `app handbook [name]`.
+    App {
+        #[command(subcommand)]
+        action: app_cmd::AppAction,
     },
     /// Print the module manifest the dashboard wrote for the agent.
     Modules,
@@ -781,6 +787,13 @@ async fn main() -> Result<()> {
              else; the owner does the rest"
         );
     }
+    // The handbook needs no core, and may be read where `~/.axiomata` is hidden; after the skill gate, which keeps a
+    // skill run's list as short as it was.
+    if let Command::App { action } = &command
+        && let Some(done) = app_cmd::run_without_core(action)
+    {
+        return done;
+    }
     // Shared: a card's pane hands it to the TUI's host, which outlives any borrow of it.
     let core = std::sync::Arc::new(
         AxiomataCore::init().context("failed to initialize the Axiomata-OS core engine")?,
@@ -826,6 +839,9 @@ async fn main() -> Result<()> {
         Command::Maintenance { action } => maintenance_cmd::run(&core, action)?,
         Command::Notes { action } => notes_cmd::run(&core, action)?,
         Command::Inbox { .. } => unreachable!("answered before the core starts"),
+        Command::App { .. } => {
+            unreachable!("every `app` command is answered before the core starts")
+        }
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
         Command::Harness { action } => return harness_cmd::run(&core, action).await,

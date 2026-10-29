@@ -49,17 +49,12 @@
   import { tagProposals, waitingLabel } from "../core/tagProposals";
   import HexCount from "../ui/HexCount.svelte";
   import Window from "./Window.svelte";
+  import { SETTINGS_TABS, type SettingsTabId } from "../core/settingsTabs";
 
   let { open = $bindable(false), initialTab = null }: { open?: boolean; initialTab?: string | null } = $props();
 
-  type TabId = "appearance" | "workspace" | "providers" | "storage" | "about";
-  const TABS: { id: TabId; label: string }[] = [
-    { id: "appearance", label: "Appearance" },
-    { id: "workspace", label: "Workspace" },
-    { id: "providers", label: "AI providers" },
-    { id: "storage", label: "Storage" },
-    { id: "about", label: "About" },
-  ];
+  type TabId = SettingsTabId;
+  const TABS = SETTINGS_TABS;
   let tab = $state<TabId>("appearance");
   // Opened for one place (the Dock's tag badge opens Workspace): that tab, each time it is opened so.
   $effect(() => {

@@ -49,6 +49,9 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
+    // The handbook's coverage test reads the pages where the build embeds them from (`docs/handbook/`, outside the
+    // app's folder). Only under vitest: the dev server keeps Vite's default boundary.
+    fs: isVitest ? { allow: ["../.."] } : undefined,
     host: host || false,
     hmr: host
       ? {

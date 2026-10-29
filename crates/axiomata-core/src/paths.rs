@@ -104,6 +104,13 @@ pub fn module_context_path() -> PathBuf {
     axiomata_home().join("module-context.md")
 }
 
+/// The app's handbook as the installed build ships it (`~/.axiomata/handbook/`, `docs/plans/chat-knows-app.md` Q5):
+/// one Markdown page per area, written at start whenever it does not match the build, so nothing kept there survives
+/// an update. See `crate::handbook`.
+pub fn handbook_dir() -> PathBuf {
+    axiomata_home().join("handbook")
+}
+
 /// Path to the user's optional custom theme (`~/.axiomata/theme.css`): only
 /// `--ax-*` token overrides, validated by the dashboard before injection.
 pub fn custom_theme_path() -> PathBuf {

@@ -30,6 +30,7 @@ pub mod error;
 pub mod files;
 pub mod glut_card;
 pub mod graph;
+pub mod handbook;
 /// The agentic IDE's core, re-exported as `axiomata_core::ide::…` for the same
 /// reason as `board` above — a plain re-export, not a wrapper.
 pub use axiomata_ide as ide;
@@ -100,6 +101,8 @@ impl AxiomataCore {
     ///   deliberately **not** in this set (owner: real skills exist now, it
     ///   was just clutter) — `skills::seed_example_skill` still exists and
     ///   is still tested on its own, just not called from here.
+    /// - writes the build's handbook to `~/.axiomata/handbook/`, replacing any copy that differs
+    ///   ([`handbook::install`]),
     /// - opens `~/.axiomata/axiomata.db` and applies pending migrations.
     ///
     /// Safe to call on every app start: every step here is idempotent.
@@ -126,6 +129,8 @@ impl AxiomataCore {
         restrict_to_owner(&paths::config_path(), 0o600);
 
         skills::seed_default_skills()?;
+        // The handbook belongs to the build: replaced whenever it differs, never seeded once (chat-knows-app Q5).
+        handbook::install();
 
         let mut db = db::open_and_migrate()?;
         restrict_to_owner(&paths::db_path(), 0o600);

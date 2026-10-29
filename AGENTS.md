@@ -133,6 +133,10 @@ from the code itself:
   ordinary build while the copied binary is missing) and is found next to the executable (`agent_entry::cli_path`). Ad-hoc
   signature, no notarization: the macOS may ask again for file/automation access after each new build. The icon's source is
   `apps/axiomata/app-icon.svg` (`cargo tauri icon app-icon.svg` regenerates `src-tauri/icons/`).
+- **The handbook is part of the build** (`docs/handbook/`, `docs/plans/chat-knows-app.md`): one page per area of the
+  app, embedded by `axiomata_core::handbook` and replaced in `~/.axiomata/handbook/` at start. A change the owner can
+  see updates its page in the same commit — a new ring entry, view or Settings tab also gets its row in
+  `core/handbook.ts` `PAGE_FOR_PLACE`; the Rust and vitest coverage tests fail otherwise. The round is not done before.
 - **Skills live in one place only**, `~/.axiomata/skills/<name>/SKILL.md` — there is no
   workspace-local skill location (dropped deliberately; `docs/architecture.md` §4 explains
   why).
