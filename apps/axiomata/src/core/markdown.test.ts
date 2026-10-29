@@ -127,3 +127,37 @@ describe("cut", () => {
     expect(cut("word ".repeat(40).trim(), 20).endsWith("…")).toBe(true);
   });
 });
+
+describe("renderMarkdownBlocks with note links (tags-links TL2)", () => {
+  const exists = (target: string) => target !== "Missing";
+  const anchors = (html: string) =>
+    [...new DOMParser().parseFromString(html, "text/html").querySelectorAll("a")].map((a) => ({
+      cls: a.className,
+      href: a.getAttribute("href"),
+      text: a.textContent,
+    }));
+
+  it("turns wikilinks and tags into fragment links, a dangling link marked", () => {
+    const html = renderMarkdownBlocks("See [[Plan#Ziel|the plan]], [[Missing]] and #rust/async.\n", { exists });
+    expect(anchors(html)).toEqual([
+      { cls: "ax-wikilink", href: "#ax-note:Plan%23Ziel%7Cthe%20plan", text: "the plan" },
+      { cls: "ax-wikilink ax-wikilink-missing", href: "#ax-note:Missing", text: "Missing" },
+      { cls: "ax-tag", href: "#ax-tag:rust%2Fasync", text: "#rust/async" },
+    ]);
+  });
+
+  it("leaves code, numbers, mid-word #s and headings alone", () => {
+    const html = renderMarkdownBlocks("# Title\n\n`[[Not]] #not` #1 C#\n\n```\n[[Not]] #not\n```\n", { exists });
+    expect(anchors(html)).toEqual([]);
+  });
+
+  it("escapes what a link shows and never nests a link in a link", () => {
+    const html = renderMarkdownBlocks('[[<img src=x onerror=alert(1)>]] [see #x](https://e.com)\n', { exists });
+    expect(new DOMParser().parseFromString(html, "text/html").querySelectorAll("img")).toHaveLength(0);
+    expect(anchors(html).map((a) => a.cls)).toEqual(["ax-wikilink", ""]);
+  });
+
+  it("renders without them where no notes are given", () => {
+    expect(anchors(renderMarkdownBlocks("[[Plan]] #tag\n"))).toEqual([]);
+  });
+});

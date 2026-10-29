@@ -128,3 +128,20 @@ describe("the machine's jump list end to end", () => {
     expect(show(doc)).toBe("a\nb\nc\nd\n|e"); // forward one, to where gg started
   });
 });
+
+describe("past the ends of the jump list (tags-links TL2)", () => {
+  it("asks the view to go on across files instead of ringing the bell", () => {
+    const doc = docFrom("a\n|b\nc");
+    const effects: string[] = [];
+    const m = new ViMachine(doc, new ViShared(null), {
+      ctx: () => ({ ...ctx(), viewport: { top: 0, bottom: 9 } }),
+      effect: (e) => effects.push(e.type === "jumpOut" ? `jumpOut ${e.dir}` : e.type),
+    });
+    m.feedKeys("<C-o>");
+    m.feedKeys("<C-i>");
+    expect(effects).toEqual(["jumpOut -1", "jumpOut 1"]);
+    m.feedKeys("G<C-o>");
+    expect(show(doc)).toBe("a\n|b\nc");
+    expect(effects).toEqual(["jumpOut -1", "jumpOut 1"]);
+  });
+});

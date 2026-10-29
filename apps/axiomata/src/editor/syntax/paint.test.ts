@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { paintLines, rowSegments, type Capture } from "./paint";
+import { overlaySpans, paintLines, rowSegments, type Capture, type Span } from "./paint";
 import type { SyntaxToken } from "./tokens";
 
 function cap(sr: number, sc: number, er: number, ec: number, token: SyntaxToken, priority = 0): Capture {
@@ -74,5 +74,35 @@ describe("rowSegments", () => {
 
   it("is one plain segment without spans", () => {
     expect(rowSegments("text", undefined, 1, 3)).toEqual([{ text: "ex", token: null }]);
+  });
+});
+
+describe("overlaySpans", () => {
+  const s = (from: number, to: number, token: Span["token"]): Span => ({ from, to, token });
+
+  it("paints the extra spans over the base, cutting it where needed", () => {
+    expect(overlaySpans([s(0, 10, "link")], [s(3, 5, "note-link")])).toEqual([
+      s(0, 3, "link"),
+      s(3, 5, "note-link"),
+      s(5, 10, "link"),
+    ]);
+  });
+
+  it("covers base spans across their edges and keeps gaps", () => {
+    expect(overlaySpans([s(0, 4, "heading"), s(6, 10, "emphasis")], [s(3, 8, "note-tag")])).toEqual([
+      s(0, 3, "heading"),
+      s(3, 8, "note-tag"),
+      s(8, 10, "emphasis"),
+    ]);
+    expect(overlaySpans([s(0, 2, "code"), s(5, 7, "code")], [s(3, 4, "note-tag")])).toEqual([
+      s(0, 2, "code"),
+      s(3, 4, "note-tag"),
+      s(5, 7, "code"),
+    ]);
+  });
+
+  it("works without a base", () => {
+    expect(overlaySpans(undefined, [s(1, 2, "note-link-missing")])).toEqual([s(1, 2, "note-link-missing")]);
+    expect(overlaySpans([s(0, 1, "code")], [])).toEqual([s(0, 1, "code")]);
   });
 });

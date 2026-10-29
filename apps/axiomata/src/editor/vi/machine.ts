@@ -94,6 +94,11 @@ export type ViEffect =
   | { type: "openFile" }
   /** A file mark (`'A`) that belongs to another file. */
   | { type: "fileMark"; file: string; at: Pos }
+  /**
+   * `<C-o>` / `<C-i>` with nothing further in this document's jump list: the view may go on along a history across
+   * files (`dir` -1 back, 1 forward); a view without one rings the bell.
+   */
+  | { type: "jumpOut"; dir: 1 | -1 }
   /** `zc zo za zR zM` (ED5, T7): folds are the view's. */
   | { type: "fold"; action: FoldAction };
 
@@ -1514,13 +1519,13 @@ export class ViMachine {
   private jumpOlder(n: number): void {
     const target = this.marks.older(n, this.cursor);
     if (target) this.setCursor(target);
-    else this.bell();
+    else this.env.effect({ type: "jumpOut", dir: -1 });
   }
 
   private jumpNewer(n: number): void {
     const target = this.marks.newer(n);
     if (target) this.setCursor(target);
-    else this.bell();
+    else this.env.effect({ type: "jumpOut", dir: 1 });
   }
 
   // ------------------------------------------------------------------ scrolling

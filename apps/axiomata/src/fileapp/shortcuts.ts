@@ -134,6 +134,16 @@ export const SHORTCUTS: ShortcutGroup[] = [
     ],
   },
   {
+    // `docs/plans/tags-links.md`, TL2: handled by `FileEditor.svelte` and `jumpHistory.ts`, not the key map.
+    title: "Notes (wikilinks and tags)",
+    items: [
+      { keys: "⌘-click", what: "Follow a [[wikilink]] (into nothing: create the note beside this one), or show a #tag" },
+      { keys: "Click", what: "In the reading view: follow a wikilink or show a tag" },
+      { keys: "⌃- / ⌃⇧-", what: "Back / forward along the jumps across files", other: "Ctrl+Alt+← / Ctrl+Alt+→" },
+      { keys: "[[ / #", what: "Complete a note name / a tag" },
+    ],
+  },
+  {
     title: "Completion and code-action menus",
     items: [
       { keys: "↓ / ↑ / ⌃N / ⌃P", what: "Choose" },
@@ -235,11 +245,11 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "<Esc> <C-[> <C-c>", what: "Back to Normal" },
       { keys: "zt zz zb z<CR> z. z-", what: "Scroll the cursor line to the top, middle, bottom" },
       { keys: "<C-e> <C-y> <C-d> <C-u> <C-f> <C-b> <PageDown> <PageUp>", what: "Scroll by lines, half pages, pages" },
-      { keys: "<C-o> <C-i> <Tab>", what: "Back / forward in the jump list" },
+      { keys: "<C-o> <C-i> <Tab>", what: "Back / forward in the jump list (past its ends: across files)" },
       { keys: "zc zo za zR zM", what: "Close, open, toggle a fold; open / close all" },
       { keys: "]c [c", what: "Next / previous change in a diff" },
       { keys: "]d [d", what: "Next / previous problem" },
-      { keys: "gd K gf", what: "Definition, hover, open the path under the cursor" },
+      { keys: "gd K gf", what: "Definition (on a note's wikilink: follow it), hover, open the path under the cursor" },
       { keys: "gri grt grr", what: "Implementations, type definition, uses" },
       { keys: "grn gra", what: "Rename, code actions (Visual: for the selection)" },
       { keys: "ZZ ZQ", what: "Save and close / close without saving" },
