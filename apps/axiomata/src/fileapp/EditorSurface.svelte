@@ -96,6 +96,7 @@
   import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
   import { textClipPath } from "./textClip";
+  import { cellWidth } from "./cellWidth";
   import FindBar from "./FindBar.svelte";
   import Minimap from "./Minimap.svelte";
   import { lastFind, rememberFind } from "./findShared";
@@ -1655,8 +1656,9 @@
 
   function measure(): void {
     if (!measurer) return;
-    const w = measurer.getBoundingClientRect().width / 64;
-    if (w > 0) charW = w;
+    // Layout pixels, not the drawn box: the panel around it may still be growing in (`cellWidth.ts`).
+    const w = cellWidth(measurer, 64);
+    if (w !== null) charW = w;
   }
 
   // Re-measure whenever the font changes, once the face has loaded.
