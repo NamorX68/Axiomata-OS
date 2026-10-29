@@ -646,14 +646,15 @@
   }
 
   /**
-   * Opens the project's master pane on `harness` (`docs/plans/agent-isolation.md`, CP3): the engine as the owner uses
-   * it outside, in the real project folder. Made the first time; afterwards the same session, brought forward if open.
+   * Opens a master pane of the project on `harness` (`docs/plans/agent-isolation.md`, CP3): the engine as the owner
+   * uses it outside, in the real project folder. A master not yet on screen is opened again; when every one is open, a
+   * further one starts beside them — the owner may run the engine twice in a folder outside too.
    */
   async function openMaster(harness: Harness): Promise<void> {
     const project = current;
     if (!project) return;
     try {
-      const master = await masterSession(project.id, harness);
+      const master = await masterSession(project.id, harness, [...openAgentIds]);
       await projectSession.refreshAgents();
       openAgent(projectSession.agentById(master.id) ?? master);
     } catch (err) {

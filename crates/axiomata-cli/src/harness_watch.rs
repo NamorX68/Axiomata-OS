@@ -69,7 +69,7 @@ mod tests {
             },
         )
         .unwrap();
-        let made = axiomata_core::roster::master_session(&db, project.id, harness).unwrap();
+        let made = axiomata_core::roster::master_session(&db, project.id, harness, &[]).unwrap();
         if !master {
             axiomata_core::ide::agent_store::set_role(&db, made.id, "allrounder").unwrap();
         }

@@ -2905,18 +2905,22 @@ pub fn create_ide_agent_on_engine(
     .map_err(|err| err.to_string())
 }
 
-/// The project's master session on `harness` (`claude_code`, `opencode` or `glut`), made the first time it is asked for
-/// (`docs/plans/agent-isolation.md`, CP3): the engine as the owner uses it outside, in the real project folder.
+/// A master session of the project on `harness` (`claude_code`, `opencode` or `glut`,
+/// `docs/plans/agent-isolation.md`, CP3): the engine as the owner uses it outside, in the real project folder. `open`
+/// names the masters already on screen; one not among them is given, else a further one is made
+/// (`roster::master_session`).
 #[tauri::command]
 pub fn ide_master_session(
     state: State<'_, CoreState>,
     project_id: i64,
     harness: String,
+    open: Vec<i64>,
 ) -> Result<ide::Agent, String> {
     let harness =
         ide::Harness::parse(&harness).ok_or_else(|| format!("no harness called {harness:?}"))?;
     let db = state.db_lock();
-    axiomata_core::roster::master_session(&db, project_id, harness).map_err(|err| err.to_string())
+    axiomata_core::roster::master_session(&db, project_id, harness, &open)
+        .map_err(|err| err.to_string())
 }
 
 /// The command line of a pane that follows Glut session `id` read-only (Glut TUI8d), resolved here so the webview

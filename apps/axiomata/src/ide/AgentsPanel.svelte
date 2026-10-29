@@ -92,9 +92,20 @@
 
   /** The engines a project has a master pane for, in the order the tiles show them. */
   const MASTER_HARNESSES = ["glut", "claude_code", "opencode"] as const satisfies readonly Harness[];
-  /** The project's master agents by engine: they are the tiles at the top, not cards in the list. */
-  const masters = $derived(new Map(agents.filter((a) => a.agent_role === "master").map((a) => [a.harness, a])));
-  const listed = $derived(agents.filter((a) => a.agent_role !== "master"));
+  /**
+   * The project's first master on each engine: it is the tile at the top. A further one (`master-glut-2`, opened by a
+   * click on the tile while the first is on screen) is a card in the list, so it can be told apart and removed.
+   */
+  const masters = $derived(
+    new Map(
+      agents
+        .filter((a) => a.agent_role === "master")
+        .sort((a, b) => b.id - a.id)
+        .map((a) => [a.harness, a]),
+    ),
+  );
+  const tiled = $derived(new Set([...masters.values()].map((a) => a.id)));
+  const listed = $derived(agents.filter((a) => !tiled.has(a.id)));
 
   async function loadRoles(id: number | null) {
     if (id === null) {
@@ -221,7 +232,8 @@
             type="button"
             title={harness === "opencode"
               ? "Opencode as you run it yourself — your settings, your models, in the project folder; no team tools"
-              : `${harnessLabel(harness)} as you use it outside — your settings and rules, in the project folder, with the team tools`}
+              : `${harnessLabel(harness)} as you use it outside — your settings and rules, in the project folder, ` +
+                "with the team tools. Click again while it is open for one more beside it"}
             onclick={() => onMaster(harness)}
           >
             <HexAvatar
@@ -353,7 +365,10 @@
             </button>
             <!-- Quiet until the card is hovered or focused (editor-look I4). -->
             <div class="row-actions">
-              <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
+              {#if agent.agent_role !== "master"}
+                <!-- A master keeps its engine and role (`roster::update_agent_on_engine` refuses). -->
+                <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
+              {/if}
               <IconButton
                 icon="trash-2"
                 label="Remove {agent.name}"

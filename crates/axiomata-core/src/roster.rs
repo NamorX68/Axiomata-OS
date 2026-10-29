@@ -329,32 +329,50 @@ fn known_role(roles: &[Role], name: &str) -> Result<()> {
     .into())
 }
 
-/// The master session of `project_id` on `harness` (`docs/plans/agent-isolation.md`, D4, CP3), made the first time it
-/// is asked for: Claude Code, Opencode or Glut with its own default command — not an engine of the catalog, whose flags
-/// would be the studio's — in the real project folder, playing [`MASTER_ROLE`](crate::ide::model::MASTER_ROLE).
+/// A master session of `project_id` on `harness` (`docs/plans/agent-isolation.md`, D4, CP3): Claude Code, Opencode or
+/// Glut with its own default command — not an engine of the catalog, whose flags would be the studio's — in the real
+/// project folder, playing [`MASTER_ROLE`](crate::ide::model::MASTER_ROLE).
+///
+/// A project may have several on one engine, as the owner may start the engine twice in a folder outside: the first
+/// one whose id is not in `open` (the masters already on screen) is given, and only when every one is open a new one
+/// is made — `master-glut`, then `master-glut-2`, `master-glut-3`, … So the first click opens the same session as
+/// before, and a second click beside it starts a second one.
 ///
 /// # Errors
 ///
 /// The agent store's refusals; a failing database write. Nothing is created then.
-pub fn master_session(db: &Connection, project_id: i64, harness: AgentHarness) -> Result<Agent> {
-    let name = match harness {
+pub fn master_session(
+    db: &Connection,
+    project_id: i64,
+    harness: AgentHarness,
+    open: &[i64],
+) -> Result<Agent> {
+    let base = match harness {
         AgentHarness::ClaudeCode => "master-claude-code",
         AgentHarness::Opencode => "master-opencode",
         AgentHarness::Glut => "master-glut",
     };
-    if let Some(master) = agent_store::list_agents(db, project_id)?
-        .into_iter()
-        .find(|agent| agent.is_master() && agent.harness == harness)
-    {
-        return Ok(master);
+    let agents = agent_store::list_agents(db, project_id)?;
+    let mut masters: Vec<&Agent> = agents
+        .iter()
+        .filter(|agent| agent.is_master() && agent.harness == harness)
+        .collect();
+    masters.sort_by_key(|agent| agent.id);
+    if let Some(master) = masters.iter().find(|agent| !open.contains(&agent.id)) {
+        return Ok((*master).clone());
     }
+    let taken = |name: &str| agents.iter().any(|agent| agent.name == name);
+    let name = std::iter::once(base.to_owned())
+        .chain((2..).map(|n| format!("{base}-{n}")))
+        .find(|name| !taken(name))
+        .expect("an endless sequence of names always has a free one");
     let tx = db.unchecked_transaction()?;
     let created = agent_store::create_agent(
         &tx,
         crate::ide::model::NewAgent {
             project_id,
             fields: AgentFields {
-                name: name.to_owned(),
+                name,
                 harness,
                 command: String::new(),
                 model: None,
@@ -647,8 +665,8 @@ mod tests {
     #[test]
     fn a_project_has_one_master_per_engine_and_no_role_can_pretend_to_be_it() {
         let (db, project, dir) = fixture();
-        let claude = master_session(&db, project, AgentHarness::ClaudeCode).unwrap();
-        let opencode = master_session(&db, project, AgentHarness::Opencode).unwrap();
+        let claude = master_session(&db, project, AgentHarness::ClaudeCode, &[]).unwrap();
+        let opencode = master_session(&db, project, AgentHarness::Opencode, &[]).unwrap();
         assert!(claude.is_master() && opencode.is_master());
         assert_ne!(claude.id, opencode.id);
         assert!(
@@ -656,13 +674,13 @@ mod tests {
             "the engine's own default command, no catalog flags"
         );
         assert_eq!(
-            master_session(&db, project, AgentHarness::ClaudeCode)
+            master_session(&db, project, AgentHarness::ClaudeCode, &[])
                 .unwrap()
                 .id,
             claude.id,
             "asked again: the same"
         );
-        let glut = master_session(&db, project, AgentHarness::Glut).unwrap();
+        let glut = master_session(&db, project, AgentHarness::Glut, &[]).unwrap();
         assert!(glut.is_master() && glut.id != claude.id && glut.id != opencode.id);
         assert!(known_role(&[], crate::ide::model::MASTER_ROLE).is_err());
         let edited = update_agent_on_engine(
@@ -677,6 +695,42 @@ mod tests {
         assert!(
             edited.unwrap_err().to_string().contains("master"),
             "a master is not turned into a session"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_second_master_on_one_engine_is_made_only_while_the_first_is_open() {
+        let (db, project, dir) = fixture();
+        let first = master_session(&db, project, AgentHarness::Glut, &[]).unwrap();
+        let second = master_session(&db, project, AgentHarness::Glut, &[first.id]).unwrap();
+        assert_ne!(second.id, first.id);
+        assert_eq!(
+            (first.name.as_str(), second.name.as_str()),
+            ("master-glut", "master-glut-2")
+        );
+        assert!(second.is_master() && second.harness == AgentHarness::Glut);
+        let third =
+            master_session(&db, project, AgentHarness::Glut, &[first.id, second.id]).unwrap();
+        assert_eq!(third.name, "master-glut-3");
+        assert_eq!(
+            master_session(&db, project, AgentHarness::Glut, &[first.id])
+                .unwrap()
+                .id,
+            second.id,
+            "a closed master is opened again before a new one is made"
+        );
+        assert_eq!(
+            master_session(
+                &db,
+                project,
+                AgentHarness::ClaudeCode,
+                &[first.id, second.id]
+            )
+            .unwrap()
+            .name,
+            "master-claude-code",
+            "the other engines count apart"
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

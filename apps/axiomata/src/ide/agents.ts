@@ -57,11 +57,12 @@ export function createAgent(projectId: number, spec: AgentSpec): Promise<IdeAgen
 }
 
 /**
- * The project's master session on `harness`: the engine as the owner uses it outside, in the real project folder, with
- * only the team tools added (`docs/plans/agent-isolation.md`, CP3). Made the first time it is asked for.
+ * A master session of the project on `harness`: the engine as the owner uses it outside, in the real project folder,
+ * with only the team tools added (`docs/plans/agent-isolation.md`, CP3). `open` names the agents already on screen: a
+ * master not among them comes back, else a further one is made (`master-glut-2`, …).
  */
-export function masterSession(projectId: number, harness: Harness): Promise<IdeAgent> {
-  return invoke<IdeAgent>("ide_master_session", { projectId, harness });
+export function masterSession(projectId: number, harness: Harness, open: number[] = []): Promise<IdeAgent> {
+  return invoke<IdeAgent>("ide_master_session", { projectId, harness, open });
 }
 
 /**

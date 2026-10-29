@@ -1869,7 +1869,7 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 })?;
                 let master = {
                     let db = core.db_lock();
-                    axiomata_core::roster::master_session(&db, project, harness)?
+                    axiomata_core::roster::master_session(&db, project, harness, &[])?
                 };
                 println!("agent #{} {} (master)", master.id, master.name);
                 Ok(())

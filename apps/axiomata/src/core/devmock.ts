@@ -1920,13 +1920,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "ide_master_session": {
       const projectId = Number(args.projectId);
       const harness = args.harness as Harness;
-      const found = ideAgents.find(
+      const open = Array.isArray(args.open) ? (args.open as number[]) : [];
+      const masters = ideAgents.filter(
         (a) => a.project_id === projectId && a.agent_role === "master" && a.harness === harness,
       );
+      const found = masters.find((a) => !open.includes(a.id));
       if (found) return found as T;
+      const base = `master-${harness === "claude_code" ? "claude-code" : harness}`;
       const created = {
         ...mockAgent((ideAgents[ideAgents.length - 1]?.id ?? 0) + 1, projectId, {
-          name: `master-${harness === "claude_code" ? "claude-code" : harness}`,
+          name: masters.length === 0 ? base : `${base}-${masters.length + 1}`,
           harness,
           command: "",
           model: null,

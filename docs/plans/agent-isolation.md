@@ -52,7 +52,8 @@ the couplings that are real.
   come on top per session, but a reader *cannot* write whatever a session, an `always` or a file in a worktree says.
   The boundary is a property of the process, not of a rule list. One service per session (option C) stays possible
   later for a case that needs it; it is not built now (a process per agent, MCP servers restarted every time).
-- **D4 — a master pane per engine in the canvas.** "Claude Code" and "Opencode" as the owner uses them outside: their
+- **D4 — a master pane per engine in the canvas** (since 2026-10-29 several per engine, owner: a click on the tile
+  while its master is open starts `master-glut-2`, … beside it — as the engine can run twice in a folder outside). "Claude Code" and "Opencode" as the owner uses them outside: their
   own settings, MCP servers, rules and modes, working in the real project folder. The app hosts the terminal and adds
   nothing to the engine's behaviour …
 - **D5 — … except the team tools.** The master gets the `axiomata` MCP server, so the owner can send work from it to

@@ -12,7 +12,9 @@ Das Studio ist Axiomatas Entwicklungsumgebung. Es öffnet sich groß über allem
 
 Ein Modus, den du nicht ansiehst, läuft weiter. **Agenten** sind Sitzungen im Projekt: eine **Rolle** (wofür) auf
 einer **Engine** (Harness + Modell), mit eigenem Branch in einem eigenen Worktree unter `~/Worktrees/axiomata-agents`.
-Ein **Master** ist dagegen die Engine so, wie du sie selbst benutzt — im echten Projektordner, ohne Worktree.
+Ein **Master** ist dagegen die Engine so, wie du sie selbst benutzt — im echten Projektordner, ohne Worktree. Ein
+weiterer Klick auf die Master-Kachel, während der Master offen ist, startet einen zweiten daneben (`master-glut-2`, …);
+er steht als Karte in der Liste und lässt sich dort entfernen.
 
 ## Wo die Knöpfe sind
 
@@ -51,6 +53,8 @@ Ein **Master** ist dagegen die Engine so, wie du sie selbst benutzt — im echte
 - Einen Agenten entfernen nimmt **Worktree und Branch** mit; ungesicherte Arbeit ist dann weg (die App fragt).
 - „Take over…“ und „Commit & Push“ pushen nie mit Gewalt; „Take over…“ pusht gar nicht.
 - Der Opencode-Master ist nur dein eigenes `opencode` im Projektordner, ohne Team-Werkzeuge.
+- Mehrere Master arbeiten im **selben** Ordner: ändern zwei dieselbe Datei, kommen sie sich in die Quere. Für
+  getrennte Arbeit einen Agenten mit eigenem Worktree starten.
 - Projektwurzel darf nicht `$HOME`, `/Users` oder `/` sein.
 - Debuggen von Node/TypeScript gibt es nicht.
 
