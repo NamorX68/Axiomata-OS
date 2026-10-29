@@ -37,7 +37,7 @@ Kosten des Zugs.
   Fragen im Studio, Kosten, letzte Läufe, Routinen, wartende Karten, Storage, Einstellungen (Schlüssel nie, nur „set“ /
   „not set“) und die Tag-Liste. Er antwortet nur daraus; steht etwas nicht darin, sagt er das.
 - **Sofort:** Ansichten öffnen (Studio, ein Projekt, Kanban, eine Karte, das Second Brain mit `#tag`-Filter, eine
-  Handbuchseite, einen Reiter der Einstellungen, eine Datei) und die Darstellung umstellen (Theme, Layout des Second
+  Handbuchseite, einen Reiter der Einstellungen, eine Datei, eine neue Terminal-Kachel) und die Darstellung umstellen (Theme, Layout des Second
   Brain, Glas-Blur und -Abdunklung, Bewegung); einfache Karten anlegen und verschieben, ToDo, die lesenden Aktionen der
   Kacheln. Sagen, was offen ist, und schließen, was dabei nichts verliert: ein Kanban- oder Datei-Panel, eine
   Terminal-Kachel mit wartender Shell, das Second Brain, das Handbuch, die Einstellungen.

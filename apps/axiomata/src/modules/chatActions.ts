@@ -27,11 +27,12 @@ import { BRAIN_LAYOUTS, brainView } from "../core/brainView";
 import { emit } from "../core/bus";
 import { MAX_GROUND_BLUR, MAX_GROUND_DIM } from "../core/glass";
 import { listHandbook, openHandbook } from "../core/handbook";
+import { createInstance } from "../core/lifecycle";
 import { MOTION_LEVELS, motionSetting, type MotionLevel } from "../core/motion";
 import { openShellViews, terminalSession } from "../core/openViews";
 import { getModule, registerShellAction } from "../core/registry";
 import { SETTINGS_TABS } from "../core/settingsTabs";
-import { FILE_PANEL, pendingLoss, requestClose, staged } from "../core/staging";
+import { FILE_PANEL, openFilePanel, pendingLoss, requestClose, staged } from "../core/staging";
 import { glassBlur, glassDim, instances, removeInstance } from "../core/stores";
 import { THEMES, applyTheme, isTheme } from "../core/themes";
 import type { ModuleAction, PreparedAsk } from "../core/types";
@@ -45,7 +46,7 @@ import { get } from "svelte/store";
 import { openKanban } from "./kanbanApp";
 
 /** The views `open_view` opens. */
-export const CHAT_VIEWS = ["studio", "kanban", "second-brain", "handbook", "settings"] as const;
+export const CHAT_VIEWS = ["studio", "kanban", "second-brain", "handbook", "settings", "terminal", "file"] as const;
 type ChatView = (typeof CHAT_VIEWS)[number];
 
 const STUDIO_MODES = ["editor", "agents", "flow"] as const;
@@ -76,7 +77,8 @@ const openView: ModuleAction = {
     "card id), second-brain (optionally a tag to filter by, or a search query), handbook (optionally a page name), " +
     "settings (optionally a tab: " +
     SETTINGS_TABS.map((tab) => tab.id).join("|") +
-    "). Changes nothing.",
+    "), terminal (a new terminal tile with the owner's shell, nothing typed into it), file (a path in the vault, " +
+    "to read). Changes nothing.",
   params: {
     type: "object",
     properties: {
@@ -88,6 +90,7 @@ const openView: ModuleAction = {
       query: { type: "string" },
       page: { type: "string" },
       tab: { type: "string" },
+      path: { type: "string" },
     },
     required: ["view"],
   },
@@ -127,6 +130,17 @@ const openView: ModuleAction = {
         const tab = SETTINGS_TABS.find((t) => t.id === p.tab)?.id;
         emit("shell:settings", tab ? { tab } : {});
         return { opened: "settings", tab: tab ?? null };
+      }
+      case "terminal": {
+        const created = createInstance("terminal");
+        if (!created.ok) throw new Error(created.reason);
+        return { opened: "terminal", id: created.instance.id };
+      }
+      case "file": {
+        const path = text(p.path);
+        if (!path) throw new Error("file needs a path");
+        if (!openFilePanel(path, "read")) throw new Error(`could not open "${path}"`);
+        return { opened: "file", path };
       }
       default:
         throw new Error(`unknown view "${String(p.view)}"; one of ${CHAT_VIEWS.join(", ")}`);

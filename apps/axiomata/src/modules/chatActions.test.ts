@@ -12,7 +12,8 @@ import {
   registerShellAction,
   SHELL_INSTANCE,
 } from "../core/registry";
-import { glassBlur } from "../core/stores";
+import { FILE_PANEL, staged } from "../core/staging";
+import { glassBlur, instances } from "../core/stores";
 import { loadInstances } from "../core/stores";
 import { CHAT_ACTIONS } from "./chatActions";
 import { registerBuiltins } from "./index";
@@ -35,6 +36,14 @@ describe("what the chat may operate (CH5)", () => {
     expect(actions.get("start_skill")).toContain(ASKS_SUFFIX);
     expect(actions.get("save_routine")).toContain(ASKS_SUFFIX);
     expect(actions.get("start_card")).toContain(ASKS_SUFFIX);
+  });
+
+  it("opens a terminal tile and a file for the owner at once", async () => {
+    await invokeAgentAction(SHELL_INSTANCE, "open_view", { view: "terminal" });
+    expect(get(instances).filter((inst) => inst.type === "terminal")).toHaveLength(1);
+    await expect(invokeAgentAction(SHELL_INSTANCE, "open_view", { view: "file" })).rejects.toThrow(/needs a path/);
+    await invokeAgentAction(SHELL_INSTANCE, "open_view", { view: "file", path: "Inbox/idea.md" });
+    expect(get(staged).some((panel) => panel.type === FILE_PANEL)).toBe(true);
   });
 
   it("never offers deleting, and refuses it from the bridge", async () => {

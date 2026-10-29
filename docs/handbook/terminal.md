@@ -22,7 +22,8 @@ Rückseite der Kachel (Zahnrad):
 
 ## Häufige Handgriffe
 
-1. **Terminal öffnen:** im App-Ring auf „Terminal“ (jedes Mal eine neue Kachel) oder Dock → „Add module“.
+1. **Terminal öffnen:** im App-Ring auf „Terminal“ (jedes Mal eine neue Kachel), Dock → „Add module“ oder den Chat
+   bitten („öffne ein Terminal“).
 2. **Text kopieren:** mit der Maus markieren — beim Loslassen ist er kopiert. Mit gedrückter Shift-Taste geht das
    auch, während ein Programm die Maus benutzt.
 3. **Zurückblättern:** Mausrad, ⌘⇧↑/↓ oder Shift+PageUp/PageDown (am Mac Shift+fn+Pfeile).
