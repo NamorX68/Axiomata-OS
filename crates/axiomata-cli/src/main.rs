@@ -9,6 +9,7 @@ mod harness_cmd;
 mod harness_master;
 mod harness_watch;
 mod inbox_cmd;
+mod maintenance_cmd;
 mod models_cmd;
 
 use std::path::{Path, PathBuf};
@@ -144,6 +145,11 @@ enum Command {
     },
     /// Summarise the workspace graph (areas, files, links, skills, routines).
     Graph,
+    /// Axiomata's own storage (`docs/plans/maintenance.md`): status | clean [--dry-run] [--json].
+    Maintenance {
+        #[command(subcommand)]
+        action: maintenance_cmd::MaintenanceAction,
+    },
     /// Axiomata's own agent harness (`docs/plans/harness.md`): run a prompt with a provider from config.toml.
     Harness {
         #[command(subcommand)]
@@ -802,6 +808,7 @@ async fn main() -> Result<()> {
                 },
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
         Command::McpServe => return mcp_serve(&core),
+        Command::Maintenance { action } => maintenance_cmd::run(&core, action)?,
         Command::Inbox { .. } => unreachable!("answered before the core starts"),
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
@@ -3226,6 +3233,8 @@ mod tests {
             &["files", "roots"],
             &["skills", "reseed"],
             &["modules"],
+            &["maintenance", "clean"],
+            &["maintenance", "status"],
         ] {
             assert!(!may(refused), "{refused:?}");
         }

@@ -127,19 +127,75 @@ impl Locations {
 /// Measures everything and says what a clean-up would free; deletes nothing.
 pub fn report(core: &AxiomataCore) -> Report {
     let settings = core.config_read().maintenance.clone();
-    run(&core.db, &settings, &Locations::current(), Utc::now(), true)
+    clean_with(&core.db, &settings, true)
 }
 
 /// Cleans up by the rules of `[maintenance]`; with `dry_run` only says what it would remove.
 pub fn clean(core: &AxiomataCore, dry_run: bool) -> Report {
     let settings = core.config_read().maintenance.clone();
-    run(
-        &core.db,
-        &settings,
-        &Locations::current(),
-        Utc::now(),
-        dry_run,
-    )
+    clean_with(&core.db, &settings, dry_run)
+}
+
+/// [`clean`] on a shared connection and a copy of the rules, for a caller that runs it on a thread of its own (the
+/// app does, so the window never waits for a clean-up).
+pub fn clean_with(db: &Mutex<Connection>, settings: &MaintenanceSettings, dry_run: bool) -> Report {
+    run(db, settings, &Locations::current(), Utc::now(), dry_run)
+}
+
+/// How often the app cleans up by itself at start (A2).
+pub const WEEKLY: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
+/// How long after the start the weekly clean-up waits, so it never competes with the app coming up.
+pub const START_DELAY: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Whether the weekly clean-up is due: never ran, or the last run lies a week back (or, with a clock set back, in the
+/// future — a stamp that cannot be right does not hold the clean-up off).
+pub fn due(last_run: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+    last_run.is_none_or(|last| now - last >= WEEKLY || last > now)
+}
+
+/// Starts the weekly clean-up of the app's start on a thread of its own (MT3): after [`START_DELAY`], only when
+/// `[maintenance] enabled` and [`due`]. Never holds the start up, and holds the database only while it counts and
+/// deletes rows.
+pub fn spawn_weekly(core: &AxiomataCore) {
+    let config = std::sync::Arc::clone(&core.config);
+    let db = std::sync::Arc::clone(&core.db);
+    let started = std::thread::Builder::new()
+        .name("maintenance".to_owned())
+        .spawn(move || {
+            std::thread::sleep(START_DELAY);
+            let settings = config
+                .read()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .maintenance
+                .clone();
+            weekly(&db, &settings, &Locations::current(), Utc::now());
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "could not start the weekly maintenance");
+    }
+}
+
+/// The weekly clean-up's decision and run; `None` when it is switched off or not due.
+pub(crate) fn weekly(
+    db: &Mutex<Connection>,
+    settings: &MaintenanceSettings,
+    locations: &Locations,
+    now: DateTime<Utc>,
+) -> Option<Report> {
+    if !settings.enabled || !due(last_run(&lock(db)), now) {
+        return None;
+    }
+    let report = run(db, settings, locations, now, false);
+    match &report.error {
+        Some(error) => tracing::warn!(%error, "the weekly maintenance did not run"),
+        None => tracing::info!(
+            freed = report.freeable_bytes,
+            total = report.total_bytes,
+            "the weekly maintenance cleaned up"
+        ),
+    }
+    Some(report)
 }
 
 /// Removes the orphaned worktree at `path` with whatever changes it has — the owner's "Delete" in Settings → Storage,
@@ -148,8 +204,11 @@ pub fn clean(core: &AxiomataCore, dry_run: bool) -> Report {
 /// # Errors
 ///
 /// A sentence: not an orphan (or the agents could not be read), or why git or the file system refused.
-pub fn remove_orphan_worktree(core: &AxiomataCore, path: &std::path::Path) -> Result<(), String> {
-    remove_orphan_at(&core.db, &Locations::current(), path)
+pub fn remove_orphan_worktree(
+    db: &Mutex<Connection>,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    remove_orphan_at(db, &Locations::current(), path)
 }
 
 pub(crate) fn remove_orphan_at(

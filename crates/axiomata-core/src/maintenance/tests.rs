@@ -568,3 +568,32 @@ fn a_forged_git_file_never_gets_an_orphan_removed_or_inspected() {
     assert!(!found.removed);
     assert!(orphan.exists());
 }
+
+#[test]
+fn the_weekly_run_waits_a_week_and_obeys_the_switch() {
+    let s = Scratch::new("weekly");
+    let day = chrono::TimeDelta::days(1);
+    assert!(due(None, s.now));
+    assert!(!due(Some(s.now - day * 6), s.now));
+    assert!(due(Some(s.now - day * 7), s.now));
+    assert!(
+        due(Some(s.now + day), s.now),
+        "a stamp from the future does not hold it off"
+    );
+
+    let off = MaintenanceSettings {
+        enabled: false,
+        ..MaintenanceSettings::default()
+    };
+    assert!(weekly(&s.db, &off, &s.locations(), s.now).is_none());
+    assert_eq!(last_run(&lock(&s.db)), None);
+
+    let on = MaintenanceSettings::default();
+    assert!(weekly(&s.db, &on, &s.locations(), s.now).is_some());
+    assert_eq!(last_run(&lock(&s.db)), Some(s.now));
+    assert!(
+        weekly(&s.db, &on, &s.locations(), s.now + day).is_none(),
+        "not again within the week"
+    );
+    assert!(weekly(&s.db, &on, &s.locations(), s.now + day * 8).is_some());
+}

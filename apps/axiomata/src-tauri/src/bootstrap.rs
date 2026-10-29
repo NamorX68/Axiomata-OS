@@ -59,6 +59,10 @@ pub fn bootstrap() -> Services {
     // Durable runs (CP3): a run the app lost before this start is `interrupted`, never left `running` — before the
     // scheduler fires anything that would be `running` itself.
     axiomata_core::durable::on_start(&core.db);
+    // Axiomata keeps its own storage clean (docs/plans/maintenance.md, MT3): once a week, on a thread of its own that
+    // waits a moment first, so the start never waits for it. Here and not in `AxiomataCore::init`: the CLI starts the
+    // core for every command and would end the process mid-clean.
+    axiomata_core::maintenance::spawn_weekly(&core);
     let scheduler = SchedulerHandle::new();
     let stop_rx = scheduler.subscribe();
     tauri::async_runtime::spawn(routines::serve(
