@@ -7,11 +7,15 @@
   so a note inside a project finds its images, not only one in the workspace.
   Rendering waits for a short pause in typing; a big note is not re-rendered on
   every keystroke.
+
+  A vault note's wikilinks and tags are links (`docs/plans/tags-links.md`,
+  TL2) when `notes` is given: a click on one is handed to the owner, nothing
+  navigates by itself.
 -->
 <script lang="ts">
   import { KEEP_SCROLL } from "./keepScroll";
   import { invokeBackend } from "../core/backend";
-  import { renderMarkdownBlocks } from "../core/markdown";
+  import { NOTE_HREF, renderMarkdownBlocks, TAG_HREF, type NoteLinkRendering } from "../core/markdown";
   import { resolveMarkdownImagesWith } from "../core/markdownImages";
 
   interface Props {
@@ -21,9 +25,15 @@
     rel: string;
     /** The first source line whose block is on screen, after every scroll. */
     onTopLine?: (line: number) => void;
+    /** A vault note: its wikilinks and tags render as links. A new object renders again (the vault became known). */
+    notes?: NoteLinkRendering | null;
+    /** A click on a wikilink, with its inner text (`Target#Heading|alias`). */
+    onNoteLink?: (inner: string) => void;
+    /** A click on a tag, without its `#`. */
+    onTag?: (tag: string) => void;
   }
 
-  let { text, root, rel, onTopLine }: Props = $props();
+  let { text, root, rel, onTopLine, notes = null, onNoteLink, onTag }: Props = $props();
 
   /** Pause in typing before the preview renders again. */
   const RENDER_DELAY_MS = 150;
@@ -36,21 +46,48 @@
   $effect(() => {
     const source = text;
     const at = { root, rel };
+    const links = notes;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void render(source, at), html ? RENDER_DELAY_MS : 0);
+    timer = setTimeout(() => void render(source, at, links), html ? RENDER_DELAY_MS : 0);
     return () => clearTimeout(timer);
   });
 
-  async function render(source: string, at: { root: string; rel: string }): Promise<void> {
+  async function render(
+    source: string,
+    at: { root: string; rel: string },
+    links: NoteLinkRendering | null,
+  ): Promise<void> {
     const mine = ++generation;
     const read = (imageRel: string) =>
       invokeBackend<{ mime: string; base64: string }>("file_read_image", { root: at.root, rel: imageRel });
     const resolved = await resolveMarkdownImagesWith(source, at.rel, read);
-    if (mine === generation) html = renderMarkdownBlocks(resolved);
+    if (mine === generation) html = renderMarkdownBlocks(resolved, links);
+  }
+
+  /** A click on a wikilink or a tag goes to the owner; every other click is the page's as before. */
+  function onClick(e: MouseEvent): void {
+    const anchor = (e.target as Element | null)?.closest?.("a");
+    const href = anchor?.getAttribute("href") ?? "";
+    const note = href.startsWith(NOTE_HREF);
+    if (!note && !href.startsWith(TAG_HREF)) return;
+    e.preventDefault();
+    let value: string;
+    try {
+      value = decodeURIComponent(href.slice(note ? NOTE_HREF.length : TAG_HREF.length));
+    } catch {
+      return;
+    }
+    if (note) onNoteLink?.(value);
+    else onTag?.(value);
   }
 
   function blocks(): HTMLElement[] {
     return scroller ? [...scroller.querySelectorAll<HTMLElement>("[data-line]")] : [];
+  }
+
+  /** Takes the keyboard focus, so the editor's keys (⌃- back, ⌘⇧V) reach it while only the page shows. */
+  export function focus(): void {
+    scroller?.focus({ preventScroll: true });
   }
 
   /** Scrolls to the last block starting at or before `line`. */
@@ -78,7 +115,15 @@
   }
 </script>
 
-<div class="preview ax-prose" {...KEEP_SCROLL} bind:this={scroller} onscroll={onScroll}>
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div
+  class="preview ax-prose"
+  tabindex="-1"
+  {...KEEP_SCROLL}
+  bind:this={scroller}
+  onscroll={onScroll}
+  onclick={onClick}
+>
   {@html html}
 </div>
 
@@ -95,5 +140,25 @@
     font-size: var(--ax-preview-font-size, var(--ax-font-size-lg));
     line-height: 1.55;
     user-select: text;
+  }
+
+  .preview:focus {
+    outline: none;
+  }
+
+  /* A note's wikilinks (a dangling one faded) and tags (TL2): the editor's colours, no accent. */
+  .preview :global(a.ax-wikilink) {
+    color: var(--ax-syntax-wikilink);
+  }
+  .preview :global(a.ax-wikilink-missing) {
+    color: var(--ax-syntax-wikilink-missing);
+    text-decoration-style: dotted;
+  }
+  .preview :global(a.ax-tag) {
+    color: var(--ax-syntax-hashtag);
+    text-decoration: none;
+  }
+  .preview :global(a.ax-tag:hover) {
+    text-decoration: underline;
   }
 </style>

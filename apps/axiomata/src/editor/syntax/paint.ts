@@ -15,8 +15,14 @@ import type { SyntaxToken } from "./tokens";
 /** Bracket-pair colours by nesting depth (D8, G7), cycling through three. */
 export type BracketToken = "bracket-1" | "bracket-2" | "bracket-3";
 
+/**
+ * Colours a host paints over the grammar's itself, with {@link overlaySpans}: a note's wikilinks (a dangling one
+ * dimmed) and tags — the grammar has no word for them (`docs/plans/tags-links.md`, TL2).
+ */
+export type OverlayToken = "note-link" | "note-link-missing" | "note-tag";
+
 /** Anything a span can be coloured with. */
-export type PaintToken = SyntaxToken | BracketToken;
+export type PaintToken = SyntaxToken | BracketToken | OverlayToken;
 
 export interface Capture {
   startRow: number;
@@ -125,4 +131,34 @@ export function rowSegments(line: string, spans: readonly Span[] | undefined, st
   }
   if (at < end) out.push({ text: line.slice(at, end), token: null });
   return out;
+}
+
+/**
+ * `extra` painted over `base` (both sorted and non-overlapping): where an extra span lies, its token wins; the rest of
+ * `base` stays as it was, cut where needed.
+ */
+export function overlaySpans(base: readonly Span[] | undefined, extra: readonly Span[]): Span[] {
+  if (extra.length === 0) return base ? [...base] : [];
+  const out: Span[] = [];
+  let e = 0;
+  const push = (s: Span) => {
+    if (s.to > s.from) out.push(s);
+  };
+  for (const span of base ?? []) {
+    let from = span.from;
+    while (e < extra.length && extra[e].to <= from) push(extra[e++]);
+    while (from < span.to) {
+      const next = extra[e];
+      if (!next || next.from >= span.to) {
+        push({ from, to: span.to, token: span.token });
+        break;
+      }
+      push({ from, to: Math.min(span.to, next.from), token: span.token });
+      from = Math.max(from, next.to);
+      if (next.to <= span.to) push(extra[e++]);
+      else break;
+    }
+  }
+  while (e < extra.length) push(extra[e++]);
+  return out.sort((a, b) => a.from - b.from);
 }

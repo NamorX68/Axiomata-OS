@@ -22,7 +22,7 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
-import { marked } from "marked";
+import { Marked, marked, type TokenizerAndRendererExtension, type Tokens } from "marked";
 
 /** Maps every registered name — canonical or alias — to its canonical form,
  *  so a code fence's `language-*` class is stable regardless of which one
@@ -65,19 +65,103 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
-marked.use({
-  renderer: {
-    code({ text, lang }) {
-      const requested = lang?.trim().split(/\s+/, 1)[0]?.toLowerCase();
-      const canonical = requested ? CANONICAL_LANGUAGE[requested] : undefined;
-      const body = canonical ? hljs.highlight(text, { language: canonical }).value : escapeHtml(text);
-      const langClass = canonical ? ` language-${canonical}` : "";
-      return `<pre><code class="hljs${langClass}">${body}</code></pre>`;
-    },
-  },
-});
+/** A fenced code block, coloured by `hljs` where it knows the language. */
+function renderCode({ text, lang }: Tokens.Code): string {
+  const requested = lang?.trim().split(/\s+/, 1)[0]?.toLowerCase();
+  const canonical = requested ? CANONICAL_LANGUAGE[requested] : undefined;
+  const body = canonical ? hljs.highlight(text, { language: canonical }).value : escapeHtml(text);
+  const langClass = canonical ? ` language-${canonical}` : "";
+  return `<pre><code class="hljs${langClass}">${body}</code></pre>`;
+}
+
+marked.use({ renderer: { code: renderCode } });
 
 marked.setOptions({ gfm: true, breaks: false, async: false });
+
+/**
+ * How the reading view of a vault note shows its wikilinks and tags (`docs/plans/tags-links.md`, TL2): a wikilink
+ * becomes `<a class="ax-wikilink" href="#ax-note:…">` (with `ax-wikilink-missing` when its note does not exist), a tag
+ * `<a class="ax-tag" href="#ax-tag:…">` — fragment links the sanitiser keeps, which the view catches on click; nothing
+ * in them navigates by itself.
+ */
+export interface NoteLinkRendering {
+  /** Whether the note a link names exists: `false` dims it, `null` while the vault is not known. */
+  exists(target: string): boolean | null;
+}
+
+/** Where a wikilink's and a tag's fragment start: what the view looks for in a clicked `href`. */
+export const NOTE_HREF = "#ax-note:";
+export const TAG_HREF = "#ax-tag:";
+
+/** The rendering of the note being rendered right now — `marked` renders synchronously, one note at a time. */
+let rendering: NoteLinkRendering | null = null;
+
+/** Escapes text for an attribute value or element text. */
+function escapeText(text: string): string {
+  return escapeHtml(text).replace(/"/g, "&quot;");
+}
+
+const WIKILINK_RE = /^\[\[([^[\]\n]+?)\]\]/;
+const TAG_RE = /^#([\p{L}\p{M}\p{N}_\-/]+)/u;
+
+/** `[[Target#Heading|alias]]` (Obsidian's form), as `fileapp/noteLinks.ts` reads it. */
+const wikilinkExtension: TokenizerAndRendererExtension = {
+  name: "wikilink",
+  level: "inline",
+  start: (src) => {
+    const at = src.indexOf("[[");
+    return at < 0 ? undefined : at;
+  },
+  tokenizer(src) {
+    if (this.lexer.state.inLink) return undefined;
+    const m = WIKILINK_RE.exec(src);
+    if (!m) return undefined;
+    const inner = m[1];
+    const bar = inner.indexOf("|");
+    const head = bar < 0 ? inner : inner.slice(0, bar);
+    const alias = bar < 0 ? "" : inner.slice(bar + 1).trim();
+    const hash = head.indexOf("#");
+    const target = (hash < 0 ? head : head.slice(0, hash)).trim();
+    const heading = hash < 0 ? "" : head.slice(hash + 1).trim();
+    if (!target && !heading) return undefined;
+    return { type: "wikilink", raw: m[0], inner, target, heading, alias };
+  },
+  renderer(token) {
+    const { inner, target, heading, alias } = token as unknown as Record<string, string>;
+    const shown = alias || (target && heading ? `${target} › ${heading}` : target || heading);
+    const missing = target && rendering?.exists(target) === false ? " ax-wikilink-missing" : "";
+    const href = `${NOTE_HREF}${encodeURIComponent(inner)}`;
+    return `<a class="ax-wikilink${missing}" href="${href}" title="${escapeText(target || heading)}">${escapeText(shown)}</a>`;
+  },
+};
+
+/** `#tag` at the start or after whitespace, not digits alone (Q1). */
+const tagExtension: TokenizerAndRendererExtension = {
+  name: "hashtag",
+  level: "inline",
+  start: (src) => {
+    for (let i = src.indexOf("#"); i >= 0; i = src.indexOf("#", i + 1)) {
+      if ((i === 0 || /\s/u.test(src[i - 1])) && TAG_RE.test(src.slice(i))) return i;
+    }
+    return undefined;
+  },
+  tokenizer(src) {
+    if (this.lexer.state.inLink) return undefined;
+    const m = TAG_RE.exec(src);
+    if (!m || /^\p{N}+$/u.test(m[1])) return undefined;
+    return { type: "hashtag", raw: m[0], tag: m[1] };
+  },
+  renderer(token) {
+    const tag = String((token as unknown as { tag: string }).tag);
+    return `<a class="ax-tag" href="${TAG_HREF}${encodeURIComponent(tag.toLowerCase())}">#${escapeText(tag)}</a>`;
+  },
+};
+
+/** A second `marked` for vault notes, so the chat and other Markdown never turn `#` or `[[` into links. */
+const noteMarked = new Marked(
+  { gfm: true, breaks: false, async: false },
+  { renderer: { code: renderCode }, extensions: [wikilinkExtension, tagExtension] },
+);
 
 const ALLOWED_TAGS = [
   "a", "p", "br", "hr", "em", "strong", "del", "s", "code", "pre", "kbd",
@@ -147,19 +231,26 @@ export function renderMarkdown(source: string): string {
  * Each block is sanitised on its own with the ordinary rules and wrapped only
  * afterwards, so `data-line` is never something a note's own HTML can produce:
  * every `[data-line]` in the result is one of these wrappers (ED2 audit).
+ * With `notes` (a vault note), its wikilinks and tags become links ({@link NoteLinkRendering}).
  */
-export function renderMarkdownBlocks(source: string): string {
-  const tokens = marked.lexer(source);
-  let line = 0;
-  const parts: string[] = [];
-  for (const token of tokens) {
-    if (token.type !== "space") {
-      const one = Object.assign([token], { links: tokens.links });
-      parts.push(`<div data-line="${line}">${purify.sanitize(marked.parser(one))}</div>`);
+export function renderMarkdownBlocks(source: string, notes: NoteLinkRendering | null = null): string {
+  const engine = notes ? noteMarked : marked;
+  rendering = notes;
+  try {
+    const tokens = engine.lexer(source);
+    let line = 0;
+    const parts: string[] = [];
+    for (const token of tokens) {
+      if (token.type !== "space") {
+        const one = Object.assign([token], { links: tokens.links });
+        parts.push(`<div data-line="${line}">${purify.sanitize(engine.parser(one))}</div>`);
+      }
+      line += (token.raw.match(/\n/g) ?? []).length;
     }
-    line += (token.raw.match(/\n/g) ?? []).length;
+    return parts.join("");
+  } finally {
+    rendering = null;
   }
-  return parts.join("");
 }
 
 /** Word/line-boundary truncation for a plain-text preview — `core/mail.ts`'s

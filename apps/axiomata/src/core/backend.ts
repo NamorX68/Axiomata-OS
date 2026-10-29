@@ -829,6 +829,20 @@ export interface GraphFile {
   /** The earliest of frontmatter `created:`, birth and modification time (G17); the Orbit's time travel. */
   created?: string | null;
   is_markdown: boolean;
+  /** The note's tags (`docs/plans/tags-links.md`, TL1): lower case, without `#`, frontmatter and text together. */
+  tags?: string[];
+}
+
+/** One entry of the vault's tag list (`get_tag_list`, `<workspace>/TAGS.md`, V1). */
+export interface TagEntry {
+  tag: string;
+  description: string;
+}
+
+/** What `rename_note_links` changed — or, as a dry run, would change (V3). */
+export interface NoteLinksRenamed {
+  files: number;
+  links: number;
 }
 
 export interface GraphArea {

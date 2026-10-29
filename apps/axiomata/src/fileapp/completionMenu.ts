@@ -14,6 +14,11 @@
  * * **Taking an item** resolves it first when it has no extra edits yet (an
  *   auto-import is often filled in only then), within a short limit, and
  *   returns the edit — the surface runs it as the `complete` command.
+ * * **A source may complete more than a word** (`CompletionPort.span`): a note
+ *   name after `[[` holds spaces, a tag after `#` slashes and dashes
+ *   (`docs/plans/tags-links.md`, Q4). Where the source names such a span, the
+ *   menu opens at its start, follows it by the source's characters, and asks
+ *   with the span so other sources (the file's words) stay out.
  */
 
 import type { EditorDocument } from "../editor/document";
@@ -35,11 +40,21 @@ export const MAX_SHOWN = 200;
 /** A character that belongs to a word being completed. */
 const WORD_CHAR = /[\p{L}\p{N}_$]/u;
 
+/** A stretch being completed that is no word: where it starts on the cursor's line, and what it may hold. */
+export interface CompletionSpan {
+  start: number;
+  /** One character the span may hold; typing any other closes the menu. */
+  char: RegExp;
+}
+
 export interface CompletionPort {
-  ask(at: Pos, trigger: string | null, again: boolean): Promise<CompletionAnswer>;
+  /** `span` is set when the menu opened on one this port named (see {@link CompletionPort.span}). */
+  ask(at: Pos, trigger: string | null, again: boolean, span?: CompletionSpan): Promise<CompletionAnswer>;
   resolve(item: CompletionItem): Promise<CompletionItem>;
   /** The server's trigger characters. */
   triggers(): readonly string[];
+  /** The span the cursor is in when it is something other than a word (after `[[`, a `#`), or `null`. */
+  span?(at: Pos): CompletionSpan | null;
 }
 
 export interface MenuView {
@@ -51,6 +66,8 @@ export interface MenuView {
 
 interface Open {
   anchor: Pos;
+  /** What the menu follows: a word, or a span the port named. */
+  span: CompletionSpan | null;
   all: CompletionItem[];
   shown: CompletionItem[];
   selected: number;
@@ -96,6 +113,8 @@ export class CompletionMenu {
     }
     const last = text.slice(-1);
     if (last === "") return;
+    const span = this.port.span?.(doc.selection.head) ?? null;
+    if (span) return void this.request(doc, null, false, undefined, span);
     const triggers = this.port.triggers();
     const trigger = triggers.find((t) => t !== "" && lineBefore(doc).endsWith(t)) ?? null;
     if (trigger !== null && !WORD_CHAR.test(last)) return void this.request(doc, trigger, false);
@@ -104,17 +123,17 @@ export class CompletionMenu {
 
   /** ⌃Space: opens the menu here, word or not. */
   invoke(doc: EditorDocument): void {
-    void this.request(doc, null, false);
+    void this.request(doc, null, false, undefined, this.port.span?.(doc.selection.head) ?? null);
   }
 
   /** The text or the cursor changed while open (a ⌫, an arrow): narrow the list, or close. */
   follow(doc: EditorDocument): void {
     const o = this.open;
     if (!o) return;
-    const query = this.queryAt(doc, o.anchor);
+    const query = this.queryAt(doc, o.anchor, o.span);
     if (query === null) return this.close();
     if (o.incomplete) {
-      void this.request(doc, null, true, o.anchor);
+      void this.request(doc, null, true, o.anchor, o.span);
       return;
     }
     this.show(o, query);
@@ -167,30 +186,38 @@ export class CompletionMenu {
     return completionEdit(final, at, o.anchor.col, indent);
   }
 
-  /** The word typed since `anchor`, or `null` when the cursor left it. */
-  private queryAt(doc: EditorDocument, anchor: Pos): string | null {
+  /** The word (or span) typed since `anchor`, or `null` when the cursor left it. */
+  private queryAt(doc: EditorDocument, anchor: Pos, span: CompletionSpan | null): string | null {
     const sel = doc.selection;
     const at = sel.head;
     if (doc.extra.length > 0 || at.line !== anchor.line || at.col < anchor.col) return null;
     if (sel.anchor.line !== at.line || sel.anchor.col !== at.col) return null;
     const typed = doc.store.line(at.line).slice(anchor.col, at.col);
-    for (const ch of typed) if (!WORD_CHAR.test(ch)) return null;
+    const allowed = span?.char ?? WORD_CHAR;
+    for (const ch of typed) if (!allowed.test(ch)) return null;
     return typed;
   }
 
-  private async request(doc: EditorDocument, trigger: string | null, again: boolean, keep?: Pos): Promise<void> {
+  private async request(
+    doc: EditorDocument,
+    trigger: string | null,
+    again: boolean,
+    keep?: Pos,
+    span: CompletionSpan | null = null,
+  ): Promise<void> {
     if (doc.extra.length > 0) return;
     const at = doc.selection.head;
-    const anchor = keep ?? pos(at.line, trigger !== null ? at.col : wordStart(doc.store.line(at.line), at.col));
+    const start = span ? span.start : trigger !== null ? at.col : wordStart(doc.store.line(at.line), at.col);
+    const anchor = keep ?? pos(at.line, start);
     const token = ++this.token;
-    const answer = await this.port.ask(at, trigger, again);
+    const answer = await this.port.ask(at, trigger, again, span ?? undefined);
     if (token !== this.token) return;
-    const query = this.queryAt(doc, anchor);
+    const query = this.queryAt(doc, anchor, span);
     if (query === null || answer.items.length === 0) {
       if (this.open) this.close();
       return;
     }
-    const open: Open = { anchor, all: answer.items, shown: [], selected: 0, incomplete: answer.incomplete };
+    const open: Open = { anchor, span, all: answer.items, shown: [], selected: 0, incomplete: answer.incomplete };
     this.open = open;
     this.resolved.clear();
     this.show(open, query);

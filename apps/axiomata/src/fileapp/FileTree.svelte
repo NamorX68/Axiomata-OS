@@ -19,14 +19,21 @@
     through `files:renamed`); a closed folder hovered for half a second opens.
     Pointer events, not HTML drag and drop, which the Tauri window may take for
     dropping files from Finder.
+  * **A renamed or moved note keeps its links** (`docs/plans/tags-links.md`,
+    V3): once a Markdown file of the vault (the workspace, or a project opened
+    on its folder) has its new name, the tree asks
+    `rename_note_links` (a dry run) how many `[[…]]` in other notes point at
+    it, and offers to update them; alias and `#Heading` stay as they are.
 -->
 <script lang="ts">
-  import type { FileRootInfo } from "../core/backend";
+  import { invokeBackend, type FileRootInfo, type NoteLinksRenamed } from "../core/backend";
   import { messageOf } from "../core/errors";
+  import { toast } from "../core/toast";
   import { countTree, createFile, deleteTree, listDir, makeDir, renameEntry, type Listing } from "./backend";
   import type { FileRef } from "./tabs";
   import Icon from "../ui/Icon.svelte";
   import FileIcon from "./FileIcon.svelte";
+  import { invalidateNoteIndex, vaultPrefix, vaultRel } from "./noteIndex";
   import {
     baseName,
     expandedAfterDelete,
@@ -63,6 +70,17 @@
   let problem = $state<string | null>(null);
   /** Delete asked about: the entry and how many go with it. */
   let confirming = $state<{ root: string; rel: string; count: number | null } | null>(null);
+  /** A renamed note other notes link to (V3): the question whether their links follow. */
+  let relinking = $state<{
+    root: string;
+    from: string;
+    to: string;
+    /** `from` and `to` as paths of the vault, which `rename_note_links` speaks. */
+    oldRel: string;
+    newRel: string;
+    files: number;
+    links: number;
+  } | null>(null);
   /** The ⋯ / right-click menu. */
   let menu = $state<{ root: string; rel: string; kind: "root" | "dir" | "file"; x: number; y: number } | null>(null);
 
@@ -165,6 +183,7 @@
     }
     try {
       await renameEntry(from.root, from.rel, target.to);
+      void offerRelink(from.root, from.rel, target.to);
       expanded = expandedAfterRename(expanded, from.root, from.rel, target.to);
       if (!isOpen(dir.root, dir.rel)) expanded = [...expanded, folderKey(dir.root, dir.rel)];
     } catch (err) {
@@ -259,6 +278,7 @@
         const to = joinRel(parentOf(edit.rel), name);
         if (to !== edit.rel) {
           await renameEntry(edit.root, edit.rel, to);
+          void offerRelink(edit.root, edit.rel, to);
           expanded = expandedAfterRename(expanded, edit.root, edit.rel, to);
         }
         editing = null;
@@ -275,6 +295,40 @@
       problem = messageOf(err);
     }
   }
+
+  /** Whether the wikilinks to a note renamed from `from` to `to` should follow it (V3) — asked only when there are any. */
+  async function offerRelink(root: string, from: string, to: string): Promise<void> {
+    if (!/\.md$/i.test(from)) return;
+    const prefix = await vaultPrefix(root);
+    if (prefix === null) return;
+    invalidateNoteIndex();
+    const oldRel = vaultRel(prefix, from);
+    const newRel = vaultRel(prefix, to);
+    try {
+      const found = await invokeBackend<NoteLinksRenamed>("rename_note_links", { oldRel, newRel, dryRun: true });
+      if (found.links > 0) relinking = { root, from, to, oldRel, newRel, ...found };
+    } catch (err) {
+      onError(`The links to ${baseName(from)} were not checked: ${messageOf(err)}`);
+    }
+  }
+
+  async function commitRelink(): Promise<void> {
+    const r = relinking;
+    if (!r) return;
+    relinking = null;
+    try {
+      const done = await invokeBackend<NoteLinksRenamed>("rename_note_links", {
+        oldRel: r.oldRel,
+        newRel: r.newRel,
+        dryRun: false,
+      });
+      toast(`Updated ${plural(done.links, "link")} in ${plural(done.files, "note")}`, "info");
+    } catch (err) {
+      onError(`The links were not updated: ${messageOf(err)}`);
+    }
+  }
+
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   async function commitDelete(): Promise<void> {
     const c = confirming;
@@ -388,6 +442,13 @@
           </span>
           <button type="button" class="danger" onclick={() => void commitDelete()}>Delete</button>
           <button type="button" onclick={() => (confirming = null)}>Cancel</button>
+        </div>
+      {/if}
+      {#if relinking && relinking.root === root && relinking.to === path}
+        <div class="row confirm" style:--depth={depth}>
+          <span>Update {plural(relinking.links, "link")} in {plural(relinking.files, "note")}?</span>
+          <button type="button" onclick={() => void commitRelink()}>Update</button>
+          <button type="button" onclick={() => (relinking = null)}>Keep</button>
         </div>
       {/if}
       {#if entry.kind === "dir" && isOpen(root, path)}

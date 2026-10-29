@@ -157,6 +157,10 @@ const files = new Map<string, string>([
   ],
   ["README.md", "# Axiomata-Workspace\n\nSecond-brain root.\n"],
   [
+    "notes/links.md",
+    "---\ntags: [rust]\n---\n# Links\n\nSee [[inbox]], the [[ToDo#Done|done list]] and [[GLOSSARY]].\n\nA note that is not there yet: [[Neue Idee]].\n\nTagged #rust/async and #ki-news, not #1 or `#code` or `[[code]]`.\n\n```md\n[[not a link]] #not-a-tag\n```\n",
+  ],
+  [
     "ToDo.md",
     "# ToDo\n\n- [ ] Steuerunterlagen sortieren\n- [ ] Rückruf Werkstatt\n\n## Done\n\n- [x] Reifen wechseln lassen (done: 2026-09-04)\n",
   ],
@@ -180,6 +184,9 @@ const files = new Map<string, string>([
   ],
   ["Learning/BlockOS/0000-roadmap.html", lessonPage("BlockOS Roadmap", "Ein OS in Rust.", "0001-freestanding-binary.html", "Weiter")],
 ]);
+
+/** The workspace's fixture files under a name `mockGraph` (whose own list is `files`) can reach. */
+const mockFiles = files;
 
 /** A self-contained course page like the owner's: inline style, quiz script, relative link. */
 function lessonPage(title: string, intro: string, nextHref: string, nextLabel: string): string {
@@ -405,7 +412,26 @@ let ideProjects: IdeProject[] = [
     root_exists: false,
     accent_slot: null,
   },
+  // The vault opened as a project (tags-links TL2, V3): its files are the workspace's (`storeRoot`).
+  {
+    id: 3,
+    name: "Vault",
+    repo_root: "/mock/vault",
+    layout_json: null,
+    created_at: new Date(Date.now() - 40 * 86_400_000).toISOString(),
+    last_opened_at: null,
+    root_exists: true,
+    accent_slot: null,
+  },
 ];
+
+/** The project opened on the vault's folder: the mock keeps its files as the workspace's. */
+const MOCK_VAULT_PROJECT = "project:3";
+
+/** The root whose files `root` shows — the workspace for the vault project. */
+function storeRoot(root: string): string {
+  return root === MOCK_VAULT_PROJECT ? "workspace" : root;
+}
 
 /* Settings → Storage (maintenance.md, MT4): a home with something to free, one orphaned worktree with changes and a
  * Glut that answered. A clean-up empties what is freeable; "Delete" drops the orphan. */
@@ -913,6 +939,15 @@ function mockGraph(): WorkspaceGraph {
     { from: "Learning/Rust/lessons/0002-variablen.html", to: "Learning/Rust/lessons/0003-funktionen.html" },
     { from: "Learning/BlockOS/0000-roadmap.html", to: "Learning/BlockOS/0001-freestanding-binary.html" },
   ];
+  // The fixture files of the file app (`files`) are notes of this vault too, so wikilinks find them (tags-links TL2).
+  for (const [path, text] of mockFiles) {
+    if (files.some((f) => f.path === path)) continue;
+    const tags = [...text.matchAll(/(?:^|\s)#([\p{L}\p{N}_\-/]*\p{L}[\p{L}\p{N}_\-/]*)/gu)].map((m) => m[1].toLowerCase());
+    const area = path.includes("/") ? path.split("/")[0] : null;
+    const title = /^#\s+(.+)/m.exec(text)?.[1] ?? path;
+    files.push({ path, area, title, bytes: text.length, modified: null, is_markdown: path.endsWith(".md"), tags });
+  }
+  for (const [i, f] of files.entries()) if (!f.tags) f.tags = i % 7 === 0 ? ["ki-news"] : i % 5 === 0 ? ["rust"] : [];
   for (let i = 0; i < 70; i++) {
     const a = files[Math.floor(rnd() * files.length)];
     const b = files[Math.floor(rnd() * files.length)];
@@ -930,6 +965,34 @@ function mockGraph(): WorkspaceGraph {
     truncated: false,
     generated_at: new Date().toISOString(),
   };
+}
+
+/**
+ * `rename_note_links` in the mock: every `[[…]]` in a workspace note whose target is the old note's stem or its path
+ * (with or without `.md`) is counted — and, unless `dryRun`, rewritten to the new one, alias and heading kept.
+ */
+function mockRenameNoteLinks(oldRel: string, newRel: string, dryRun: boolean): { files: number; links: number } {
+  const stem = (rel: string) => rel.slice(rel.lastIndexOf("/") + 1).replace(/\.md$/i, "");
+  const names = new Set([stem(oldRel).toLowerCase(), oldRel.toLowerCase(), oldRel.replace(/\.md$/i, "").toLowerCase()]);
+  let changedFiles = 0;
+  let links = 0;
+  for (const [rel, text] of [...files]) {
+    if (!rel.endsWith(".md") || rel === newRel) continue;
+    let count = 0;
+    const next = text.replace(/\[\[([^[\]|#\n]+)([^[\]\n]*)\]\]/g, (whole, target: string, rest: string) => {
+      if (!names.has(target.trim().toLowerCase())) return whole;
+      count++;
+      return `[[${stem(newRel)}${rest}]]`;
+    });
+    if (count === 0) continue;
+    changedFiles++;
+    links += count;
+    if (dryRun) continue;
+    files.set(rel, next);
+    // As the real watcher would: an open copy of the note reloads (or asks, with unsaved changes).
+    mockEmit("files:changed", { root: "workspace", rel, kind: "modified", version: mockVersion(next) });
+  }
+  return { files: changedFiles, links };
 }
 
 /** `editor-settings.json` in the mock. */
@@ -1199,11 +1262,11 @@ function fileArgs(args: Record<string, unknown>): { root: string; rel: string } 
 }
 
 function fileStore(root: string): Map<string, string> {
-  return root === "workspace" ? files : otherRootFiles;
+  return storeRoot(root) === "workspace" ? files : otherRootFiles;
 }
 
 function fileKey(root: string, rel: string): string {
-  return root === "workspace" ? rel : `${root}\0${rel}`;
+  return storeRoot(root) === "workspace" ? rel : `${root}\0${rel}`;
 }
 
 /** Folders made with `file_mkdir` that hold no file yet (the mock's files make their folders implicitly). */
@@ -1211,10 +1274,11 @@ const mockDirs = new Set<string>();
 
 /** Every file key of `root`, as `rel` paths. */
 function relsOf(root: string): string[] {
-  const prefix = root === "workspace" ? "" : `${root}\0`;
+  const vault = storeRoot(root) === "workspace";
+  const prefix = vault ? "" : `${root}\0`;
   const out: string[] = [];
   for (const key of fileStore(root).keys()) {
-    if (root === "workspace" ? !key.includes("\0") : key.startsWith(prefix)) out.push(key.slice(prefix.length));
+    if (vault ? !key.includes("\0") : key.startsWith(prefix)) out.push(key.slice(prefix.length));
   }
   for (const key of mockDirs) if (key.startsWith(`${root}\0`)) out.push(`${key.slice(root.length + 1)}/`);
   return out;
@@ -2574,6 +2638,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return "Undid the last turn (mock): no files were touched in the browser mock." as T;
     case "get_workspace_graph":
       return mockGraph() as T;
+    // The vault's tag list (`TAGS.md`, tags-links V1) and the links that follow a renamed note (V3).
+    case "get_tag_list":
+      return [
+        { tag: "ki-news", description: "News about AI, from the news skills" },
+        { tag: "ki-modelle", description: "AI models and their releases" },
+        { tag: "rust", description: "The Rust language" },
+        { tag: "rust/async", description: "Async Rust: tokio, futures" },
+      ] as T;
+    case "rename_note_links":
+      return mockRenameNoteLinks(String(args.oldRel), String(args.newRel), args.dryRun !== false) as T;
     case "load_custom_css":
       return (mockCustomCss ?? null) as T;
     case "write_module_manifest":
