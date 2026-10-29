@@ -646,7 +646,10 @@ export class GraphRenderer {
 
     // Labels.
     if (this.options.labels) {
-      ctx.font = `500 ${Math.max(9, Math.min(11, R * 0.04))}px ${getComputedStyle(this.canvas).fontFamily}`;
+      // Grows when zoomed in, gently (square root), up to the map's largest field name.
+      const base = Math.max(9, Math.min(11, R * 0.04));
+      const px = Math.min(GraphRenderer.FIELD_NAME_MAX_PX, base * Math.max(1, Math.sqrt(this.view.zoom)));
+      ctx.font = `500 ${px}px ${getComputedStyle(this.canvas).fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       for (const n of model.nodes) {
@@ -1388,6 +1391,10 @@ export class GraphRenderer {
   private static readonly COUNTRIES_UNTIL = 2.8;
   /** How far an old note darkens on the map: half way, so every country keeps its light. */
   private static readonly MAP_COOLING = 0.5;
+  /** The largest a field's name grows when zoomed in close (px): grows with the field, so it stays readable up
+   *  close (owner, 2026-10-29: 12 px read small there). */
+  private static readonly FIELD_NAME_MAX_PX = 17;
+
   /** The least heat (0…1) a field or cell shows as an ember core. */
   private static readonly EMBER_FROM = 0.05;
   /** An ember's radius as a share of its cell's: a hint of heat, not a second mark over the area's colour (owner,
@@ -1673,7 +1680,7 @@ export class GraphRenderer {
     // Names on the fields, close up (or always, with the file names switched on).
     const names = zoom >= GraphRenderer.NAMES_FROM || this.options.fileLabels;
     if (names && s >= 14) {
-      ctx.font = this.font(Math.min(12, s * 0.3), 500);
+      ctx.font = this.font(Math.min(GraphRenderer.FIELD_NAME_MAX_PX, s * 0.3), 500);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = this.textColor;
