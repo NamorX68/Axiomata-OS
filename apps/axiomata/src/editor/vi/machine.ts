@@ -453,6 +453,8 @@ export class ViMachine {
   placeCursor(at: Pos): void {
     this.pending = [];
     if (this.isVisual()) this.mode = "normal";
+    // A click inside Insert splits the undo step there, like an arrow key does (`insert.ts` `moveKey`).
+    if (this.mode === "insert" || this.mode === "replace") this.insertMode.movedFromOutside();
     this.setCursor(at);
   }
 

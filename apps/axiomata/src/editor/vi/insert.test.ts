@@ -90,6 +90,19 @@ describe("undo after an Insert session an arrow key interrupted", () => {
     expect(show(doc)).toBe("|ab");
   });
 
+  it("a click inside Insert splits the session like an arrow key does", () => {
+    const { doc, m } = setup("|ab");
+    m.feedKeys("ix");
+    m.placeCursor({ line: 0, col: 0 }); // the mouse, not a key the session saw
+    m.feedKeys("y<Esc>");
+    const text = () => show(doc).replace("|", "");
+    expect(text()).toBe("yxab");
+    m.feedKeys("u");
+    expect(text()).toBe("xab");
+    m.feedKeys("u");
+    expect(text()).toBe("ab");
+  });
+
   it("Ctrl-o's one command is its own undo step, between the typing around it", () => {
     const { doc, m } = setup("|ab");
     m.feedKeys("ix<C-o>xy<Esc>");
