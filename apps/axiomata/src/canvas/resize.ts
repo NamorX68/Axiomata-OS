@@ -2,8 +2,9 @@
  * `use:resizable` — attach to a resize handle. The handle's `dir` says which
  * edge(s) move: `"e"`/`"w"` (width, growing right/left), `"s"`/`"n"`
  * (height, growing down/up), `"se"` (both, growing right+down — the
- * canvas tile corner handle) or `"sw"` (both, growing left+down — the tile's
- * other lower corner, for a tile at the screen's right edge). `"w"`/`"n"` are for an edge anchored on the
+ * canvas tile corner handle), `"sw"` (both, growing left+down — the tile's
+ * other lower corner, for a tile at the screen's right edge) or `"ne"`/`"nw"`
+ * (both, growing up and right/left — a window's upper corners). `"w"`/`"n"` are for an edge anchored on the
  * opposite side (e.g. `StagingLayer`'s staged panel: dragging its *left*
  * edge left, or its *top* edge up, both grow it, so those two report a
  * positive delta for a *negative* pointer movement). Unlike drag there is no
@@ -13,7 +14,7 @@
 
 import type { Action } from "svelte/action";
 
-export type ResizeDir = "e" | "s" | "se" | "w" | "n" | "sw";
+export type ResizeDir = "e" | "s" | "se" | "w" | "n" | "sw" | "ne" | "nw";
 
 export interface ResizeDelta {
   dw: number;
@@ -27,6 +28,14 @@ export interface ResizeOptions {
   onEnd?: (delta: ResizeDelta) => void;
 }
 
+/** The growth a pointer offset (`dx`, `dy`, screen px) means for a handle on side(s) `dir`: an edge on the right or
+ *  bottom grows with the pointer, one on the left or top against it, and an edge the handle does not touch not at all. */
+export function resizeDelta(dir: ResizeDir, dx: number, dy: number): ResizeDelta {
+  const dw = dir.includes("e") ? dx : dir.includes("w") ? -dx : 0;
+  const dh = dir.includes("s") ? dy : dir.includes("n") ? -dy : 0;
+  return { dw, dh };
+}
+
 export const resizable: Action<HTMLElement, ResizeOptions> = (node, options) => {
   let opts = options;
   let pointerId: number | null = null;
@@ -34,11 +43,7 @@ export const resizable: Action<HTMLElement, ResizeOptions> = (node, options) => 
   let startY = 0;
 
   function delta(e: PointerEvent): ResizeDelta {
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    const dw = opts.dir === "e" || opts.dir === "se" ? dx : opts.dir === "w" || opts.dir === "sw" ? -dx : 0;
-    const dh = opts.dir === "s" || opts.dir === "se" || opts.dir === "sw" ? dy : opts.dir === "n" ? -dy : 0;
-    return { dw, dh };
+    return resizeDelta(opts.dir, e.clientX - startX, e.clientY - startY);
   }
 
   function onPointerDown(e: PointerEvent) {

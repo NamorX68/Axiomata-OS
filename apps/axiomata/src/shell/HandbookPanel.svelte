@@ -20,10 +20,9 @@
     request?: { page: string | null; seq: number } | null;
   } = $props();
 
-  /** The window's size: large enough for a page beside the list, never beyond the screen. */
-  const PANEL_SIZE =
-    "width: min(calc(980px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); " +
-    "height: min(calc(720px * var(--ax-ui-scale)), calc(100vh - 2 * var(--ax-space-5)));";
+  /** The size the window first opens at (unscaled px): large enough for a page beside the list. `Window` holds it to
+   *  the screen; once the owner resized it, the remembered size wins (`sizeKey`). */
+  const PANEL_SIZE = { w: 980, h: 720 };
 
   /** The overview, shown when nothing else was asked for. */
   const FIRST_PAGE = "index";
@@ -79,7 +78,10 @@
     title="Handbook"
     subtitle={title}
     onClose={() => (open = false)}
-    style={PANEL_SIZE}
+    movable
+    resizable
+    sizeKey="handbook"
+    defaultSize={PANEL_SIZE}
   >
     <div class="handbook">
       <nav class="pages" aria-label="Handbook pages">

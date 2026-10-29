@@ -74,6 +74,21 @@ export function readPanelSize(raw: unknown): PanelSize | null {
   return ok(s.w) && ok(s.h) ? { w: s.w, h: s.h } : null;
 }
 
+/**
+ * A remembered size out of a setting that files sizes by key (`stagingPanelSizes` per module type, `windowSizes` per
+ * `Window.svelte` `sizeKey`); `null` when the setting or its entry is not one.
+ */
+export function rememberedSize(sizes: unknown, key: string): PanelSize | null {
+  if (typeof sizes !== "object" || sizes === null || Array.isArray(sizes)) return null;
+  return readPanelSize((sizes as Record<string, unknown>)[key]);
+}
+
+/** The same setting with `size` filed under `key`, every other entry kept — what is written back after a resize. */
+export function rememberingSize(sizes: unknown, key: string, size: PanelSize): Record<string, unknown> {
+  const kept = typeof sizes === "object" && sizes !== null && !Array.isArray(sizes) ? sizes : {};
+  return { ...(kept as Record<string, unknown>), [key]: size };
+}
+
 /** What a panel's remembered size is filed under: the opener's `config.sizeKey`
  *  if it stated one, else the module type. */
 export function readSizeKey(config: Record<string, unknown>, type: string): string {
