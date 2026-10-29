@@ -2205,7 +2205,12 @@ mod tests {
         engines.insert("sonnet".to_owned(), engine("sonnet", ""));
         engines.insert("opus".to_owned(), engine("opus", ""));
         engines.insert("custom".to_owned(), engine("custom", "my-harness --go"));
-        let mut config = Config::default();
+        // `Config::default()` points the workspace at the real `~/Axiomata-Workspace`, and a returned card mirrors
+        // its board there.
+        let mut config = Config {
+            workspace_root: dir.join("workspace"),
+            ..Config::default()
+        };
         config.agents.engines = engines;
         World {
             roles: vec![

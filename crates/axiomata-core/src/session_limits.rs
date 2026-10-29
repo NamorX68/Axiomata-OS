@@ -649,6 +649,17 @@ mod tests {
         card: i64,
     }
 
+    impl World {
+        /// A config whose workspace is this world's scratch directory: `Config::default()` points at the real
+        /// `~/Axiomata-Workspace`, and a limit stop mirrors the board into it.
+        fn config(&self) -> Config {
+            Config {
+                workspace_root: self.dir.join("workspace"),
+                ..Config::default()
+            }
+        }
+    }
+
     impl Drop for World {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
@@ -771,7 +782,7 @@ mod tests {
         )
         .unwrap();
         let mut meter = Meter::with_projects(projects);
-        let config = Config::default();
+        let config = world.config();
         let mut seen = Vec::new();
         let read = futures_block(meter.read(&world.watched, &config, &mut seen));
         assert!(read.measured);
@@ -796,7 +807,7 @@ mod tests {
     fn a_glut_session_is_counted_from_its_event_log_and_what_is_left_bounds_its_next_turn() {
         let world = world(Harness::Glut);
         let mut meter = Meter::default();
-        let config = Config::default();
+        let config = world.config();
         let read = futures_block(meter.read(&world.watched, &config, &mut Vec::new()));
         assert_eq!(
             read.unmeasured,
@@ -835,7 +846,7 @@ mod tests {
         let mut meter = Meter::with_projects(world.dir.join("projects"));
         let id = axiomata_ide::usage::new_claude_session_id().unwrap();
         world.watched.channel.record_claude_session(&id).unwrap();
-        let read = futures_block(meter.read(&world.watched, &Config::default(), &mut Vec::new()));
+        let read = futures_block(meter.read(&world.watched, &world.config(), &mut Vec::new()));
         assert!(!read.measured);
         assert_eq!(read.usage, Usage::default());
         assert_eq!(
@@ -849,7 +860,7 @@ mod tests {
     fn the_reason_a_session_is_not_measured_is_told_apart() {
         let world = world(Harness::ClaudeCode);
         let mut meter = Meter::with_projects(world.dir.join("projects"));
-        let config = Config::default();
+        let config = world.config();
         // No id was ever noted for it.
         let none = futures_block(meter.read(&world.watched, &config, &mut Vec::new()));
         assert_eq!(none.unmeasured, Some(Unmeasured::NoSessionId));
@@ -889,7 +900,7 @@ mod tests {
             format!("{}\n", reply("m1", 1_000_000, 1_000_000, "t1")),
         )
         .unwrap();
-        let mut config = Config::default();
+        let mut config = world.config();
         config.agents.costs.insert(
             "deepseek/flash".into(),
             crate::config::ModelCost {
@@ -914,7 +925,7 @@ mod tests {
         let world = world(Harness::ClaudeCode);
         let breach = stop(
             &world.db,
-            &Config::default(),
+            &world.config(),
             &world.watched,
             "60 steps of 60 used",
             false,
@@ -960,7 +971,7 @@ mod tests {
 
         let breach = stop(
             &world.db,
-            &Config::default(),
+            &world.config(),
             watched,
             "40 steps of 40 used",
             false,
