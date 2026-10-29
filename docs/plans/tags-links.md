@@ -1,6 +1,6 @@
 # Tags + Links — #Tags und [[Wikilinks]] wie in Obsidian (Karte #75)
 
-Stand: 2026-10-29, **gegrillt** (Q1–Q10, Owner), Go zum Bau. **TL1, TL3–TL6 gebaut** auf Branch `tags` (2026-10-29,
+Stand: 2026-10-29, **gegrillt** (Q1–Q10, Owner), **am Mac abgenommen und gemergt** (2026-10-29). **TL1, TL3–TL6 gebaut** auf Branch `tags` (2026-10-29,
 29db892 · bacd7b2 · 88e03d0 · eaebc26 · 843fe25, dazu 8811865: die Leseansicht lässt das Frontmatter weg); TL2 im Branch
 `editorlinks`. Nicht gemergt, nicht installiert; offen: Mac-Test, `skills reseed --force`, den Lauf TL6 startet der
 Owner. Karte #75 (Owner, 2026-10-11): Tags, damit man Notizen
