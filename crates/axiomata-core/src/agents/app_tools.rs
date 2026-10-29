@@ -2,12 +2,14 @@
 //!
 //! Glut runs a chat turn's shell in its sandbox, which hides `~/.axiomata`, and it starts the CLI directly only for a
 //! command the turn *declares* — a chat turn declares none (Glut's `Gate::declares_command`). So the chat would reach
-//! neither `axiomata-cli app …` nor `module-action`. These tools give it the same answers in the app's own process:
-//! `axiomata_app` reads the handbook and the live views (`crate::app_state`), the same text the CLI prints.
+//! neither `axiomata-cli app …` nor `module-action`. These tools give it the same in the app's own process:
+//! `axiomata_app` reads the handbook and the live views (`crate::app_state`), the same text the CLI prints, and
+//! `axiomata_action` calls the chat's shell actions through the app's action queue (CH5).
 //!
 //! `axiomata_app` is judged as a read ([`Access::Read`]): allowed in every mode, plan mode included, and still subject
 //! to the owner's deny rules. It is offered only to a chat turn that declares no tools of its own — an instruct turn's
-//! declaration stays its whole set. Nothing here writes a file or the database.
+//! declaration stays its whole set. `axiomata_action` is judged by the turn's mode like any other tool; what it may
+//! call is a fixed list, and the app asks the owner before a skill, a routine or a card. Neither writes the database.
 
 use std::sync::Mutex;
 
@@ -23,11 +25,116 @@ use crate::{handbook, paths};
 /// The read tool's name, as the model calls it.
 pub const APP_TOOL: &str = "axiomata_app";
 
+/// The operating tool's name.
+pub const ACTION_TOOL: &str = "axiomata_action";
+
+/// The shell actions the operating tool may call (`apps/axiomata/src/modules/chatActions.ts` and `openFile`): views
+/// and display at once, a skill, a routine and a card only after the owner's yes in the app — the app decides that by
+/// each action's `chat` mark, whoever calls. Nothing that deletes or steers is in the list, and a tile's own actions
+/// stay where they were (the Claude Code chat's `module-action`).
+pub const CHAT_SHELL_ACTIONS: [&str; 6] = [
+    "open_view",
+    "set_display",
+    "openFile",
+    "start_skill",
+    "save_routine",
+    "start_card",
+];
+
+/// How long the operating tool waits for the app to take the action — an asked one answers at once that it asked.
+const ACTION_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The tools a chat turn on Glut gets beside its own.
 pub fn chat_tools(config: &Config) -> Vec<Box<dyn Tool>> {
-    vec![Box::new(AppTool {
-        config: config.clone(),
-    })]
+    vec![
+        Box::new(AppTool {
+            config: config.clone(),
+        }),
+        Box::new(ActionTool),
+    ]
+}
+
+/// `axiomata_action`: one of [`CHAT_SHELL_ACTIONS`], through the app's action queue (`crate::bridge`), as the CLI's
+/// `module-action shell …` sends it — the sandbox hides that queue from the turn's shell.
+struct ActionTool;
+
+/// The action and its params, read from a call's arguments; an action outside the list is refused.
+fn action_call(arguments: &Value) -> Result<(String, Value), String> {
+    let action = arguments["action"].as_str().unwrap_or_default();
+    if !CHAT_SHELL_ACTIONS.contains(&action) {
+        return Err(format!(
+            "the chat operates the app with these actions only: {}",
+            CHAT_SHELL_ACTIONS.join(", ")
+        ));
+    }
+    let params = match &arguments["params"] {
+        Value::Null => json!({}),
+        Value::Object(_) => arguments["params"].clone(),
+        _ => return Err("params must be a JSON object".to_owned()),
+    };
+    Ok((action.to_owned(), params))
+}
+
+/// Hands the action to the running app and waits for its answer.
+fn dispatch(action: String, params: Value) -> Result<String, String> {
+    let request = crate::bridge::ActionRequest {
+        id: crate::bridge::new_action_id(),
+        instance_id: "shell".to_owned(),
+        action,
+        params,
+        created_at: chrono::Utc::now(),
+        origin: Some(crate::agent_entry::HARNESS_RUN_CHAT.to_owned()),
+    };
+    crate::bridge::enqueue(&request).map_err(|err| err.to_string())?;
+    let response = crate::bridge::wait_for_response(&request.id, ACTION_WAIT)
+        .map_err(|err| err.to_string())?;
+    if response.ok {
+        Ok(response.result.unwrap_or(Value::Null).to_string())
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| "the action failed".to_owned()))
+    }
+}
+
+impl Tool for ActionTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: ACTION_TOOL.to_owned(),
+            description: format!(
+                "Operate the Axiomata app for the owner: one of the Shell actions of your instructions ({}), with its \
+                 params as a JSON object. open_view and set_display act at once; start_skill, save_routine and \
+                 start_card ask the owner in the app and run only on their yes — say that you asked. Deleting, keys, \
+                 the Studio's agents and the owner's board steps are not yours.",
+                CHAT_SHELL_ACTIONS.join(", ")
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": CHAT_SHELL_ACTIONS },
+                    "params": { "type": "object" }
+                },
+                "required": ["action"]
+            }),
+        }
+    }
+
+    fn access(&self, _arguments: &Value) -> Access {
+        // Judged by the turn's mode as any other tool (security audit): with pre-approved tools it runs, otherwise the
+        // chat — which nobody answers mid-turn — is refused, and plan mode never operates. The app's own yes for a
+        // skill, a routine or a card comes on top.
+        Access::Other
+    }
+
+    fn call(&self, arguments: Value, _context: CallContext) -> ToolFuture<'_> {
+        Box::pin(async move {
+            let (action, params) = action_call(&arguments)?;
+            // The queue is files and a polling wait: off the run's thread.
+            tokio::task::spawn_blocking(move || dispatch(action, params))
+                .await
+                .map_err(|err| format!("the action failed: {err}"))?
+        })
+    }
 }
 
 /// `axiomata_app`: the handbook and the live views, read-only.
@@ -226,6 +333,26 @@ mod tests {
         );
         unsafe { std::env::remove_var(paths::AXIOMATA_HOME_ENV) };
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn the_action_tool_calls_only_the_chats_shell_actions() {
+        assert_eq!(
+            action_call(&json!({"action": "open_view", "params": {"view": "kanban"}})),
+            Ok(("open_view".into(), json!({"view": "kanban"})))
+        );
+        assert_eq!(
+            action_call(&json!({"action": "set_display"})).unwrap().1,
+            json!({})
+        );
+        for refused in ["kanban_move_card", "delete", "run", ""] {
+            assert!(
+                action_call(&json!({"action": refused})).is_err(),
+                "{refused}"
+            );
+        }
+        assert!(action_call(&json!({"action": "open_view", "params": "x"})).is_err());
+        assert_eq!(ActionTool.access(&json!({})), Access::Other);
     }
 
     #[test]

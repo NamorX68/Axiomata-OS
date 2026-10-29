@@ -33,6 +33,7 @@ import { emit, on } from "./core/bus";
   import SecondBrainView from "./shell/SecondBrainView.svelte";
   import Settings from "./shell/Settings.svelte";
   import HandbookPanel from "./shell/HandbookPanel.svelte";
+  import ChatAsks from "./shell/ChatAsks.svelte";
   import { HANDBOOK_EVENT } from "./core/handbook";
   import Spotlight from "./shell/Spotlight.svelte";
   import StagingLayer from "./shell/StagingLayer.svelte";
@@ -189,6 +190,7 @@ import { emit, on } from "./core/bus";
           mockPickNext: m.mockPickNext,
           mockAgentState: m.mockAgentState,
           mockEmit: m.mockEmit,
+          mockActionRequest: m.mockActionRequest,
         };
       });
     }
@@ -278,6 +280,7 @@ import { emit, on } from "./core/bus";
 {/if}
 <StagingLayer />
 <ChatPanel />
+<ChatAsks />
 
 <Canvas />
 <!-- The assistant bar floats over the bottom of the screen, which is fine over

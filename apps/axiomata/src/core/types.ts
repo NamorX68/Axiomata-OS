@@ -18,6 +18,27 @@ export interface ModuleAction {
   description: string;
   params: JsonSchemaObject;
   run(params: unknown, ctx: ModuleContext): Promise<unknown>;
+  /**
+   * What an agent may do with the action through the bridge (`docs/plans/chat-knows-app.md`, CH5, Q8) — required, so
+   * every new action decides (security audit). `direct`: it runs at once. `ask`: the owner is asked in the app first
+   * (`ask` below, `core/chatAsks.ts`) and it runs only on yes. `never`: not offered in the manifest and refused from
+   * the bridge. The owner's own `/` commands reach every action regardless.
+   */
+  chat: "direct" | "ask" | "never";
+  /**
+   * For `chat: "ask"`: the question the owner reads (plain text), an optional longer detail (a prompt, a card's body),
+   * and the params the action will run with — checked and frozen now, so what runs is what was shown. Throws on bad
+   * params. An `ask` action without it is refused.
+   */
+  ask?(params: unknown, ctx: ModuleContext): Promise<PreparedAsk>;
+}
+
+/** What an `ask` action shows the owner and runs with on yes. */
+export interface PreparedAsk {
+  question: string;
+  detail?: string;
+  /** The params the action runs with; the agent's own when unset. */
+  params?: unknown;
 }
 
 /** Everything a mounted module instance gets from the shell. */

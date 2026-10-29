@@ -10,6 +10,7 @@ import { invokeBackend } from "./backend";
 import type { ModuleAction, ModuleContext, ModuleDefinition, CanvasInstance } from "./types";
 import { instances, updateInstance } from "./stores";
 import { emit } from "./bus";
+import { askOwner } from "./chatAsks";
 
 const registry = new Map<string, ModuleDefinition>();
 
@@ -55,26 +56,34 @@ export interface ManifestEntry {
 }
 
 export function manifest(): ManifestEntry[] {
-  const shell: ManifestEntry[] = shellActions.length
-    ? [{ instance_id: SHELL_INSTANCE, type: "shell", title: "Shell", actions: shellActions.map(describe) }]
+  const offered = shellActions.filter(isOffered);
+  const shell: ManifestEntry[] = offered.length
+    ? [{ instance_id: SHELL_INSTANCE, type: "shell", title: "Shell", actions: offered.map(describe) }]
     : [];
   return shell.concat(moduleEntries());
 }
 
+/** Whether an agent is shown the action at all: a `never` one is the owner's alone (CH5). */
+const isOffered = (a: ModuleAction): boolean => a.chat === "direct" || a.chat === "ask";
+
+/** Said after an `ask` action's description, so the agent knows its call only asks the owner. */
+export const ASKS_SUFFIX = " Asks the owner in the app first; it runs only if they say yes.";
+
 function describe(a: ModuleAction): ManifestEntry["actions"][number] {
-  return { name: a.name, description: a.description, params: a.params };
+  const description = a.chat === "ask" ? `${a.description}${ASKS_SUFFIX}` : a.description;
+  return { name: a.name, description, params: a.params };
 }
 
 function moduleEntries(): ManifestEntry[] {
   return get(instances).flatMap((inst): ManifestEntry[] => {
-    const def = registry.get(inst.type);
-    if (!def?.actions?.length) return [];
+    const actions = (registry.get(inst.type)?.actions ?? []).filter(isOffered);
+    if (!actions.length) return [];
     return [
       {
         instance_id: inst.id,
         type: inst.type,
-        title: def.title,
-        actions: def.actions.map(describe),
+        title: registry.get(inst.type)!.title,
+        actions: actions.map(describe),
       },
     ];
   });
@@ -111,17 +120,12 @@ export function makeContext(inst: CanvasInstance): ModuleContext {
   );
 }
 
-/** Dispatch one declared action on one mounted instance (frontend → frontend).
- *  Used by the `/` command router and the agent bridge. */
-export async function invokeAction(
-  instanceId: string,
-  action: string,
-  params: unknown,
-): Promise<unknown> {
+/** One action found by instance and name, with the context it runs in. */
+function resolveAction(instanceId: string, action: string): { act: ModuleAction; ctx: ModuleContext } {
   if (instanceId === SHELL_INSTANCE) {
     const act = shellActions.find((a) => a.name === action);
     if (!act) throw new Error(`the shell has no action "${action}"`);
-    return act.run(params, createContext(SHELL_INSTANCE, {}, () => {}));
+    return { act, ctx: createContext(SHELL_INSTANCE, {}, () => {}) };
   }
   const inst = get(instances).find((i) => i.id === instanceId);
   if (!inst) {
@@ -134,5 +138,44 @@ export async function invokeAction(
       `instance "${instanceId}" (${inst.type}) has no action "${action}"`,
     );
   }
-  return act.run(params, makeContext(inst));
+  return { act, ctx: makeContext(inst) };
+}
+
+/** Dispatch one declared action on one mounted instance (frontend → frontend), as the owner: the `/` command
+ *  router. An agent's call goes through {@link invokeAgentAction}. */
+export async function invokeAction(
+  instanceId: string,
+  action: string,
+  params: unknown,
+): Promise<unknown> {
+  const { act, ctx } = resolveAction(instanceId, action);
+  return act.run(params, ctx);
+}
+
+/**
+ * Dispatch an action an agent asked for through the bridge (`core/agent-bridge.ts`) by its `chat` mark (CH5, Q8):
+ * `direct`, it runs; `ask`, the owner is asked in the app and the agent hears at once that it was asked — it runs
+ * only on the owner's yes, with the params shown then; anything else is refused. `origin` is who the request says it
+ * comes from (`chat`, `agent:<name>`, …), shown with the question.
+ */
+export async function invokeAgentAction(
+  instanceId: string,
+  action: string,
+  params: unknown,
+  origin: string | null = null,
+): Promise<unknown> {
+  const { act, ctx } = resolveAction(instanceId, action);
+  switch (act.chat) {
+    case "direct":
+      return act.run(params, ctx);
+    case "ask": {
+      if (!act.ask) throw new Error(`"${action}" cannot be asked for`);
+      const prepared = await act.ask(params, ctx);
+      const frozen = prepared.params ?? params;
+      return askOwner({ ...prepared, source: action, origin }, () => act.run(frozen, ctx));
+    }
+    default:
+      // `never`, or a mark this build does not know: refused.
+      throw new Error(`"${action}" is the owner's to do in the app; an agent does not do it`);
+  }
 }

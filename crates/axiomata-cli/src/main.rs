@@ -788,6 +788,12 @@ async fn main() -> Result<()> {
              else; the owner does the rest"
         );
     }
+    // What a chat turn never does, or does only through the owner's yes in the app (chat-knows-app CH5, Q8).
+    if board_flow::harness_run_kind() == Some(board_flow::HarnessRun::Chat)
+        && let Some(refusal) = chat_turn_refusal(&command)
+    {
+        bail!("{refusal}");
+    }
     // The handbook needs no core, and may be read where `~/.axiomata` is hidden; after the skill gate, which keeps a
     // skill run's list as short as it was.
     if let Command::App { action } = &command
@@ -1041,6 +1047,10 @@ fn module_action(instance: String, action: String, json: String, timeout_secs: u
         action,
         params,
         created_at: chrono::Utc::now(),
+        origin: Some(action_origin(
+            axiomata_core::session::session_actor(),
+            board_flow::harness_run_kind(),
+        )),
     };
     bridge::enqueue(&request).context("could not write the request")?;
     let response = match bridge::wait_for_response(
@@ -1065,6 +1075,17 @@ fn module_action(instance: String, action: String, json: String, timeout_secs: u
                 .unwrap_or_else(|| "action failed".to_string())
         );
         std::process::exit(1);
+    }
+}
+
+/// Who a `module-action` says it comes from, for the question the app may put to the owner: an agent session by its
+/// name, an app harness's run by its kind, else a terminal. Informative only — the app's own yes is the gate.
+fn action_origin(session: Option<String>, run: Option<board_flow::HarnessRun>) -> String {
+    match (session, run) {
+        (Some(actor), _) => actor,
+        (None, Some(board_flow::HarnessRun::Chat)) => "chat".to_owned(),
+        (None, Some(board_flow::HarnessRun::Skill)) => "skill".to_owned(),
+        (None, None) => "terminal".to_owned(),
     }
 }
 
@@ -2818,6 +2839,96 @@ fn skill_run_may(command: &Command) -> bool {
     }
 }
 
+/// Why a chat turn of the app may not run `command` from the CLI (`docs/plans/chat-knows-app.md`, CH5, Q8), if it may
+/// not. An allow-list, like a skill run's (`skill_run_may`), so a command added later is closed to the chat until
+/// somebody opens it here (security audit): the owner asked for the turn, but its words may come from a page or a note.
+/// Open: looking (status, skills, runs, the app's views, the board, routines, the Studio's lists, storage), what the
+/// chat did before (plain cards, a note's tags, the inbox, the router, the dashboard's actions — those decide for
+/// themselves whether they ask the owner first). Starting a skill, a routine change and starting a card go through the
+/// app, which asks the owner (`start_skill`, `save_routine`, `start_card`); everything else — deleting, the Studio's
+/// sessions, the owner's board steps, grants, other agent runs, cleaning up — is never the chat's. Most of it is refused
+/// further in by `owner_only` too; this list is the one that says what the chat may do, checked before the core starts.
+fn chat_turn_refusal(command: &Command) -> Option<String> {
+    let through_the_app = |what: &str, action: &str| {
+        Some(format!(
+            "{what} is asked of the owner in the app: call the shell action `{action}` (module-action shell \
+             {action}); it runs when the owner says yes"
+        ))
+    };
+    let never = |what: &str| {
+        Some(format!(
+            "{what} is the owner's; the chat does not do it — say what the owner can do"
+        ))
+    };
+    let open = match command {
+        Command::Status
+        | Command::ListSkills
+        | Command::ListRuns { .. }
+        | Command::GetRun { .. }
+        | Command::Graph
+        | Command::Modules
+        | Command::ModuleAction { .. }
+        | Command::App { .. }
+        | Command::Inbox { .. }
+        | Command::Memory { .. } => true,
+        Command::RunSkill { .. } => return through_the_app("starting a skill", "start_skill"),
+        Command::Skills { action } => matches!(action, SkillsAction::Bundled { .. }),
+        Command::Models { action } => matches!(action, models_cmd::ModelsAction::List { .. }),
+        Command::Routines { action } => match action {
+            RoutineAction::List | RoutineAction::History { .. } => true,
+            RoutineAction::Delete { .. } | RoutineAction::Tick => false,
+            _ => return through_the_app("creating or changing a routine", "save_routine"),
+        },
+        Command::Board { action } => match action {
+            BoardAction::Start { .. } => return through_the_app("starting a card", "start_card"),
+            // Plain cards only: `board_flow::plain_*` checks every card and column further in.
+            BoardAction::List { .. }
+            | BoardAction::Add { .. }
+            | BoardAction::Edit { .. }
+            | BoardAction::Move { .. }
+            | BoardAction::Events { .. }
+            | BoardAction::Usage { .. } => true,
+            BoardAction::Plan { action } => matches!(
+                action,
+                board_flow::PlanAction::List { .. } | board_flow::PlanAction::Spend { .. }
+            ),
+            _ => false,
+        },
+        // The chat writes the vault with its own tools; a grant is the owner's pick in the open dialog and never forged.
+        Command::Files { action } => matches!(
+            action,
+            files_cmd::FilesAction::Roots
+                | files_cmd::FilesAction::Read { .. }
+                | files_cmd::FilesAction::Search { .. }
+                | files_cmd::FilesAction::Grants {
+                    action: files_cmd::GrantAction::List
+                }
+        ),
+        Command::Ide { action } => ide_owner_gate(action).is_none(),
+        Command::Maintenance { action } => match action {
+            maintenance_cmd::MaintenanceAction::Status { .. } => true,
+            maintenance_cmd::MaintenanceAction::Clean { dry_run, .. } => *dry_run,
+        },
+        Command::Notes { action } => match action {
+            notes_cmd::NotesAction::Tag { .. } => true,
+            notes_cmd::NotesAction::Tags { action } => matches!(
+                action,
+                notes_cmd::TagsAction::List { .. }
+                    | notes_cmd::TagsAction::Todo
+                    | notes_cmd::TagsAction::Skip { .. }
+                    | notes_cmd::TagsAction::Propose { .. }
+            ),
+        },
+        // Another agent run, an import, the own harness, a session's MCP server or permission hook.
+        Command::Assistant { .. }
+        | Command::Import { .. }
+        | Command::Harness { .. }
+        | Command::McpServe
+        | Command::PermissionHook { .. } => false,
+    };
+    if open { None } else { never("this command") }
+}
+
 /// The fields a card has after `board edit`: what was passed replaces the old
 /// value, everything else — assignee and due date included — stays as it was,
 /// because the store's update is a full replace of the writable fields.
@@ -3272,6 +3383,97 @@ fn board_archive(core: &AxiomataCore, id: i64, archived: bool) -> Result<()> {
 mod tests {
     use super::*;
     use chrono::Utc;
+
+    #[test]
+    fn an_action_says_where_it_comes_from() {
+        assert_eq!(
+            action_origin(Some("agent:worker".into()), None),
+            "agent:worker"
+        );
+        assert_eq!(
+            action_origin(None, Some(board_flow::HarnessRun::Chat)),
+            "chat"
+        );
+        assert_eq!(action_origin(None, None), "terminal");
+    }
+
+    /// CH5 (Q8): a chat turn asks through the app for a skill, a routine or a card, and leaves the owner's steps alone.
+    #[test]
+    fn a_chat_turn_asks_through_the_app_or_leaves_it_to_the_owner() {
+        let refusal = |args: &[&str]| {
+            let cli =
+                Cli::try_parse_from(std::iter::once("axiomata-cli").chain(args.iter().copied()))
+                    .unwrap();
+            chat_turn_refusal(&cli.command.unwrap_or(Command::Status))
+        };
+        // With the owner's yes in the app.
+        for asked in [
+            &["run-skill", "mail-digest"][..],
+            &[
+                "routines",
+                "add",
+                "--name",
+                "x",
+                "--cron",
+                "0 0 9 * * *",
+                "--skill",
+                "s",
+            ],
+            &["routines", "enable", "1"],
+            &["board", "start", "1", "--project", "2"],
+        ] {
+            let said = refusal(asked).unwrap_or_default();
+            assert!(said.contains("shell action"), "{asked:?}: {said}");
+        }
+        // Never.
+        for never in [
+            &["routines", "delete", "1"][..],
+            &["board", "delete", "1"],
+            &["board", "archive", "1"],
+            &["board", "approve", "1"],
+            &["board", "integrate", "1"],
+            &["board", "verify", "1"],
+            &["board", "done", "1"],
+            &["board", "take-over", "1"],
+            &["board", "plan", "delete", "1"],
+            &["ide", "agents", "delete", "1"],
+            &["ide", "engines", "add", "e", "--label", "E"],
+            &["maintenance", "clean"],
+            &["skills", "reseed", "--force"],
+            &["notes", "tags", "rename", "a", "b"],
+            &["files", "grants", "add", "/etc"],
+            &["files", "write", "workspace", "x.md"],
+            &["assistant", "hi", "--instruct"],
+            &["import", "obsidian", "/tmp/x"],
+            &["harness", "run", "hi"],
+            &["models", "refresh"],
+            &["board", "claim", "1"],
+        ] {
+            let said = refusal(never).unwrap_or_default();
+            assert!(said.contains("the owner's"), "{never:?}: {said}");
+        }
+        // Looking, and what the chat does at once.
+        for free in [
+            &["app", "studio"][..],
+            &["app", "handbook", "kanban"],
+            &["board", "list"],
+            &["board", "add", "--column", "1", "t"],
+            &["routines", "list"],
+            &["maintenance", "clean", "--dry-run"],
+            &["maintenance", "status"],
+            &["ide", "agents", "list", "1"],
+            &["module-action", "shell", "open_view", "--json", "{}"],
+            &["board", "edit", "1", "--title", "x"],
+            &["files", "read", "workspace", "x.md"],
+            &["files", "grants", "list"],
+            &["notes", "tag", "A/x.md", "--tag", "rust"],
+            &["memory", "sync"],
+            &["list-runs"],
+            &[],
+        ] {
+            assert_eq!(refusal(free), None, "{free:?}");
+        }
+    }
 
     /// Fourth audit: a skill run gets the CLI's short list — looking, and adding a plain card — and nothing else.
     #[test]

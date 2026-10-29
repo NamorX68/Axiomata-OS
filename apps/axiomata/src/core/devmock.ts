@@ -1160,6 +1160,21 @@ const MOCK_UNCOMMITTED = new Set(["src/words.rs", "src/main.rs"]);
 /** The picture's change was discarded or taken over. */
 let mockImageSettled = false;
 
+/** Agent requests the bridge's next poll hands over (console: `__ax.mockActionRequest("shell", "open_view", {…})`). */
+const mockActionQueue: { id: string; instance_id: string; action: string; params: unknown; created_at: string }[] = [];
+let mockActionSeq = 0;
+
+/** Queues an agent's action request as `axiomata-cli module-action` would: the real bridge path takes it from there. */
+export function mockActionRequest(instance: string, action: string, params: unknown = {}): void {
+  mockActionQueue.push({
+    id: `mock-${++mockActionSeq}`,
+    instance_id: instance,
+    action,
+    params,
+    created_at: new Date().toISOString(),
+  });
+}
+
 /** Status overrides by agent id (console: `__ax.mockAgentState(1, "idle")`). */
 const mockStates = new Map<number, AgentState>();
 
@@ -2723,7 +2738,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "write_module_manifest":
       return true as T;
     case "poll_module_actions":
-      return [] as T;
+      return mockActionQueue.splice(0) as T;
     case "complete_module_action":
       return undefined as T;
     case "read_workspace_file": {

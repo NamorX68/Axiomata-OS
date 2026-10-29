@@ -18,6 +18,7 @@ import { completeReminderTask, createReminderTask, deleteReminderTask, loadLates
 import { resolveSkillName } from "../core/skillRun";
 import { type BoardColumn, cardRefusal, type FlowCard, targetRefusal } from "../core/kanbanAgentRules";
 import type { ModuleAction, ModuleContext } from "../core/types";
+import { prepareRoutine, prepareSkillRun, registerChatActions, routineParams } from "./chatActions";
 import {
   addTodo,
   completeTodo,
@@ -165,6 +166,7 @@ function warmTerminalFont(): void {
 }
 
 export function registerBuiltins(): void {
+  registerChatActions();
   registerModule({
     type: "memory-status",
     title: "Memory",
@@ -180,12 +182,14 @@ export function registerBuiltins(): void {
         name: "sync",
         description: "Regenerate the workspace AGENTS.md router blocks now.",
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: (_params, ctx) => ctx.invoke("sync_memory"),
       },
       {
         name: "status",
         description: "Return the router status (stale flag, tracked files, last sync).",
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: (_params, ctx) => ctx.invoke("get_memory_status"),
       },
     ],
@@ -205,6 +209,8 @@ export function registerBuiltins(): void {
       {
         name: "run",
         description: "Run a skill by name and return its run summary.",
+        chat: "ask",
+        ask: prepareSkillRun,
         params: { type: "object", properties: { skill: { type: "string" } }, required: ["skill"] },
         run: (params, ctx) => ctx.invoke("run_skill", { name: String((params as { skill: string }).skill) }),
       },
@@ -212,6 +218,7 @@ export function registerBuiltins(): void {
         name: "list",
         description: "List the discovered skills.",
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: (_params, ctx) => ctx.invoke("list_skills"),
       },
     ],
@@ -232,6 +239,9 @@ export function registerBuiltins(): void {
       {
         name: "add",
         description: "Create an enabled routine: cron (6–7 fields, seconds first), a skill name or a prompt.",
+        chat: "ask",
+        // The tile's add takes no id: whatever the agent sends, it creates.
+        ask: (params) => prepareRoutine({ ...routineParams(params), id: undefined }),
         params: {
           type: "object",
           properties: {
@@ -255,6 +265,17 @@ export function registerBuiltins(): void {
       {
         name: "setEnabled",
         description: "Enable or disable a routine by id.",
+        chat: "ask",
+        // The id and the switch are read once, here, and run as shown.
+        ask: async (params, ctx) => {
+          const p = (params ?? {}) as { id?: unknown; on?: unknown };
+          if (typeof p.id !== "number" || !Number.isInteger(p.id) || typeof p.on !== "boolean") {
+            throw new Error("setEnabled needs an integer id and a boolean on");
+          }
+          const routine = (await ctx.invoke<Routine[]>("list_routines")).find((r) => r.id === p.id);
+          if (!routine) throw new Error(`no routine #${p.id}`);
+          return { question: `${p.on ? "Enable" : "Disable"} routine #${p.id} “${routine.name}”`, params: { id: p.id, on: p.on } };
+        },
         params: {
           type: "object",
           properties: { id: { type: "integer" }, on: { type: "boolean" } },
@@ -269,6 +290,12 @@ export function registerBuiltins(): void {
         name: "edit",
         description:
           "Replace a routine's name/cron/target/backend by id — a full replace, not a partial patch: pass every field again, not just the one that changed. Its enabled state is left untouched.",
+        chat: "ask",
+        ask: (params) => {
+          const id = (params as { id?: unknown } | null)?.id;
+          if (typeof id !== "number" || !Number.isInteger(id)) throw new Error("edit needs an integer id");
+          return prepareRoutine(params);
+        },
         params: {
           type: "object",
           properties: {
@@ -296,6 +323,8 @@ export function registerBuiltins(): void {
       {
         name: "delete",
         description: "Permanently delete a routine and its firing history by id.",
+        // Deleting is the owner's (CH5, Q8): never offered to an agent.
+        chat: "never",
         params: {
           type: "object",
           properties: { id: { type: "integer" } },
@@ -310,6 +339,7 @@ export function registerBuiltins(): void {
         name: "list",
         description: "List routines with their next fire time.",
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: (_params, ctx) => ctx.invoke("list_routines"),
       },
     ],
@@ -328,12 +358,14 @@ export function registerBuiltins(): void {
         name: "refresh",
         description: "Rebuild the workspace graph now.",
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: (_params, ctx) => ctx.invoke("get_workspace_graph").then((g) => ({ files: (g as { files: unknown[] }).files.length })),
       },
       {
         name: "open",
         description: "Open the full-screen Second Brain, optionally focused on a workspace-relative file path.",
         params: { type: "object", properties: { path: { type: "string" } } },
+        chat: "direct",
         run: async (params, ctx) => {
           const path = (params as { path?: string }).path;
           ctx.emit("open-second-brain", { focus: path ? `file:${path}` : null });
@@ -344,6 +376,7 @@ export function registerBuiltins(): void {
         name: "search",
         description: "Open the Second Brain with a search query highlighting matching notes, skills and routines.",
         params: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+        chat: "direct",
         run: async (params, ctx) => {
           const q = String((params as { q: string }).q);
           ctx.emit("open-second-brain", { focus: null, query: q });
@@ -374,6 +407,7 @@ export function registerBuiltins(): void {
       "Open a workspace-relative file for the owner in a floating file panel — Markdown and HTML rendered, " +
       "any text or code in the editor, images as pictures.",
     params: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    chat: "direct",
     run: async (params) => {
       const path = String((params as { path: string }).path ?? "").trim();
       if (!path) throw new Error("openFile needs a path");
@@ -415,6 +449,7 @@ export function registerBuiltins(): void {
           name: "add",
           description: "Append an open task to ToDo.md.",
           params: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+          chat: "direct",
           run: async (params, ctx) => {
             const text = String((params as { text: string }).text);
             const { doc, raw } = await loadDoc(ctx);
@@ -427,6 +462,7 @@ export function registerBuiltins(): void {
           name: "complete",
           description: "Mark the first open task whose text contains `text` as done (moved to the Done section, dated today).",
           params: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+          chat: "direct",
           run: async (params, ctx) => {
             const needle = String((params as { text: string }).text).trim().toLowerCase();
             const { doc, raw } = await loadDoc(ctx);
@@ -441,6 +477,7 @@ export function registerBuiltins(): void {
           name: "list",
           description: "Return the open and done tasks from ToDo.md.",
           params: { type: "object", properties: {} },
+          chat: "direct",
           run: async (_params, ctx) => {
             const { doc } = await loadDoc(ctx);
             return {
@@ -467,6 +504,9 @@ export function registerBuiltins(): void {
       {
         name: "refresh",
         description: "Runs the calendar-digest skill now and returns a summary of what it found.",
+        // A refresh starts a skill (a billed agent turn): the owner says yes first (CH5).
+        chat: "ask",
+        ask: async () => ({ question: "Run the calendar-digest skill now" }),
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
           const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), CALENDAR_SKILL_NAME) });
@@ -487,6 +527,7 @@ export function registerBuiltins(): void {
             days: { type: "integer", description: "window length in days; defaults to 7" },
           },
         },
+        chat: "direct",
         run: async (params, ctx) => {
           const result = await loadLatestCalendarDigest(ctx.invoke, resolveSkillName(get(ctx.config), CALENDAR_SKILL_NAME));
           if (!result.run) return { events: [], note: "no run yet" };
@@ -506,6 +547,13 @@ export function registerBuiltins(): void {
       {
         name: "create",
         description: "Creates a calendar event via a one-shot instruct turn and returns it. All-day when startTime/endTime are omitted.",
+        // A write into the owner's calendar through an agent turn: asked first (CH5, security audit).
+        chat: "ask",
+        ask: async (params) => {
+          const p = (params ?? {}) as Record<string, unknown>;
+          const when = [p.date, p.startTime, p.endTime].filter((x) => typeof x === "string").join(" ");
+          return { question: `Create the calendar event “${String(p.title ?? "")}” on ${when} in ${String(p.calendar ?? "")}` };
+        },
         params: {
           type: "object",
           properties: {
@@ -534,6 +582,8 @@ export function registerBuiltins(): void {
       {
         name: "delete",
         description: "Deletes a calendar event by id (from the last calendar-digest run's events) via a one-shot instruct turn.",
+        // Deleting is the owner's (CH5, Q8): never offered to an agent.
+        chat: "never",
         params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
         run: async (params, ctx) => {
           const id = (params as { id?: unknown }).id;
@@ -558,6 +608,9 @@ export function registerBuiltins(): void {
       {
         name: "refresh",
         description: "Runs the reminders-digest skill now and returns a summary of what it found.",
+        // A refresh starts a skill (a billed agent turn): the owner says yes first (CH5).
+        chat: "ask",
+        ask: async () => ({ question: "Run the reminders-digest skill now" }),
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
           const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), REMINDERS_SKILL_NAME) });
@@ -571,6 +624,7 @@ export function registerBuiltins(): void {
         description:
           'Returns the reminder list names from the last reminders-digest run (does not trigger a new run). There is no "all lists" task view — call this first, then "list" with one of these names.',
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: async (_params, ctx) => {
           const result = await loadLatestReminderDigest(ctx.invoke, resolveSkillName(get(ctx.config), REMINDERS_SKILL_NAME));
           if (result.error) return { lists: [], error: result.error };
@@ -581,6 +635,7 @@ export function registerBuiltins(): void {
         name: "list",
         description: 'Returns the open tasks on one reminder list (an exact name from the "lists" action) from the last reminders-digest run — does not trigger a new run.',
         params: { type: "object", properties: { list: { type: "string" } }, required: ["list"] },
+        chat: "direct",
         run: async (params, ctx) => {
           const list = typeof (params as { list?: unknown }).list === "string" ? (params as { list: string }).list : "";
           if (!list) return { tasks: [], error: 'missing required "list" param — call the "lists" action first' };
@@ -592,6 +647,12 @@ export function registerBuiltins(): void {
       {
         name: "create",
         description: "Creates a reminder via a one-shot instruct turn and returns it, priority \"none\".",
+        // A write into the owner's reminders through an agent turn: asked first (CH5, security audit).
+        chat: "ask",
+        ask: async (params) => {
+          const p = (params ?? {}) as Record<string, unknown>;
+          return { question: `Create the reminder “${String(p.title ?? "")}” in the list ${String(p.list ?? "")}` };
+        },
         params: {
           type: "object",
           properties: {
@@ -611,6 +672,8 @@ export function registerBuiltins(): void {
       {
         name: "complete",
         description: "Marks a reminder complete by id (from the last reminders-digest run's tasks) via a one-shot instruct turn.",
+        chat: "ask",
+        ask: async (params) => ({ question: `Mark the reminder ${String((params as { id?: unknown } | null)?.id ?? "")} complete` }),
         params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
         run: async (params, ctx) => {
           const id = (params as { id?: unknown }).id;
@@ -622,6 +685,8 @@ export function registerBuiltins(): void {
       {
         name: "delete",
         description: "Deletes a reminder by id (from the last reminders-digest run's tasks) via a one-shot instruct turn.",
+        // Deleting is the owner's (CH5, Q8): never offered to an agent.
+        chat: "never",
         params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
         run: async (params, ctx) => {
           const id = (params as { id?: unknown }).id;
@@ -646,6 +711,9 @@ export function registerBuiltins(): void {
       {
         name: "refresh",
         description: "Runs the mail-digest skill now and returns a summary of what it found.",
+        // A refresh starts a skill (a billed agent turn): the owner says yes first (CH5).
+        chat: "ask",
+        ask: async () => ({ question: "Run the mail-digest skill now" }),
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
           const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), MAIL_SKILL_NAME) });
@@ -658,6 +726,7 @@ export function registerBuiltins(): void {
         name: "list",
         description: "Returns the curated emails from the last mail-digest run (does not trigger a new run).",
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: async (_params, ctx) => {
           const result = await loadLatestMailDigest(ctx.invoke, resolveSkillName(get(ctx.config), MAIL_SKILL_NAME));
           if (result.error) return { emails: [], error: result.error };
@@ -748,6 +817,7 @@ export function registerBuiltins(): void {
           type: "object",
           properties: { board_id: { type: "number", description: "Board id; the first board if omitted." } },
         },
+        chat: "direct",
         run: async (params, ctx) => {
           const p = params as { board_id?: number };
           const boards = await ctx.invoke<{ id: number }[]>("list_boards");
@@ -789,6 +859,7 @@ export function registerBuiltins(): void {
           },
           required: ["title"],
         },
+        chat: "direct",
         run: async (params, ctx) => {
           const p = params as {
             title: string;
@@ -843,6 +914,7 @@ export function registerBuiltins(): void {
           },
           required: ["id", "column"],
         },
+        chat: "direct",
         run: async (params, ctx) => {
           const p = params as { id: number; column: string; board_id?: number };
           const boards = await ctx.invoke<{ id: number }[]>("list_boards");
@@ -881,6 +953,7 @@ export function registerBuiltins(): void {
           name: "ping",
           description: "Return 'pong' — a no-op used to test the action pipeline.",
           params: { type: "object", properties: {} },
+          chat: "direct",
           run: async () => "pong",
         },
       ],

@@ -17,6 +17,7 @@ describe("registerShellAction", () => {
         name: "openFile",
         description: "a duplicate registration",
         params: { type: "object", properties: {} },
+        chat: "direct",
         run: async () => undefined,
       }),
     ).toThrow(/shell action "openFile" is already registered/);
@@ -80,6 +81,7 @@ describe("invokeAction", () => {
           name: "explode",
           description: "always fails",
           params: { type: "object", properties: {} },
+          chat: "direct",
           run: async () => {
             throw new Error("boom");
           },

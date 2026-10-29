@@ -10,7 +10,9 @@
 //!    `outbox/<id>.json`; the CLI waits for that file. Filesystem is the truth,
 //!    nobody watches — everything polls.
 //!
-//! No permissions layer: whatever is mounted is callable.
+//! The frontend decides what an agent's call may do (`docs/plans/chat-knows-app.md`, CH5): an action marked `ask` is
+//! put to the owner in the app first and runs only on yes, one marked `never` is not listed and is refused
+//! (`core/registry.ts` `invokeAgentAction`). Everything else that is mounted is callable.
 
 use std::fs;
 use std::io::Write;
@@ -99,6 +101,13 @@ or a step.
 **The live state**, read-only: `{cli} app studio|spend|runs|routines|board|storage|settings|tags`, each with \
 `--json` for JSON (`app board --board <id>` lists that board's cards). Settings show no key or token, only whether \
 one is set. Where you have the `axiomata_app` tool, it gives the same answers — use it instead of the shell.
+
+**Operating the app** (the Shell actions below; under Glut the `axiomata_action` tool): opening a view and changing \
+the display (`open_view`, `set_display`, `openFile`) happen at once. Starting a skill, creating or changing a \
+routine and starting a card (`start_skill`, `save_routine`, `start_card`) ask the owner in the app and run only on \
+their yes — tell the owner you asked, never claim it ran. Deleting anything, keys and secrets, steering the \
+Studio's agents and the owner's steps on the board (approve, integrate, verify, take over …) are not yours: say \
+what the owner can do and where.
 
 **How to behave:** ask the owner when something is unclear instead of guessing. Before moving, renaming or deleting \
 files, or changing many things at once, say what you will do and wait for a yes. Keep your work inside the \
@@ -193,6 +202,10 @@ pub struct ActionRequest {
     #[serde(default)]
     pub params: serde_json::Value,
     pub created_at: DateTime<Utc>,
+    /// Who the caller says it is (`chat`, `agent:<name>`, `terminal`): shown with a question the app puts to the owner
+    /// (chat-knows-app CH5), never a right — any process of the owner's user can write the queue.
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 /// The dashboard's answer, written to `outbox/`.
@@ -448,6 +461,7 @@ mod tests {
             "/opt/axiomata-cli app studio|spend|runs|routines|board|storage|settings|tags"
         ));
         assert!(text.contains("offer to note it as a gap in the handbook"));
+        assert!(text.contains("run only on") && text.contains("Deleting anything"));
         assert!(!text.contains("{cli}") && !text.contains("{contents}"));
     }
 
@@ -472,6 +486,7 @@ mod tests {
                 action: "sync".to_string(),
                 params: serde_json::json!({"a": 1}),
                 created_at: Utc::now(),
+                origin: None,
             };
             let path = enqueue(&req).unwrap();
             assert!(path.starts_with(home.join("module-actions/inbox")));
@@ -508,6 +523,7 @@ mod tests {
                 action: "a".to_string(),
                 params: serde_json::Value::Null,
                 created_at: Utc::now(),
+                origin: None,
             };
             let path = enqueue(&req).unwrap();
             let err = wait_for_response("abc-1", Duration::from_millis(300)).unwrap_err();
@@ -526,6 +542,7 @@ mod tests {
                 action: "a".to_string(),
                 params: serde_json::Value::Null,
                 created_at: Utc::now(),
+                origin: None,
             };
             assert!(enqueue(&bad).is_err());
             let inbox = home.join("module-actions/inbox");

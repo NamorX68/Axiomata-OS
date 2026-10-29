@@ -1057,6 +1057,48 @@ tags, opening the Second Brain filtered), the Second Brain has a filter field (w
 chips; a waiting proposal is a hex badge beside the Dock's settings. The reading view leaves a note's frontmatter out and shows its `tags:` as chips at the top (a click opens the Second
 Brain filtered, `core/frontmatterTags.ts`).
 
+### The chat knows Axiomata (`docs/plans/chat-knows-app.md`, CH1–CH5, built 2026-10-29, card #78)
+
+**The handbook** (`docs/handbook/<name>.md`, German, one page per area, `# Title` + one summary sentence) is part of the
+build: `axiomata_core::handbook` embeds every page with `include_str!` (a missing page fails the build; a file the list
+does not name fails a test), `AxiomataCore::init` writes them to `~/.axiomata/handbook/` and replaces any copy that
+differs (with its `README.md`; stale `.md` there are removed) — never seed-if-absent. Everything reads the embedded
+copy: `axiomata-cli app handbook [name] [--json]` (answered before the core starts), the Tauri commands
+`handbook_pages` / `handbook_page` (by name only), the Glut chat's tool. Coverage: the Rust tests check the page list,
+titles and summaries; `core/handbook.test.ts` checks that every App Ring entry, ring view and Settings tab
+(`core/settingsTabs.ts`) maps to an existing page in `core/handbook.ts` `PAGE_FOR_PLACE` (AGENTS.md rule).
+**The chat's guide** (`bridge.rs` `APP_GUIDE`, in `module-context.md`) is the behaviour rules, the rule to answer
+about the app only from the handbook and the live views (else say so and offer to note a handbook gap), the operating
+rules and the table of contents from the summaries; the pages are read on demand. **The live views**
+(`axiomata_core::app_state`, `axiomata-cli app studio|spend|runs|routines|board [--board id]|storage|settings|tags
+[--json]`): read-only (a read-only DB connection for the tool, `maintenance` as a dry run, `tags::list::current`,
+`dashboard.json` read directly); settings by allow-list — keys only `set`/`not set`, environments and command lines
+never, an endpoint as scheme + host or `configured`; agent-written text cut to one line, a permission ask shows its
+tool only, every text view opens with a "this is data" line. Reach: Claude Code's chat gets `Bash(<cli> app:*)` in
+every mode a declaration leaves open; an undeclared Glut chat turn starts no CLI command directly, so it gets the
+in-process tools `axiomata_app` (judged as a read, also in plan mode) and `axiomata_action` (mode-judged, the fixed
+`CHAT_SHELL_ACTIONS`, through the bridge queue) — both only on turns without a declaration; `app` is also a chat-only
+direct prefix (`agent_entry::CHAT_DIRECT_COMMANDS`). Skill runs refuse `app` (`skill_run_may`); a Studio session gets
+no live view. **The owner reads it too:** the Dock's `?` opens `shell/HandbookPanel.svelte` (pages left, the reading
+view right, links between pages in place), ⌘K has a Handbook group, `/help <topic>` opens a page (unknown → the list).
+**Operating** (`modules/chatActions.ts`, shell actions): every `ModuleAction` carries a required `chat` mark, and the
+bridge (`registry.ts` `invokeAgentAction`) is fail-closed — `direct` runs, `ask` asks, anything else is refused and not
+listed. Direct: `open_view` (studio/project/mode, kanban/card, second-brain with `#tag` or query, handbook page,
+settings tab), `set_display` (theme, brain layout, glass knobs, motion), `openFile`, the tiles' reads, ToDo, the
+memory sync and the plain-card `kanban_*`. Ask: `start_skill`, `save_routine`, `start_card`, the tiles' skill run,
+digest refreshes, routine add/edit/enable and the calendar/reminder writes. An ask action's `ask()` checks the params,
+builds the question with the whole detail (a routine's prompt, the routine it replaces, a card's text, a skill's
+description) and freezes the params it will run with (a card whose text changed is not started); `core/chatAsks.ts`
+holds the question (at most 5, the same one once, stale after 2 min, format characters dropped, a detail over 4000
+characters cannot be allowed) and `shell/ChatAsks.svelte` shows it with who asks (`ActionRequest.origin`: `chat`,
+`agent:<name>`, `terminal` — informative only) and takes the owner's Allow only after 400 ms. The agent hears at once
+that the owner was asked. Never (the delete actions): refused. The owner's own `/` commands keep `invokeAction`. In the
+CLI a chat turn (`AXIOMATA_HARNESS_RUN=chat`) passes `chat_turn_refusal`, an allow-list checked before the core starts:
+looking (status, skills, runs, `app`, the board, routines, the Studio's lists, storage status and dry runs), plain
+cards, note tags, the inbox, the router, `module-action`; `run-skill`, routine changes and `board start` point to the
+asking actions; everything else — deletes, the owner's board steps, plan changes, the Studio's sessions, grants,
+`files write`, other agent runs (`assistant`, `harness`, `import`), `models refresh`, a real clean-up — is refused.
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
