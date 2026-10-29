@@ -33,11 +33,18 @@ Kosten des Zugs.
 
 ## Was er darf
 
-- Er nutzt die Aktionen der **offenen** Kacheln (Routinen, Kalender, Erinnerungen, ToDo …) und die Kanban-Aktionen
-  (Karten auflisten, anlegen, verschieben — nur einfache Karten, nie die Schritte, die dir gehören: Freigeben,
-  Review, Übernehmen). Er kann dir eine Datei im Dateifenster öffnen.
-- Vor dem Verschieben, Umbenennen oder Löschen von Dateien und vor vielen Änderungen auf einmal sagt er, was er vorhat,
-  und wartet auf dein Ja.
+- **Nachlesen und Lage kennen:** Er liest dieses Handbuch und die Lage der App — laufende Agenten und wartende
+  Fragen im Studio, Kosten, letzte Läufe, Routinen, wartende Karten, Storage, Einstellungen (Schlüssel nie, nur „set“ /
+  „not set“) und die Tag-Liste. Er antwortet nur daraus; steht etwas nicht darin, sagt er das.
+- **Sofort:** Ansichten öffnen (Studio, ein Projekt, Kanban, eine Karte, das Second Brain mit `#tag`-Filter, eine
+  Handbuchseite, einen Reiter der Einstellungen, eine Datei) und die Darstellung umstellen (Theme, Layout des Second
+  Brain, Glas-Blur und -Abdunklung, Bewegung); einfache Karten anlegen und verschieben, ToDo, die lesenden Aktionen der
+  Kacheln.
+- **Nur nach deinem Ja:** einen Skill starten, eine Routine anlegen oder ändern, eine Karte starten, einen Digest
+  auffrischen, in Kalender oder Erinnerungen schreiben. Die Frage erscheint als Leiste in der App mit allem, was er tun
+  will; „Allow“ führt genau das aus, „Deny“ nichts. Eine Frage verfällt nach 2 Minuten.
+- **Nie:** etwas löschen, Schlüssel oder Provider ändern, Agenten im Studio steuern, deine Schritte auf dem Board
+  (Freigeben, Review, Übernehmen, Integrieren).
 - Im Plan-Modus ändert er nichts.
 
 ## Fallen
@@ -47,7 +54,9 @@ Kosten des Zugs.
 - `/clear`, `/compact`, `/resume` und `/undo` gehen nicht, solange der Agent arbeitet.
 - Jeder Zug kostet bei einem bezahlten Provider Geld und zählt gegen die Tagesgrenze ([Kosten](kosten.md)).
 - Endet die App mitten in einem Zug, bietet das Chatfenster beim nächsten Start „Resume“ oder „Drop“ an.
-- Aktionen einer Kachel kennt er nur, wenn die Kachel auf der Fläche liegt; Kanban geht immer.
+- Aktionen einer Kachel kennt er nur, wenn die Kachel auf der Fläche liegt; Ansichten, Darstellung und Kanban gehen
+  immer.
+- Was er nicht weiß, liest du selbst im Handbuch nach: `?` im Dock, ⌘K (Gruppe „Handbook“) oder `/help <thema>`.
 
 ## Siehe auch
 

@@ -31,6 +31,9 @@ einem **Harness** und einem **Provider** ([Provider](provider.md)) und zählt ge
 
 Der Chat antwortet aus diesen Seiten. Steht eine Antwort hier nicht, sagt er das — dann gehört sie ins Handbuch.
 
+Selbst lesen: `?` im Dock öffnet das Handbuch als Fenster (links die Seiten, rechts die Leseansicht), ⌘K findet
+Seiten in der Gruppe „Handbook“, und `/help <thema>` im Chat öffnet die passende Seite.
+
 ## Alle Seiten
 
 - [Orbit, App-Ring, Kacheln und Dock](orbit.md) — Wie der Startbildschirm aufgebaut ist: der Orbit im Hintergrund, der App-Ring um ihn herum, die Kacheln auf der Fläche und das Dock mit seinen Knöpfen.
