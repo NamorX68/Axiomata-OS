@@ -1064,7 +1064,7 @@
           onMaster={(harness) => void openMaster(harness)}
           onCreate={(spec) => addAgent(spec)}
           onEdit={(id, spec) => void projectSession.editAgent(id, spec)}
-          onRemove={(id) => void projectSession.removeAgent(id)}
+          onRemove={(id, force) => void projectSession.removeAgent(id, force)}
         />
       {/snippet}
       {#snippet tasksView()}

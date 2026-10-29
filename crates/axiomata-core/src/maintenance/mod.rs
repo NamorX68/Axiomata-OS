@@ -10,6 +10,7 @@
 mod files;
 mod fsops;
 mod rows;
+mod worktrees;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -23,6 +24,8 @@ use serde::Serialize;
 use crate::AxiomataCore;
 use crate::config::MaintenanceSettings;
 use crate::paths;
+
+pub use worktrees::OrphanWorktree;
 
 /// The `app_meta` key under which the moment of the last real clean-up is kept (RFC 3339).
 pub const LAST_RUN_KEY: &str = "maintenance.last_run";
@@ -92,6 +95,9 @@ pub struct Report {
     pub last_run: Option<DateTime<Utc>>,
     /// One line per kind of data, in a fixed order; empty when the pass was refused.
     pub items: Vec<Item>,
+    /// The worktrees whose agent is gone (A3c): a clean one is removed by a clean-up (`removed`), one with changes
+    /// waits for the owner.
+    pub orphan_worktrees: Vec<OrphanWorktree>,
     /// Why nothing was measured or cleaned at all (rules out of range, a folder that is not Axiomata's).
     pub error: Option<String>,
 }
@@ -103,6 +109,8 @@ pub struct Locations {
     pub home: PathBuf,
     /// The database file inside it.
     pub db: PathBuf,
+    /// Where the studio puts its agents' worktrees (`~/Worktrees/axiomata-agents`).
+    pub worktrees: PathBuf,
 }
 
 impl Locations {
@@ -111,6 +119,7 @@ impl Locations {
         Self {
             home: paths::axiomata_home(),
             db: paths::db_path(),
+            worktrees: paths::worktrees_dir(),
         }
     }
 }
@@ -131,6 +140,25 @@ pub fn clean(core: &AxiomataCore, dry_run: bool) -> Report {
         Utc::now(),
         dry_run,
     )
+}
+
+/// Removes the orphaned worktree at `path` with whatever changes it has — the owner's "Delete" in Settings → Storage,
+/// after the app asked. `path` must be one the sweep finds right now; anything else is refused.
+///
+/// # Errors
+///
+/// A sentence: not an orphan (or the agents could not be read), or why git or the file system refused.
+pub fn remove_orphan_worktree(core: &AxiomataCore, path: &std::path::Path) -> Result<(), String> {
+    remove_orphan_at(&core.db, &Locations::current(), path)
+}
+
+pub(crate) fn remove_orphan_at(
+    db: &Mutex<Connection>,
+    locations: &Locations,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let agents = Agents::read(&lock(db)).map_err(|err| err.to_string())?;
+    worktrees::remove_one(&locations.worktrees, &agents, path)
 }
 
 /// Locks the database, recovering a poisoned guard like [`AxiomataCore::db_lock`].
@@ -156,6 +184,7 @@ pub(crate) fn run(
             freeable_bytes: 0,
             last_run: last_run(&lock(db)),
             items: Vec::new(),
+            orphan_worktrees: Vec::new(),
             error: Some(error),
         };
     }
@@ -191,6 +220,10 @@ pub(crate) fn run(
         clock,
         dry_run,
     ));
+    // Git runs here, never under the database lock.
+    let (worktree_item, orphan_worktrees) =
+        worktrees::sweep(&locations.worktrees, &agents, dry_run);
+    items.push(worktree_item);
 
     let last_run = if dry_run {
         last_run
@@ -211,6 +244,7 @@ pub(crate) fn run(
         freeable_bytes,
         last_run,
         items,
+        orphan_worktrees,
         error: None,
     }
 }
@@ -236,6 +270,10 @@ fn check_home(locations: &Locations) -> Result<(), String> {
 /// Which agents exist, read in one go so the files can be judged without the database.
 struct Agents {
     ids: HashSet<i64>,
+    /// The worktrees the agents' rows name.
+    worktrees: Vec<PathBuf>,
+    /// The studio's project folders: the only repositories an orphan's `.git` file is believed to name.
+    projects: Vec<PathBuf>,
     /// The highest id the database has handed out so far: anything above it is newer than this read.
     issued: i64,
 }
@@ -252,17 +290,36 @@ impl Agents {
             )
             .optional()?
             .unwrap_or(0);
-        let mut stmt = db.prepare("SELECT id FROM ide_agents")?;
-        let ids = stmt
-            .query_map([], |row| row.get::<_, i64>(0))?
-            .collect::<rusqlite::Result<HashSet<_>>>()?;
-        Ok(Self { ids, issued })
+        let mut stmt = db.prepare("SELECT id, worktree_path FROM ide_agents")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let ids = rows.iter().map(|(id, _)| *id).collect();
+        let worktrees = rows
+            .into_iter()
+            .filter_map(|(_, path)| path.map(PathBuf::from))
+            .collect();
+        let mut stmt = db.prepare("SELECT repo_root FROM projects")?;
+        let projects = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .map(|root| root.map(PathBuf::from))
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(Self {
+            ids,
+            worktrees,
+            projects,
+            issued,
+        })
     }
 
     /// When the agents cannot be read, no folder may count as orphaned.
     fn unknown() -> Self {
         Self {
             ids: HashSet::new(),
+            worktrees: Vec::new(),
+            projects: Vec::new(),
             issued: 0,
         }
     }

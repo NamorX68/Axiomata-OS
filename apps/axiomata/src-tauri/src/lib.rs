@@ -348,6 +348,7 @@ pub fn run() {
             commands::project_roles,
             commands::confirm_project_roles,
             commands::delete_ide_agent,
+            commands::ide_agent_unsaved_work,
             commands::prepare_ide_agent,
             commands::ide_mailbox_nudge,
             commands::ide_mailbox_nudged,

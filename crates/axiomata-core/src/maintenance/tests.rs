@@ -38,6 +38,7 @@ impl Scratch {
         Locations {
             home: self.home.clone(),
             db: self.home.join("axiomata.db"),
+            worktrees: self.home.join("worktrees"),
         }
     }
 
@@ -430,6 +431,7 @@ fn rules_out_of_range_or_a_foreign_home_refuse_the_whole_pass() {
     let foreign = Locations {
         home: s.home.join("logs"),
         db: s.home.join("logs").join("axiomata.db"),
+        worktrees: s.home.join("worktrees"),
     };
     let refused = run(
         &s.db,
@@ -440,4 +442,129 @@ fn rules_out_of_range_or_a_foreign_home_refuse_the_whole_pass() {
     );
     assert!(refused.error.is_some());
     assert!(s.home.join("logs/app.log.2020-01-01").exists());
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn a_clean_orphaned_worktree_goes_one_with_changes_waits_for_the_owner() {
+    let s = Scratch::new("worktrees");
+    let repo = s.home.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--initial-branch=main"]);
+    git(&repo, &["config", "user.email", "t@example.com"]);
+    git(&repo, &["config", "user.name", "T"]);
+    fs::write(repo.join("README.md"), "hi\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-m", "first"]);
+
+    let ide_locations = ide::provision::Locations {
+        worktrees: s.home.join("worktrees"),
+        channels: ide::lifecycle::ChannelRoots {
+            events: s.home.join("agent-events"),
+            claude_tasks: s.home.join("claude-tasks"),
+            claude_plans: s.home.join("claude-plans"),
+        },
+        permission_cli: None,
+    };
+    let (clean, dirty, live) = {
+        let db = lock(&s.db);
+        let project = add_project(&db, &repo);
+        let mut paths = Vec::new();
+        for name in ["clean", "dirty", "live"] {
+            let agent = add_agent(&db, project, name);
+            let ready = ide::provision::prepare(&db, &ide_locations, agent.id).unwrap();
+            paths.push((agent.id, ready.cwd));
+        }
+        fs::write(paths[1].1.join("work.txt"), "unfinished").unwrap();
+        // Deleted the old way: the row goes, the checkout stays.
+        ide::agent_store::delete_agent(&db, paths[0].0).unwrap();
+        ide::agent_store::delete_agent(&db, paths[1].0).unwrap();
+        (paths[0].1.clone(), paths[1].1.clone(), paths[2].1.clone())
+    };
+    // A plan's integration line is never an agent's worktree.
+    fs::create_dir_all(s.home.join("worktrees/project/.lines/1")).unwrap();
+
+    let settings = MaintenanceSettings::default();
+    let dry = s.run(&settings, true);
+    let line = item(&dry, "worktrees");
+    assert_eq!((line.count, line.freeable_count), (2, 1), "{line:?}");
+    assert_eq!(dry.orphan_worktrees.len(), 2);
+    assert!(clean.exists());
+
+    let done = s.run(&settings, false);
+    assert!(!clean.exists(), "the clean orphan goes");
+    assert!(
+        dirty.join("work.txt").exists(),
+        "work is never thrown away by a clean-up"
+    );
+    assert!(live.exists());
+    assert!(s.home.join("worktrees/project/.lines/1").exists());
+    let waiting: Vec<_> = done
+        .orphan_worktrees
+        .iter()
+        .filter(|o| !o.removed)
+        .collect();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].dirty, Some(true));
+
+    // The owner's click: only an orphan the sweep finds is accepted.
+    assert!(remove_orphan_at(&s.db, &s.locations(), &live).is_err());
+    assert!(live.exists());
+    assert!(
+        remove_orphan_at(
+            &s.db,
+            &s.locations(),
+            &s.home.join("worktrees/project/.lines/1")
+        )
+        .is_err()
+    );
+    remove_orphan_at(&s.db, &s.locations(), &waiting[0].path).unwrap();
+    assert!(!dirty.exists());
+    let after = s.run(&settings, true);
+    assert_eq!(item(&after, "worktrees").count, 0);
+}
+
+#[test]
+fn a_forged_git_file_never_gets_an_orphan_removed_or_inspected() {
+    let s = Scratch::new("forged");
+    let evil = s.home.join("evil");
+    fs::create_dir_all(evil.join(".git/worktrees/x")).unwrap();
+    let id = {
+        let db = lock(&s.db);
+        let project = add_project(&db, &s.home);
+        let agent = add_agent(&db, project, "gone");
+        ide::agent_store::delete_agent(&db, agent.id).unwrap();
+        agent.id
+    };
+    let orphan = s.home.join(format!("worktrees/project/gone-{id}"));
+    fs::create_dir_all(&orphan).unwrap();
+    fs::write(
+        orphan.join(".git"),
+        format!("gitdir: {}\n", evil.join(".git/worktrees/x").display()),
+    )
+    .unwrap();
+
+    let done = s.run(&MaintenanceSettings::default(), false);
+    assert_eq!(done.orphan_worktrees.len(), 1);
+    let found = &done.orphan_worktrees[0];
+    assert_eq!(
+        found.repo_root, None,
+        "a repository no project names is not believed"
+    );
+    assert_eq!(found.dirty, None);
+    assert!(!found.removed);
+    assert!(orphan.exists());
 }

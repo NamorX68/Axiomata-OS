@@ -412,15 +412,16 @@ export async function editAgent(id: number, spec: AgentSpec): Promise<IdeAgent |
 }
 
 /**
- * Removes an agent profile.
+ * Removes an agent profile, its worktree and its branch; `force` throws unsaved work in the worktree away (the
+ * delete dialog asked first).
  *
  * Panes showing it stay open and say the profile is gone rather than vanishing
  * from under whatever is running in them — closing a pane would take a live
  * shell with it, and the user did not ask for that.
  */
-export async function removeAgent(id: number): Promise<boolean> {
+export async function removeAgent(id: number, force = false): Promise<boolean> {
   try {
-    return await deleteAgent(id);
+    return await deleteAgent(id, force);
   } catch (err) {
     report(err);
     return false;

@@ -13,7 +13,8 @@
 
   import type { AgentSpec, Harness, IdeAgent } from "../core/backend";
   import { projectRoles, type Role } from "../core/roster";
-  import { blankSpec, specOf, specReady } from "./agents";
+  import { agentUnsavedWork, blankSpec, specOf, specReady } from "./agents";
+  import { removalQuestion } from "./agentRemoval";
   import { agentStatus } from "./agentStatus";
   import { cardOf } from "./agentCard";
   import ProjectRolesNotice from "./ProjectRolesNotice.svelte";
@@ -65,8 +66,16 @@
     /** May answer when the agent exists, so a second click on a chip waits for the first. */
     onCreate: (spec: AgentSpec) => void | Promise<unknown>;
     onEdit: (id: number, spec: AgentSpec) => void;
-    onRemove: (id: number) => void;
+    /** `force`: the owner agreed to throw unsaved work in the worktree away. */
+    onRemove: (id: number, force: boolean) => void;
   } = $props();
+
+  /** Asks before an agent goes — once more when its worktree holds unsaved work (A3c) — and only then removes it. */
+  async function askRemove(id: number, question: string) {
+    // Unknown counts as none: the backend then refuses on its own if there is some, and nothing is lost.
+    const unsaved = await agentUnsavedWork(id).catch(() => false);
+    if (confirm(removalQuestion(question, unsaved))) onRemove(id, unsaved);
+  }
 
   /** `null` = the "new agent" form, a number = editing that agent. */
   let editing = $state<number | null | undefined>(undefined);
@@ -235,11 +244,8 @@
                 icon="trash-2"
                 label="Remove the {harnessLabel(harness)} master"
                 size="sm"
-                onclick={() => {
-                  if (confirm(`Remove the ${harnessLabel(harness)} master? Panes already running it stay open.`)) {
-                    onRemove(agent.id);
-                  }
-                }}
+                onclick={() =>
+                  void askRemove(agent.id, `Remove the ${harnessLabel(harness)} master? Panes already running it stay open.`)}
               />
             </div>
           {/if}
@@ -352,11 +358,11 @@
                 icon="trash-2"
                 label="Remove {agent.name}"
                 size="sm"
-                onclick={() => {
-                  if (confirm(`Remove the agent “${agent.name}”? Panes already running it stay open.`)) {
-                    onRemove(agent.id);
-                  }
-                }}
+                onclick={() =>
+                  void askRemove(
+                    agent.id,
+                    `Remove the agent “${agent.name}”? Its worktree and branch go with it; panes already running it stay open.`,
+                  )}
               />
             </div>
           </li>

@@ -1983,6 +1983,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return { outcome: "done", commit: "facade1234567", committed: true } as T;
     }
     case "ide_agent_has_changes":
+    case "ide_agent_unsaved_work":
       return false as T;
     case "discard_ide_agent_worktree":
       return false as T;
