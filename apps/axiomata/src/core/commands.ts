@@ -320,7 +320,8 @@ function listTypes(): string {
 export async function runCommand(name: string, args: string[]): Promise<CommandResult> {
   switch (name) {
     case "help":
-      return args.length > 0 ? helpTopic(args.join(" ")) : { ok: true, message: "See the chat panel.", detail: helpText() };
+      if (args.length > 0) return helpTopic(args.join(" "));
+      return { ok: true, message: "See the chat panel.", detail: helpText() };
 
     case "clear":
       if (get(busy)) return WHILE_BUSY;

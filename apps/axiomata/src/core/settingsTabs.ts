@@ -1,6 +1,6 @@
 /**
- * The Settings dialog's tabs, in order. Their own module so the handbook's coverage test (`core/handbook.test.ts`) reads
- * the same list the dialog draws — a tab added here without a handbook page fails that test.
+ * The Settings dialog's tabs, in order. Their own module so the handbook's coverage test
+ * (`core/handbook.test.ts`) reads the same list the dialog draws — a tab added here without a handbook page fails that test.
  */
 
 export type SettingsTabId = "appearance" | "workspace" | "providers" | "storage" | "about";

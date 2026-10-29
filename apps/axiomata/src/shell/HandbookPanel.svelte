@@ -8,7 +8,7 @@
 -->
 <script lang="ts">
   import { renderMarkdown } from "../core/markdown";
-  import { listHandbook, pageOfLink, readHandbookPage, type HandbookEntry } from "../core/handbook";
+  import { listHandbook, pageOfLink, readHandbookPage, withPageLinks, type HandbookEntry } from "../core/handbook";
   import Window from "./Window.svelte";
 
   let {
@@ -19,6 +19,11 @@
     /** The page asked for when opened, numbered so the same page asked for twice is shown again. */
     request?: { page: string | null; seq: number } | null;
   } = $props();
+
+  /** The window's size: large enough for a page beside the list, never beyond the screen. */
+  const PANEL_SIZE =
+    "width: min(calc(980px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); " +
+    "height: min(calc(720px * var(--ax-ui-scale)), calc(100vh - 2 * var(--ax-space-5)));";
 
   /** The overview, shown when nothing else was asked for. */
   const FIRST_PAGE = "index";
@@ -51,7 +56,7 @@
       .then((page) => {
         if (name !== current) return;
         failure = null;
-        html = renderMarkdown(page.text);
+        html = renderMarkdown(withPageLinks(page.text));
         article?.scrollTo({ top: 0 });
       })
       .catch((err) => {
@@ -74,7 +79,7 @@
     title="Handbook"
     subtitle={title}
     onClose={() => (open = false)}
-    style="width: min(calc(980px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); height: min(calc(720px * var(--ax-ui-scale)), calc(100vh - 2 * var(--ax-space-5)));"
+    style={PANEL_SIZE}
   >
     <div class="handbook">
       <nav class="pages" aria-label="Handbook pages">

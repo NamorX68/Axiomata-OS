@@ -1061,9 +1061,9 @@ Brain filtered, `core/frontmatterTags.ts`).
 
 **The handbook** (`docs/handbook/<name>.md`, German, one page per area, `# Title` + one summary sentence) is part of the
 build: `axiomata_core::handbook` embeds every page with `include_str!` (a missing page fails the build; a file the list
-does not name fails a test), `AxiomataCore::init` writes them to `~/.axiomata/handbook/` and replaces any copy that
-differs (with its `README.md`; stale `.md` there are removed) — never seed-if-absent. Everything reads the embedded
-copy: `axiomata-cli app handbook [name] [--json]` (answered before the core starts), the Tauri commands
+does not name fails a test), the app writes them at start (`bootstrap.rs`, not the CLI) to `~/.axiomata/handbook/`
+and replaces any copy that differs (with its `README.md`; stale `.md` there are removed) — never seed-if-absent.
+Everything reads the embedded copy: `axiomata-cli app handbook [name] [--json]` (answered before the core starts), the Tauri commands
 `handbook_pages` / `handbook_page` (by name only), the Glut chat's tool. Coverage: the Rust tests check the page list,
 titles and summaries; `core/handbook.test.ts` checks that every App Ring entry, ring view and Settings tab
 (`core/settingsTabs.ts`) maps to an existing page in `core/handbook.ts` `PAGE_FOR_PLACE` (AGENTS.md rule).

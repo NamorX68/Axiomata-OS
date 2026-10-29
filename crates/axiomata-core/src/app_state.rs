@@ -208,8 +208,8 @@ fn studio(conn: &Mutex<Connection>) -> Result<Value, AxiomataError> {
                 "reason": entry.reason,
                 "since": when(entry.since),
                 // Written by the agent: plain text, cut short.
-                // Only which tool it asks for: the detail is the command or the file an agent wants, and a command can carry
-                // a token (security audit) — the owner reads it in the Studio, not the chat's provider.
+                // Only which tool it asks for: the detail is the command or the file an agent wants, and a command can
+                // carry a token (security audit) — the owner reads it in the Studio, not the chat's provider.
                 "ask": entry.ask.as_ref().map(|ask| json!({"tool": cut(&ask.tool)})),
             })
         })
@@ -343,7 +343,10 @@ fn tags_view(db: &Connection, config: &Config) -> Result<Value, AxiomataError> {
     let open = tags::proposals::count_open(db)?;
     let phase = tags::vault_run::phase(db)?;
     Ok(json!({
-        "tags": list.iter().map(|entry| json!({"tag": entry.tag, "description": cut(&entry.description)})).collect::<Vec<_>>(),
+        "tags": list
+            .iter()
+            .map(|entry| json!({"tag": entry.tag, "description": cut(&entry.description)}))
+            .collect::<Vec<_>>(),
         "open_proposals": open,
         "vault_run": phase.map(|phase| format!("{phase:?}").to_lowercase()),
     }))
@@ -838,9 +841,58 @@ mod tests {
     }
 
     #[test]
+    fn every_text_view_says_its_rows_are_data_and_names_them() {
+        let studio = json!({
+            "projects": [{"id": 1, "name": "OS", "folder": "/p"}],
+            "sessions": [{"id": 4, "name": "worker", "project_id": 1, "harness": "glut", "model": null,
+                          "role": "builder", "card": 9, "state": "working"}],
+            "waiting": [{"name": "worker", "card": 9, "reason": "prompt", "ask": {"tool": "Bash"}}],
+        });
+        let spend = json!({"providers": [{"provider": "open_router", "role": "chat", "today_usd": 0.5,
+                            "month_usd": 3.0, "metered": true}], "daily_cap_usd": 2.0,
+                           "studio": {"today_usd": 1.0, "today_tokens": 10, "daily_cap_usd": null,
+                                      "plan_max_cost_usd": 5.0, "plan_max_tokens": 100}});
+        let runs = json!([{"id": 3, "skill": "mail-digest", "status": "failed", "started": "t", "backend": "axh",
+                           "duration_ms": 5, "cost_usd": null, "error": "boom"}]);
+        let routines = json!([{"id": 2, "enabled": true, "name": "Morning", "cron": "0 0 9 * * *",
+                               "target": {"kind": "skill", "value": "mail-digest"}, "next_fire": null,
+                               "last_fired": null}]);
+        let tags = json!({"tags": [{"tag": "rust", "description": "Rust"}], "open_proposals": 1, "vault_run": null});
+        let cases = [
+            (Topic::Studio, studio, "asks to use Bash"),
+            (
+                Topic::Spend,
+                spend,
+                "open_router (chat): today $0.50, this month $3.00",
+            ),
+            (Topic::Runs, runs, "#3 mail-digest [failed]"),
+            (Topic::Routines, routines, "#2 on  Morning — 0 0 9 * * *"),
+            (Topic::Tags, tags, "#rust — Rust"),
+        ];
+        for (topic, value, expected) in cases {
+            let text = render(topic, &value);
+            assert!(text.starts_with(DATA_NOTE), "{topic:?}");
+            assert!(text.contains(expected), "{topic:?}: {text}");
+        }
+        assert!(render(Topic::Runs, &json!([])).contains("No runs yet."));
+    }
+
+    #[test]
+    fn an_unknown_board_is_an_error() {
+        let path =
+            crate::test_support::unique_temp_dir("axiomata-test-app-state").with_extension("db");
+        let db = crate::db::open_and_migrate_at(&path).unwrap();
+        assert!(board_view(&db, Some(999)).is_err());
+        assert_eq!(board_view(&db, None).unwrap(), json!([]));
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn the_board_text_lists_columns_and_cards() {
         let value = json!([{"id": 1, "name": "Work", "columns": [
-            {"id": 2, "name": "Open", "status": "open", "role": null, "cards": 1, "list": [{"id": 9, "title": "Do it"}]},
+            {"id": 2, "name": "Open", "status": "open", "role": null, "cards": 1,
+             "list": [{"id": 9, "title": "Do it"}]},
             {"id": 3, "name": "Review", "status": "doing", "role": "review", "cards": 0}
         ]}]);
         let text = render(Topic::Board, &value);

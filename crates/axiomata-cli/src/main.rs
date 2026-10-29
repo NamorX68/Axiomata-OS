@@ -2846,8 +2846,8 @@ fn skill_run_may(command: &Command) -> bool {
 /// chat did before (plain cards, a note's tags, the inbox, the router, the dashboard's actions — those decide for
 /// themselves whether they ask the owner first). Starting a skill, a routine change and starting a card go through the
 /// app, which asks the owner (`start_skill`, `save_routine`, `start_card`); everything else — deleting, the Studio's
-/// sessions, the owner's board steps, grants, other agent runs, cleaning up — is never the chat's. Most of it is refused
-/// further in by `owner_only` too; this list is the one that says what the chat may do, checked before the core starts.
+/// sessions, the owner's board steps, grants, other agent runs, cleaning up — is never the chat's. Most of it is
+/// refused further in by `owner_only` too; this list is the one that says what the chat may do, checked before the core starts.
 fn chat_turn_refusal(command: &Command) -> Option<String> {
     let through_the_app = |what: &str, action: &str| {
         Some(format!(
@@ -2894,7 +2894,7 @@ fn chat_turn_refusal(command: &Command) -> Option<String> {
             ),
             _ => false,
         },
-        // The chat writes the vault with its own tools; a grant is the owner's pick in the open dialog and never forged.
+        // The chat writes the vault with its own tools; a grant is the owner's pick in the open dialog, never forged.
         Command::Files { action } => matches!(
             action,
             files_cmd::FilesAction::Roots

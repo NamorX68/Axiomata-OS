@@ -274,7 +274,8 @@ export function registerBuiltins(): void {
           }
           const routine = (await ctx.invoke<Routine[]>("list_routines")).find((r) => r.id === p.id);
           if (!routine) throw new Error(`no routine #${p.id}`);
-          return { question: `${p.on ? "Enable" : "Disable"} routine #${p.id} “${routine.name}”`, params: { id: p.id, on: p.on } };
+          const question = `${p.on ? "Enable" : "Disable"} routine #${p.id} “${routine.name}”`;
+          return { question, params: { id: p.id, on: p.on } };
         },
         params: {
           type: "object",
@@ -549,10 +550,25 @@ export function registerBuiltins(): void {
         description: "Creates a calendar event via a one-shot instruct turn and returns it. All-day when startTime/endTime are omitted.",
         // A write into the owner's calendar through an agent turn: asked first (CH5, security audit).
         chat: "ask",
+        // Exactly the fields shown run: anything else the agent sent is dropped.
         ask: async (params) => {
           const p = (params ?? {}) as Record<string, unknown>;
-          const when = [p.date, p.startTime, p.endTime].filter((x) => typeof x === "string").join(" ");
-          return { question: `Create the calendar event “${String(p.title ?? "")}” on ${when} in ${String(p.calendar ?? "")}` };
+          const field = (name: string): string | undefined =>
+            typeof p[name] === "string" ? String(p[name]) : undefined;
+          const shown = {
+            title: field("title") ?? "",
+            calendar: field("calendar") ?? "",
+            date: field("date") ?? "",
+            startTime: field("startTime"),
+            endTime: field("endTime"),
+            location: field("location"),
+          };
+          const when = [shown.date, shown.startTime, shown.endTime].filter(Boolean).join(" ");
+          return {
+            question: `Create the calendar event “${shown.title}” on ${when} in ${shown.calendar}`,
+            detail: shown.location ? `Location: ${shown.location}` : undefined,
+            params: shown,
+          };
         },
         params: {
           type: "object",
@@ -649,9 +665,23 @@ export function registerBuiltins(): void {
         description: "Creates a reminder via a one-shot instruct turn and returns it, priority \"none\".",
         // A write into the owner's reminders through an agent turn: asked first (CH5, security audit).
         chat: "ask",
+        // Exactly the fields shown run: anything else the agent sent is dropped.
         ask: async (params) => {
           const p = (params ?? {}) as Record<string, unknown>;
-          return { question: `Create the reminder “${String(p.title ?? "")}” in the list ${String(p.list ?? "")}` };
+          const field = (name: string): string | undefined =>
+            typeof p[name] === "string" ? String(p[name]) : undefined;
+          const shown = {
+            title: field("title") ?? "",
+            list: field("list") ?? "",
+            dueDate: field("dueDate"),
+            notes: field("notes"),
+          };
+          const due = shown.dueDate ? `, due ${shown.dueDate}` : "";
+          return {
+            question: `Create the reminder “${shown.title}” in the list ${shown.list}${due}`,
+            detail: shown.notes ? `Notes: ${shown.notes}` : undefined,
+            params: shown,
+          };
         },
         params: {
           type: "object",
@@ -673,7 +703,15 @@ export function registerBuiltins(): void {
         name: "complete",
         description: "Marks a reminder complete by id (from the last reminders-digest run's tasks) via a one-shot instruct turn.",
         chat: "ask",
-        ask: async (params) => ({ question: `Mark the reminder ${String((params as { id?: unknown } | null)?.id ?? "")} complete` }),
+        // The reminder by its title from the last digest, so the owner reads which one; the id alone runs.
+        ask: async (params, ctx) => {
+          const id = (params as { id?: unknown } | null)?.id;
+          if (typeof id !== "string" || !id) throw new Error('complete needs the reminder\'s "id"');
+          const { digest } = await loadLatestReminderDigest(ctx.invoke);
+          const task = digest.tasks.find((t) => t.id === id);
+          const name = task ? `“${task.title}”` : id;
+          return { question: `Mark the reminder ${name} complete`, params: { id } };
+        },
         params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
         run: async (params, ctx) => {
           const id = (params as { id?: unknown }).id;

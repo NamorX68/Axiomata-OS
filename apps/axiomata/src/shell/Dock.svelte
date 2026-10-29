@@ -2,7 +2,8 @@
   The dock (`docs/plans/ui-ux-round.md` UX3, G5): one floating bar at the top centre in place of the old title block
   and its six unlabelled icons. The brand on the left (hexagon, name, the workspace), then the places to go — Studio,
   Kanban, Second Brain, a new note — with their names, today's heartbeat and spend (`Heartbeat.svelte`), the spotlight
-  as a magnifier (its key on hover), and the quiet tools at the end (add a module, the theme choice, the handbook, the settings).
+  as a magnifier (its key on hover), and the quiet tools at the end (add a module, the theme choice, the handbook, the
+  settings).
 
   The Studio's hex mark glows while card sessions are at work (`core/studioActivity.ts`, the same signal as the Orbit's
   live pulse). Below ~1500 px of window width the names go and the icons stay, with the name and key as tooltip.

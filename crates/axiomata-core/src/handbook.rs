@@ -3,10 +3,11 @@
 //! them.
 //!
 //! Every page is embedded with `include_str!`: a page missing from `docs/handbook/` fails the build, and a page the
-//! list below does not name fails [`tests::every_file_in_the_folder_is_a_listed_page`]. At start [`install`] writes
-//! the pages to `~/.axiomata/handbook/` — and replaces any copy that differs from the build, unlike the bundled skills,
-//! which are seeded once and then the owner's (Q5). The CLI's `app handbook` and the app's Help panel read the embedded
-//! copy, never the folder: what an agent or the owner reads is the build's own text even if the folder was edited.
+//! list below does not name fails [`tests::every_file_in_the_folder_is_a_listed_page`]. At the app's start
+//! [`install`] writes the pages to `~/.axiomata/handbook/` — and replaces any copy that differs from the build,
+//! unlike the bundled skills, which are seeded once and then the owner's (Q5). The CLI's `app handbook` and the app's
+//! Help panel read the embedded copy, never the folder: what an agent or the owner reads is the build's own text even
+//! if the folder was edited.
 
 use std::fs;
 use std::path::Path;
@@ -161,8 +162,9 @@ pub fn install_into(dir: &Path) -> Result<usize, AxiomataError> {
     Ok(changed)
 }
 
-/// [`install_into`] for `~/.axiomata/handbook/`, at every start. Best-effort: a handbook that could not be written
-/// leaves the old copy (or none) until the next start; the app and the CLI read the embedded pages anyway.
+/// [`install_into`] for `~/.axiomata/handbook/`, at every start of the app (not the CLI's). Best-effort: a handbook
+/// that could not be written leaves the old copy (or none) until the next start; the app and the CLI read the embedded
+/// pages anyway.
 pub fn install() {
     match install_into(&paths::handbook_dir()) {
         Ok(0) => {}

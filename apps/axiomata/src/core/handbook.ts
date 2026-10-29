@@ -50,6 +50,14 @@ export function pageOfLink(href: string, known: ReadonlySet<string>): string | u
 }
 
 /**
+ * A page's Markdown with its bare page links written `./name.md`: the shared sanitiser (`core/markdown.ts`) keeps only
+ * hrefs that start with a scheme, `#`, `/` or `.`, so `[Studio](studio.md)` would lose its target.
+ */
+export function withPageLinks(markdown: string): string {
+  return markdown.replace(/\]\(([a-z0-9-]+\.md(?:#[^)\s]*)?)\)/g, "](./$1)");
+}
+
+/**
  * The page `/help <topic>` means: a page's name, else the one whose title is the topic, else the only one whose
  * name or title starts with it. `undefined` when none or several fit — the caller lists the pages then.
  */

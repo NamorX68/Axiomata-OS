@@ -101,7 +101,8 @@ async function pollOnce(): Promise<void> {
     const label = actionLabel(req);
     try {
       // An agent's call: its action's `chat` mark decides whether it runs, asks the owner first or is refused (CH5).
-      response.result = (await invokeAgentAction(req.instance_id, req.action, req.params ?? {}, req.origin ?? null)) ?? null;
+      const result = await invokeAgentAction(req.instance_id, req.action, req.params ?? {}, req.origin ?? null);
+      response.result = result ?? null;
       response.ok = true;
     } catch (err) {
       response.error = String(err);

@@ -2,7 +2,15 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { registerBuiltins } from "../modules";
 import { listAllRingEligibleBuiltins } from "./apps";
-import { PAGE_FOR_PLACE, pageForRingEntry, pageForSettingsTab, pageForTopic, pageOfLink } from "./handbook";
+import {
+  PAGE_FOR_PLACE,
+  pageForRingEntry,
+  pageForSettingsTab,
+  pageForTopic,
+  pageOfLink,
+  withPageLinks,
+} from "./handbook";
+import { renderMarkdown } from "./markdown";
 import { SETTINGS_TABS } from "./settingsTabs";
 
 // The pages as the build embeds them: the same folder `axiomata_core::handbook` reads with `include_str!`.
@@ -62,6 +70,14 @@ describe("links and topics", () => {
     expect(pageOfLink("nope.md", known)).toBeUndefined();
     expect(pageOfLink("../studio.md", known)).toBeUndefined();
     expect(pageOfLink("https://example.com/studio.md", known)).toBeUndefined();
+  });
+
+  it("keeps a page link through the sanitiser, bare or not", () => {
+    const html = renderMarkdown(withPageLinks("[A](studio.md) [B](./kosten.md#x) [C](https://x.org/a.md)"));
+    const hrefs = [...new DOMParser().parseFromString(html, "text/html").querySelectorAll("a")].map(
+      (a) => a.getAttribute("href") ?? "",
+    );
+    expect(hrefs.map((href) => pageOfLink(href, known))).toEqual(["studio", "kosten", undefined]);
   });
 
   it("finds the page a topic means", () => {

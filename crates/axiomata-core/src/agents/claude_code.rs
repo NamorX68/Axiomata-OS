@@ -713,8 +713,13 @@ fn permissions(invocation: &Invocation) -> Permissions {
             .filter(|rule| !is_shell_rule(rule))
             .cloned()
             .chain(READ_COMMANDS.iter().map(|command| bash_rule(command)))
-            // The app's views only read: the plan switch keeps them.
-            .chain(invocation.views.map(str::to_owned))
+            // The app's views only read: the plan switch keeps them — unless a declaration is the turn's whole set.
+            .chain(
+                invocation
+                    .views
+                    .filter(|_| invocation.declared.is_empty())
+                    .map(str::to_owned),
+            )
             .collect();
         let disallowed = EDIT_TOOLS
             .iter()
@@ -1177,6 +1182,11 @@ mod tests {
         assert!(
             chat(&[], false, true).allowed.contains(&rule),
             "plan mode reads them too"
+        );
+        let declared_plan = strings(&["Read"]);
+        assert!(
+            !chat(&declared_plan, false, true).allowed.contains(&rule),
+            "a declared plan turn gets none"
         );
         assert!(chat(&[], true, false).allowed.contains(&"Bash".to_owned()));
         let declared = strings(&["mcp__apple-reminders__reminders_tasks"]);

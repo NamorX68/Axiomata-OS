@@ -75,9 +75,11 @@ export function askerLabel(origin: string | null): string {
 
 /** Drops the questions older than {@link ASK_TTL_MS}; returns how many went. */
 export function dropStale(now = Date.now()): number {
-  const before = get(chatAsks).length;
-  chatAsks.update((list) => list.filter((ask) => now - ask.at < ASK_TTL_MS));
-  return before - get(chatAsks).length;
+  const list = get(chatAsks);
+  const fresh = list.filter((ask) => now - ask.at < ASK_TTL_MS);
+  // Only a real change is written: subscribers are not woken for nothing.
+  if (fresh.length !== list.length) chatAsks.set(fresh);
+  return list.length - fresh.length;
 }
 
 /** Queues a question for the owner, or finds the same one waiting. Throws when too many are open already. */
@@ -93,7 +95,8 @@ export function askOwner(input: AskInput, run: () => Promise<unknown>): { asked:
   if (get(chatAsks).length >= MAX_OPEN_ASKS) {
     throw new Error(`the owner has ${MAX_OPEN_ASKS} questions open already; wait for their answers`);
   }
-  const ask: ChatAsk = { id: nextId++, what, detail, complete, source, origin: input.origin ?? null, at: Date.now(), run };
+  const origin = input.origin ?? null;
+  const ask: ChatAsk = { id: nextId++, what, detail, complete, source, origin, at: Date.now(), run };
   chatAsks.update((list) => [...list, ask]);
   return { asked: true, question: ask.what };
 }

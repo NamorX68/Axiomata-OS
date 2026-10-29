@@ -11,11 +11,18 @@
  *   action here at all, and the CLI refuses it for a chat turn (`axiomata-cli`'s `chat_turn_refusal`).
  */
 
-import { invokeBackend, type BoardCard, type BoardPlan, type IdeProject, type Routine, type Skill } from "../core/backend";
+import {
+  invokeBackend,
+  type BoardCard,
+  type BoardPlan,
+  type IdeProject,
+  type Routine,
+  type Skill,
+} from "../core/backend";
 import { BRAIN_LAYOUTS, brainView } from "../core/brainView";
 import { emit } from "../core/bus";
 import { MAX_GROUND_BLUR, MAX_GROUND_DIM } from "../core/glass";
-import { openHandbook } from "../core/handbook";
+import { listHandbook, openHandbook } from "../core/handbook";
 import { MOTION_LEVELS, motionSetting, type MotionLevel } from "../core/motion";
 import { registerShellAction } from "../core/registry";
 import { SETTINGS_TABS } from "../core/settingsTabs";
@@ -88,17 +95,26 @@ const openView: ModuleAction = {
         emit("shell:studio");
         return { opened: "studio", project: project ?? null, mode: mode ?? null };
       }
-      case "kanban":
-        await openKanban({ cardId: int(p.card) });
-        return { opened: "kanban", card: int(p.card) ?? null };
+      case "kanban": {
+        const card = int(p.card);
+        // A card opens on its own board, not the one used last.
+        const boardId = card === undefined ? undefined : (await findCard(card)).board_id;
+        await openKanban({ boardId, cardId: card });
+        return { opened: "kanban", card: card ?? null };
+      }
       case "second-brain": {
         const filter = tagFilter(p.tag) ?? text(p.query);
         emit("open-second-brain", filter ? { focus: null, query: filter } : {});
         return { opened: "second-brain", filter: filter ?? null };
       }
-      case "handbook":
-        openHandbook(text(p.page));
-        return { opened: "handbook", page: text(p.page) ?? null };
+      case "handbook": {
+        const page = text(p.page);
+        if (page && !(await listHandbook()).some((entry) => entry.name === page)) {
+          throw new Error(`the handbook has no page "${page}"`);
+        }
+        openHandbook(page);
+        return { opened: "handbook", page: page ?? null };
+      }
       case "settings": {
         const tab = SETTINGS_TABS.find((t) => t.id === p.tab)?.id;
         emit("shell:settings", tab ? { tab } : {});
@@ -178,7 +194,9 @@ export async function prepareSkillRun(params: unknown): Promise<PreparedAsk> {
   const skill = await knownSkill(params);
   return {
     question: `Run the skill ${skill.name}`,
-    detail: `${skill.description}\nRuns on ${skill.harness}; its instructions are ~/.axiomata/skills/${skill.name}/SKILL.md.`,
+    detail:
+      `${skill.description}\n` +
+      `Runs on ${skill.harness}; its instructions are ~/.axiomata/skills/${skill.name}/SKILL.md.`,
     params: { skill: skill.name },
   };
 }
@@ -231,7 +249,8 @@ export async function prepareRoutine(params: unknown): Promise<PreparedAsk> {
     const current = (await invokeBackend<Routine[]>("list_routines")).find((routine) => routine.id === r.id);
     if (!current) throw new Error(`no routine #${r.id}`);
     verb = `Replace routine #${r.id} “${current.name}” with`;
-    const old = current.target.type === "skill" ? `the skill ${current.target.value}` : `the prompt “${current.target.value}”`;
+    const old =
+      current.target.type === "skill" ? `the skill ${current.target.value}` : `the prompt “${current.target.value}”`;
     lines.push(`It replaces: “${current.name}” (${current.cron_expr}) running ${old}.`);
   }
   return {
@@ -244,7 +263,8 @@ export async function prepareRoutine(params: unknown): Promise<PreparedAsk> {
 const saveRoutine: ModuleAction = {
   name: "save_routine",
   description:
-    "Create a routine, or change the one with id (a full replace of name, cron, skill/prompt; its on/off state stays). " +
+    "Create a routine, or change the one with id (a full replace of name, cron, skill/prompt; its on/off state " +
+    "stays). " +
     "cron has six or seven fields, seconds first (0 0 9 * * * is 09:00 daily); give a skill name or a prompt.",
   params: {
     type: "object",
@@ -277,32 +297,37 @@ const saveRoutine: ModuleAction = {
   },
 };
 
+/** A card of any board by its id (archived ones left out). */
+async function findCard(id: number): Promise<BoardCard> {
+  for (const board of await invokeBackend<{ id: number }[]>("list_boards")) {
+    const cards = await invokeBackend<BoardCard[]>("list_board_cards", { boardId: board.id, includeArchived: false });
+    const card = cards.find((entry) => entry.id === id);
+    if (card) return card;
+  }
+  throw new Error(`no card #${id}`);
+}
+
 /** The card to start and the project it runs in: a plain open card in no plan, and a project whose folder exists. */
 async function cardToStart(params: unknown): Promise<{ card: BoardCard; project: IdeProject }> {
   const p = (params ?? {}) as Record<string, unknown>;
   const id = int(p.card);
   if (id === undefined) throw new Error("start_card needs a card id");
-  const boards = await invokeBackend<{ id: number }[]>("list_boards");
-  let card: BoardCard | undefined;
-  for (const board of boards) {
-    const cards = await invokeBackend<BoardCard[]>("list_board_cards", { boardId: board.id, includeArchived: false });
-    card = cards.find((entry) => entry.id === id);
-    if (card) break;
-  }
-  if (!card) throw new Error(`no card #${id}`);
+  const card = await findCard(id);
   if (card.plan_id !== null) throw new Error(`card #${id} is a step of plan #${card.plan_id}; its plan runs it`);
   const projects = startableProjects(await listProjects());
   const wanted = int(p.project);
   const project = wanted === undefined ? projects[0] : projects.find((entry) => entry.id === wanted);
-  if (!project) throw new Error(wanted === undefined ? "there is no project a card could run in" : `no project #${wanted}`);
+  if (!project) {
+    throw new Error(wanted === undefined ? "there is no project a card could run in" : `no project #${wanted}`);
+  }
   return { card, project };
 }
 
 const startCard: ModuleAction = {
   name: "start_card",
   description:
-    "Start a card as a plan (what Start on the card does): it becomes a plan's goal in a project (the one opened last " +
-    "unless project is given), and the Studio opens on the plan in the Flow, where the owner starts its planner.",
+    "Start a card as a plan (what Start on the card does): it becomes a plan's goal in a project (the one opened " +
+    "last unless project is given), and the Studio opens on the plan in the Flow, where the owner starts its planner.",
   params: {
     type: "object",
     properties: { card: { type: "integer" }, project: { type: "integer" } },

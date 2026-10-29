@@ -28,6 +28,10 @@ pub struct Services {
 /// `.expect(...)` behaviour rather than inventing a new failure path here.
 pub fn bootstrap() -> Services {
     let core = AxiomataCore::init().expect("failed to initialize the Axiomata-OS core engine");
+    // The handbook belongs to the build: replaced whenever it differs (chat-knows-app Q5). Here, not in
+    // `AxiomataCore::init`: every CLI call starts the core too, and a CLI of another build (or one in a sandbox that
+    // cannot write there) must not rewrite the app's copy — it reads its own embedded pages anyway.
+    axiomata_core::handbook::install();
 
     // Off the setup thread so a large vault or a slow disk doesn't stall
     // window creation. A failure surfaces as a "stale" badge the user can act

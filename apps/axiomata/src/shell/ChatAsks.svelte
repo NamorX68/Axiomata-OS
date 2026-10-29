@@ -12,26 +12,32 @@
   import { ARM_MS, answerChatAsk, askerLabel, chatAsks, dropStale } from "../core/chatAsks";
   import Icon from "../ui/Icon.svelte";
 
-  let busy = $state<number | null>(null);
   /** The clock the arming and the staleness are read against; ticks while questions wait. */
   let now = $state(Date.now());
 
   onMount(() => {
-    const tick = setInterval(() => {
-      now = Date.now();
-      dropStale(now);
-    }, ARM_MS);
-    return () => clearInterval(tick);
+    // Ticks only while a question waits: the arming and the staleness are all it reads the clock for.
+    let tick: ReturnType<typeof setInterval> | null = null;
+    const off = chatAsks.subscribe((list) => {
+      if (list.length > 0 && tick === null) {
+        tick = setInterval(() => {
+          now = Date.now();
+          dropStale(now);
+        }, ARM_MS);
+      } else if (list.length === 0 && tick !== null) {
+        clearInterval(tick);
+        tick = null;
+      }
+    });
+    return () => {
+      off();
+      if (tick !== null) clearInterval(tick);
+    };
   });
 
-  async function answer(id: number, allow: boolean): Promise<void> {
-    if (busy !== null) return;
-    busy = id;
-    try {
-      await answerChatAsk(id, allow);
-    } finally {
-      busy = null;
-    }
+  /** The question leaves the list at once (`answerChatAsk`); the action itself runs on, without holding the others. */
+  function answer(id: number, allow: boolean): void {
+    void answerChatAsk(id, allow);
   }
 </script>
 
@@ -45,15 +51,15 @@
           <span class="text">{ask.what}</span>
         </p>
         <div class="answers">
-          <button type="button" class="answer" disabled={busy !== null} onclick={() => void answer(ask.id, false)}>
+          <button type="button" class="answer" onclick={() => answer(ask.id, false)}>
             Deny
           </button>
           <button
             type="button"
             class="answer allow"
-            disabled={busy !== null || !ask.complete || now - ask.at < ARM_MS}
+            disabled={!ask.complete || now - ask.at < ARM_MS}
             title={ask.complete ? "Run it now" : "Too long to show in full: set it up yourself"}
-            onclick={() => void answer(ask.id, true)}
+            onclick={() => answer(ask.id, true)}
           >
             Allow
           </button>

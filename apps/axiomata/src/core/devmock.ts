@@ -1548,7 +1548,9 @@ const MOCK_HANDBOOK: { name: string; title: string; summary: string; text: strin
     name: "kanban",
     title: "Kanban",
     summary: "Das Kanban-Board mit Spalten, Vorschlägen und Review.",
-    text: "# Kanban\n\nDas Kanban-Board mit Spalten, Vorschlägen und Review.\n\nSiehe auch [Studio](./studio.md#handgriffe).\n",
+    text:
+      "# Kanban\n\nDas Kanban-Board mit Spalten, Vorschlägen und Review.\n\n" +
+      "Siehe auch [Studio](./studio.md#handgriffe).\n",
   },
 ];
 
