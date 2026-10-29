@@ -171,7 +171,7 @@ from the code itself:
 - **Bundled skills are seed-if-absent**: a `resources/<name>/SKILL.md` edit does **not**
   reach an install whose `~/.axiomata/skills/<name>/SKILL.md` already exists (the seed never
   overwrites). Bring it up to date with `cargo run -p axiomata-cli -- skills reseed --force`
-  (re-copies only the bundled ones — the four digests/cleanup plus `inbox-sort`, `todo-to-kanban`, `news-rss`, `news-web` and `model-news`; user skills untouched).
+  (re-copies only the bundled ones — the four digests/cleanup plus `inbox-sort`, `todo-to-kanban`, `news-rss`, `news-web`, `model-news` and `vault-tagging`; user skills untouched).
 - **HTML/course pages render via `<iframe sandbox srcdoc=…>`, not `asset://`** — an
   `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
   WebKit sandboxing wall); don't re-attempt it without reading the postmortem in
@@ -281,7 +281,8 @@ from the code itself:
   `docs/plans/settings-provider-overhaul.md`.
 - **A skill's declared `axiomata-cli` command runs outside Glut's sandbox** (glut-round W8): the sandbox hides
   `~/.axiomata` from every command, so a command that every narrowing names by a pattern and that is one of the
-  CLI's direct commands (`board list`, `board add`, `inbox move` — `agent_entry::cli_direct_program`) starts the CLI
+  CLI's direct commands (`board list`, `board add`, `inbox move`, `notes tag`, `notes tags list|todo|propose|skip` —
+  `agent_entry::cli_direct_program`) starts the CLI
   directly, without a shell. Every app-harness command carries `AXIOMATA_HARNESS_RUN=skill|chat`: a skill run gets only a
   short CLI list (`main.rs` `skill_run_may`), a chat turn no owner gate and only plain cards (`board_flow::plain_*`).
   Widen either list only with the same care.

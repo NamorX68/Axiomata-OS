@@ -1,6 +1,9 @@
 # Tags + Links — #Tags und [[Wikilinks]] wie in Obsidian (Karte #75)
 
-Stand: 2026-10-29, **gegrillt** (Q1–Q10, Owner), Go zum Bau. Karte #75 (Owner, 2026-10-11): Tags, damit man Notizen
+Stand: 2026-10-29, **gegrillt** (Q1–Q10, Owner), Go zum Bau. **TL1, TL3–TL6 gebaut** auf Branch `tags` (2026-10-29,
+29db892 · bacd7b2 · 88e03d0 · eaebc26 · 843fe25, dazu 8811865: die Leseansicht lässt das Frontmatter weg); TL2 im Branch
+`editorlinks`. Nicht gemergt, nicht installiert; offen: Mac-Test, `skills reseed --force`, den Lauf TL6 startet der
+Owner. Karte #75 (Owner, 2026-10-11): Tags, damit man Notizen
 in Spotlight und im Second Brain findet; Links mit einer echten Möglichkeit, ins verlinkte Dokument zu springen und
 zurück. Obsidian wird auf lange Sicht nicht mehr genutzt — Axiomata macht es **wie dort**, damit der Vault ohne die
 App lesbar bleibt.
@@ -78,6 +81,22 @@ Text vereinigt) und `get_tag_list` → `{ tag, description }[]`.
 - **TL6 Einmaliger Lauf (Q9):** ein Skill `vault-tagging` in zwei Schritten — `--propose-list` (Vorschlag der Liste
   → Vorschläge zum Freigeben) und danach je Notiz `notes tag`; vorher eine Vorschau (welche Notiz bekommt was) und
   eine Kostenschätzung; gestartet vom Owner in TL4s Ansicht.
+
+**Abweichungen beim Bau** (2026-10-29): Der Lauf TL6 ist ein Skill für beide Schritte; welchen er tut, sagt ihm
+`axiomata-cli notes tags todo` (die App setzt den Schritt beim Start, `tag_run`). Die Vorschau ist kein zweiter Lauf:
+im Notizen-Schritt schreibt `notes tag --dry-run` den Plan in `tag_plan`, und „Write into N notes“ schreibt ihn ohne
+Agent; die dort geplanten Vorschläge gehen erst dabei an den Owner (mit der Notiz). Neue Befehle `notes tags
+todo|propose|skip` (`skip`: eine Notiz bleibt aus dem Lauf, mit Grund; eine verweigerte Notiz bleibt von selbst
+draußen). Eine Notiz, die beim Schreiben scheitert, bleibt in der Vorschau für einen zweiten Versuch. Aus den Security-Audits: der Platzierungszug für eine neue Notiz darf nur
+lesen und bekommt höchstens 40 passende Notiznamen (nicht alle); ein unbeaufsichtigter Skill-Lauf taggt (nicht
+probeweise) nur eine Notiz, die in der letzten Stunde an ihren Platz kam; Agenten-Sitzungen des Studios taggen nicht;
+ein `tags:` in einer Form, die nicht unverändert zurückgeschrieben werden kann, wird nie umgeschrieben;
+`rename_note_links` lehnt Namen mit `[ ] | # ^` u. ä. ab und verlangt, dass genau eine Seite existiert.
+
+**Bekannte Grenzen** (kombinierter Review, offen gelassen): `rename_note_links` zieht nur `[[…]]` im Text mit, nicht im
+Frontmatter und nicht relative Markdown-Links `[a](Alt.md)`; `rename_tag` meldet Notizen nicht, die es auslässt (ein
+`tags:` in fremder Form, ein Schreibkonflikt); ein `---`-Block ganz oben gilt immer als Frontmatter; ein unbekannter
+`--tag` wird wie in V2 ein Vorschlag (ohne Beschreibung), auch über die „ein Vorschlag“-Grenze des Prompts hinaus.
 
 Prüfungen: der volle Gate vor jedem Commit; `security-auditor` für TL1/TL5 (schreibt in Vault-Dateien, neue
 Tauri-Befehle und ein CLI-Befehl für Skills); ein kombinierter Review vor dem Abschluss. Karte #125 (Datum je Link)
