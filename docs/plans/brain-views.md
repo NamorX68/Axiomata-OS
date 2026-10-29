@@ -1,6 +1,6 @@
 # Bündel + Wachstum — zwei neue Darstellungen im Second Brain
 
-Stand: 2026-10-29, **gegrillt** (Q1–Q11, Owner); **BV1 + BV2 gebaut** (Branch `brain`, nicht gemergt).
+Stand: 2026-10-29, **gegrillt** (Q1–Q11, Owner); **BV1 + BV2 gebaut, am Mac abgenommen und gemergt** (2026-10-29).
 Abweichungen: Links haben im Scan kein eigenes Datum — ein Link gilt als so alt wie die jüngere seiner beiden Notizen;
 Bündel dreht sich nicht (ein Ring aus Namen wird gelesen, wie die Karte); die Kurvenrechnung steht in `graph/bundle.ts`,
 `layoutBundle` in `graph/layout.ts`. Grundlage: der Mock `docs/plans/brain-views/brain-views-mock.html`

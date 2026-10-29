@@ -1,6 +1,6 @@
 # Wartung — Axiomata hält seine eigene Ablage sauber
 
-Stand: 2026-10-29, **gebaut** (MT1–MT4 auf Branch `maintenance`, nicht gemergt; Mac-Test offen). Gegrillt (A1–A5, Owner 2026-10-28), Plan abgenommen 2026-10-29 (M1: keine Build-Ordner in „Storage“). Anlass: die Platte war voll
+Stand: 2026-10-29, **gebaut, am Mac abgenommen und gemergt** (MT1–MT4, 2026-10-29). Gegrillt (A1–A5, Owner 2026-10-28), Plan abgenommen 2026-10-29 (M1: keine Build-Ordner in „Storage“). Anlass: die Platte war voll
 (Build-Ordner, alte Worktrees, Harness-Reste); aufgeräumt wurde von Hand. Damit sich Axiomatas eigene Daten nicht
 wieder ansammeln, räumt die App sie selbst auf. Glut bekommt sein eigenes Gegenstück (`glut clean`, im Glut-Repo, A5).
 
