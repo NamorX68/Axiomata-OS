@@ -54,6 +54,8 @@ import { emit, on } from "./core/bus";
   let spotlightOpen = $state(false);
   let brainOpen = $state(false);
   let brainFocus = $state<string | null>(null);
+  /** The Second Brain's filter asked for from outside, numbered so the same text asked for twice is set again. */
+  let brainQuery = $state<{ text: string; seq: number } | null>(null);
 
   /**
    * The window-wide keys (`core/globalKeys.ts`): ⌘K toggles the spotlight from every view, ⌘, opens the settings and ⌘W
@@ -153,6 +155,7 @@ import { emit, on } from "./core/bus";
       on("open-second-brain", (detail) => {
         const d = (detail ?? {}) as { focus?: string | null; query?: string };
         brainFocus = typeof d.focus === "string" ? d.focus : null;
+        if (typeof d.query === "string") brainQuery = { text: d.query, seq: (brainQuery?.seq ?? 0) + 1 };
         brainOpen = true;
       }),
     ];
@@ -249,7 +252,7 @@ import { emit, on } from "./core/bus";
 <Settings bind:open={settingsOpen} />
 <Spotlight bind:open={spotlightOpen} />
 {#if brainOpen}
-  <SecondBrainView bind:open={brainOpen} focus={brainFocus} />
+  <SecondBrainView bind:open={brainOpen} focus={brainFocus} query={brainQuery} />
 {/if}
 {#if ideStarted}
   <IdeView bind:open={ideOpen} />

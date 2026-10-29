@@ -36,6 +36,7 @@ import {
   routineItems,
   skillItems,
   suggestionItems,
+  tagItems,
   type SpotlightAction,
 } from "./spotlightItems";
 import { bringToFront, instances } from "./stores";
@@ -84,6 +85,7 @@ export async function loadInstantSources(): Promise<SpotlightSources> {
     ),
     plan: planItems(perBoard.flatMap((entry) => entry.plans)),
     project: projectItems(projects),
+    tag: tagItems(graph?.files ?? []),
     file: fileNameItems(graph?.files ?? []),
   };
 }
@@ -113,6 +115,9 @@ export async function runSpotlightAction(action: SpotlightAction, secondary = fa
     case "file":
       if (secondary) emit("open-second-brain", { focus: `file:${action.path}` });
       else openFilePanel(action.path, "read");
+      return;
+    case "tag":
+      emit("open-second-brain", { focus: null, query: `#${action.tag}` });
       return;
     case "event":
       emit(action.event, action.detail);
