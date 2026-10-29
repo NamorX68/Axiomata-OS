@@ -862,6 +862,44 @@ export interface TagAnswer {
   notes_failed: string[];
 }
 
+/** A step of the one run over the vault (`docs/plans/tags-links.md` Q9, TL6). */
+export type VaultPhase = "list" | "notes";
+
+/** What a step of the vault run is expected to cost, before the owner starts it. */
+export interface VaultEstimate {
+  phase: VaultPhase;
+  notes: number;
+  bytes: number;
+  input_tokens: number;
+  output_tokens: number;
+  model: string | null;
+  /** `null` when the model has no price in the owner's table (Anthropic's subscription, a local Ollama). */
+  cost_usd: number | null;
+}
+
+/** What the vault run plans for one note: a row of the preview. */
+export interface PlannedNote {
+  note: string;
+  tags: string[];
+  related: string[];
+  proposed: string[];
+}
+
+/** The vault run as Settings → Workspace → Tags shows it (`vault_tagging_status`). */
+export interface VaultTagging {
+  phase: VaultPhase | null;
+  list_estimate: VaultEstimate;
+  notes_estimate: VaultEstimate;
+  plan: PlannedNote[];
+}
+
+/** What writing the preview did (`vault_tagging_apply`). */
+export interface VaultApplied {
+  written: number;
+  unchanged: number;
+  failed: string[];
+}
+
 /** What a rename changed or would change (`rename_note_links`, `rename_tag`): notes, and links or uses of the tag. */
 export interface RenameCount {
   files: number;

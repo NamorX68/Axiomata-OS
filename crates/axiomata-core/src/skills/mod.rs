@@ -75,6 +75,11 @@ const DEFAULT_SKILLS: &[(&str, &str)] = &[
         "model-news",
         include_str!("../../resources/model-news/SKILL.md"),
     ),
+    // The one run over the whole vault: a proposed tag list, then a preview of every note's tags (tags-links.md TL6).
+    (
+        "vault-tagging",
+        include_str!("../../resources/vault-tagging/SKILL.md"),
+    ),
 ];
 
 /// Writes `content` into `~/.axiomata/skills/<name>/SKILL.md` if it isn't
@@ -320,6 +325,7 @@ mod tests {
             "model-news",
             "inbox-sort",
             "todo-to-kanban",
+            "vault-tagging",
         ] {
             let skill = skills.iter().find(|s| s.name == name).unwrap();
             let declared = skill

@@ -48,6 +48,15 @@ pub enum TagsAction {
         #[arg(long)]
         json: bool,
     },
+    /// The vault run's work (`vault-tagging`, tags-links.md TL6): which step it is in and the next notes to do.
+    Todo,
+    /// Propose a new tag for the list, with a line of description; the owner accepts or turns it down in the app.
+    Propose {
+        /// The tag, lower case (`rust/async`).
+        tag: String,
+        /// One line on what the tag is for.
+        description: String,
+    },
 }
 
 /// Who the proposals are from: the agent session, the app's harness run, or the owner's own shell.
@@ -62,6 +71,24 @@ fn proposer() -> String {
     }
 }
 
+/// How recently a note must have come to its place for an unattended skill run to tag it: a sort run's moves and tags
+/// lie well within it.
+const RECENT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Whether the file at `path` (never followed through a link) changed its place or content within `window`: its
+/// status-change time, which a move by `inbox move` (a new link) and every write set.
+fn just_placed(path: &std::path::Path, window: std::time::Duration) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    let changed =
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(meta.ctime().max(0) as u64);
+    std::time::SystemTime::now()
+        .duration_since(changed)
+        .is_ok_and(|age| age <= window)
+}
+
 /// `tag:description` of `--propose`, split at the first colon.
 fn split_proposal(raw: &str) -> Result<(String, String)> {
     let Some((tag, description)) = raw.split_once(':') else {
@@ -71,6 +98,19 @@ fn split_proposal(raw: &str) -> Result<(String, String)> {
 }
 
 pub fn run(core: &AxiomataCore, action: NotesAction) -> Result<()> {
+    let writes = matches!(
+        action,
+        NotesAction::Tag { .. }
+            | NotesAction::Tags {
+                action: TagsAction::Propose { .. }
+            }
+    );
+    // A studio card session works in its worktree; the vault is none of its business (security audit).
+    if writes && axiomata_core::session::session_actor().is_some() {
+        bail!(
+            "an agent session does not tag the vault's notes or propose tags; the owner's skills and chat do"
+        );
+    }
     let config = read_config(core);
     match action {
         NotesAction::Tag {
@@ -84,6 +124,17 @@ pub fn run(core: &AxiomataCore, action: NotesAction) -> Result<()> {
                 .iter()
                 .map(|raw| split_proposal(raw))
                 .collect::<Result<Vec<_>>>()?;
+            // An unattended skill run writes only into a note that just came to its place — moved by `inbox move` or
+            // newly written — not into any note an injected text names (security audit, TL5). Its dry run (the vault
+            // run's plan) writes nothing and may look at every note.
+            if !dry_run
+                && board_flow::harness_run_kind() == Some(board_flow::HarnessRun::Skill)
+                && !just_placed(&config.workspace_root.join(&file), RECENT)
+            {
+                bail!(
+                    "a skill run tags only a note it just moved or wrote; {file} has been where it is for a while"
+                );
+            }
             let request = TagRequest {
                 note: file,
                 tags: wanted,
@@ -91,14 +142,39 @@ pub fn run(core: &AxiomataCore, action: NotesAction) -> Result<()> {
                 proposals,
                 dry_run,
             };
-            // A studio card session works in its worktree; the vault is none of its business (security audit).
-            if axiomata_core::session::session_actor().is_some() {
-                bail!(
-                    "an agent session does not tag the vault's notes; the owner's skills and chat do"
-                );
-            }
             let outcome = tags::note::tag_note(&config, &core.db, &proposer(), &request)?;
             print_outcome(&outcome, dry_run);
+            // In the vault run's notes step a dry run is its plan: kept for the owner's preview, written only by them.
+            if dry_run {
+                let db = core.db_lock();
+                if tags::vault_run::record(&db, &outcome)? {
+                    println!("planned for the owner's preview; nothing was written");
+                }
+            }
+        }
+        NotesAction::Tags {
+            action: TagsAction::Todo,
+        } => print_todo(&tags::vault_run::todo(&config, &core.db)?),
+        NotesAction::Tags {
+            action: TagsAction::Propose { tag, description },
+        } => {
+            let proposed = {
+                let db = core.db_lock();
+                tags::proposals::propose(&db, &tag, &description, None, &proposer())?
+            };
+            match proposed {
+                tags::proposals::Proposed::Waiting => {
+                    println!("proposed #{} to the owner", tag.trim_start_matches('#'))
+                }
+                tags::proposals::Proposed::RejectedBefore => {
+                    println!("#{tag} was turned down by the owner lately; not proposed again")
+                }
+                tags::proposals::Proposed::Full => {
+                    println!(
+                        "not proposed: too many proposals wait for the owner already; stop proposing"
+                    )
+                }
+            }
         }
         NotesAction::Tags {
             action: TagsAction::List { json },
@@ -120,6 +196,29 @@ pub fn run(core: &AxiomataCore, action: NotesAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_todo(todo: &tags::vault_run::Todo) {
+    match todo.phase {
+        None => println!("step: none — no vault run is under way; stop here"),
+        Some(tags::vault_run::Phase::List) => println!("step: propose-list"),
+        Some(tags::vault_run::Phase::Notes) => println!("step: tag-notes"),
+    }
+    if todo.phase.is_none() {
+        return;
+    }
+    if todo.notes.is_empty() {
+        println!("notes to do: none — the step is done");
+        return;
+    }
+    println!(
+        "notes to do ({} here, {} more after these):",
+        todo.notes.len(),
+        todo.more
+    );
+    for note in &todo.notes {
+        println!("{note}");
+    }
 }
 
 fn print_outcome(outcome: &tags::note::TagOutcome, dry_run: bool) {
@@ -173,5 +272,15 @@ mod tests {
             ("rust/async".to_owned(), "Async: Rust".to_owned())
         );
         assert!(split_proposal("nocolon").is_err());
+    }
+
+    #[test]
+    fn a_note_just_written_counts_as_just_placed() {
+        let path =
+            std::env::temp_dir().join(format!("axiomata-notes-placed-{}.md", std::process::id()));
+        std::fs::write(&path, "x").unwrap();
+        assert!(just_placed(&path, RECENT));
+        assert!(!just_placed(&path.with_extension("none"), RECENT));
+        let _ = std::fs::remove_file(&path);
     }
 }

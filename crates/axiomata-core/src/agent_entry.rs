@@ -136,13 +136,16 @@ pub const HARNESS_RUN_CHAT: &str = "chat";
 
 /// The commands of the CLI a Glut run may start directly; every other one stays in the sandbox.
 /// `notes tag` writes a note's tags and links through the workspace's guard and records proposals in the database, so it
-/// needs both outside the sandbox; `notes tags list` only reads (`docs/plans/tags-links.md` V2).
-const DIRECT_COMMANDS: [&[&str]; 5] = [
+/// needs both outside the sandbox; `notes tags list|todo` only read, `notes tags propose` records a proposal
+/// (`docs/plans/tags-links.md` V2, TL6).
+const DIRECT_COMMANDS: [&[&str]; 7] = [
     &["board", "list"],
     &["board", "add"],
     &["inbox", "move"],
     &["notes", "tag"],
     &["notes", "tags", "list"],
+    &["notes", "tags", "todo"],
+    &["notes", "tags", "propose"],
 ];
 
 /// The app's CLI as a program a Glut run starts directly when its declaration names the exact command (glut-round

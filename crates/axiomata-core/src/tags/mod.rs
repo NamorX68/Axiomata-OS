@@ -5,6 +5,7 @@
 //! - [`note`]: setting a note's `tags:` and its `## Related` links (V2, Q8) without touching the rest of it.
 //! - [`proposals`]: a tag an agent wants that is not on the list waits for the owner (Q10).
 //! - [`rename`]: renaming a note pulls the `[[links]]` to it along (V3); renaming a tag pulls its uses along (TL4).
+//! - [`vault_run`]: the one run over the whole vault — a proposed list, then a preview, then the owner writes (Q9).
 //!
 //! Every read and write of a vault file goes through the workspace's strict guard (`axiomata-files`, no link
 //! followed, nothing outside the workspace), and every write is checked against the version just read, so a note the
@@ -15,6 +16,7 @@ pub mod list;
 pub mod note;
 pub mod proposals;
 pub mod rename;
+pub mod vault_run;
 
 use std::collections::HashMap;
 

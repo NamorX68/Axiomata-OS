@@ -2,7 +2,8 @@
   Settings → Workspace → Tags (`docs/plans/tags-links.md` TL4): the vault's one tag list (`TAGS.md`, written only from
   here — "nothing by hand in files"), each tag with its line of description; add, rename (the notes are rewritten
   along, after a count of what would change) and remove (the notes keep the tag). Above it the tags agents proposed,
-  with Accept — the tag goes onto the list and onto the notes that asked for it — and Turn down.
+  with Accept — the tag goes onto the list and onto the notes that asked for it — and Turn down. Below, the one run
+  over the whole vault (`VaultTagging.svelte`, TL6).
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -13,6 +14,7 @@
   import { toast } from "../core/toast";
   import HexCount from "../ui/HexCount.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import VaultTagging from "./VaultTagging.svelte";
 
   let list = $state<TagEntry[]>([]);
   let loading = $state(true);
@@ -259,6 +261,7 @@
       <button type="button" disabled={busy || newTag.trim() === "" || !!newProblem} onclick={() => void addTag()}>Add</button>
     </div>
     {#if newProblem}<p class="status invalid">{newProblem}</p>{/if}
+    <VaultTagging onChanged={() => void load()} />
   {/if}
 </section>
 

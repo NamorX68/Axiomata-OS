@@ -770,8 +770,8 @@ async fn main() -> Result<()> {
         && !skill_run_may(&command)
     {
         bail!(
-            "a skill run of the app may list skills, runs and boards and add a plain card, nothing else; \
-             the owner does the rest"
+            "a skill run of the app may list skills, runs and boards, add a plain card and tag notes, nothing \
+             else; the owner does the rest"
         );
     }
     // Shared: a card's pane hands it to the TUI's host, which outlives any borrow of it.
@@ -2756,12 +2756,10 @@ fn skill_run_may(command: &Command) -> bool {
         Command::Board { action } => {
             matches!(action, BoardAction::List { .. } | BoardAction::Add { .. })
         }
+        // `notes tags` is the list, the vault run's todo and a proposal — nothing that writes a note.
         Command::Notes { action } => matches!(
             action,
-            notes_cmd::NotesAction::Tag { .. }
-                | notes_cmd::NotesAction::Tags {
-                    action: notes_cmd::TagsAction::List { .. }
-                }
+            notes_cmd::NotesAction::Tag { .. } | notes_cmd::NotesAction::Tags { .. }
         ),
         _ => false,
     }
@@ -3238,6 +3236,8 @@ mod tests {
             &["list-runs"],
             &["notes", "tag", "A/x.md", "--tag", "rust", "--related", "B"],
             &["notes", "tags", "list"],
+            &["notes", "tags", "todo"],
+            &["notes", "tags", "propose", "rust", "Rust"],
             &[],
         ] {
             assert!(may(allowed), "{allowed:?}");

@@ -4,7 +4,7 @@
  * tried in `vite` without the Rust side. `devmock.ts` hands every tag command here.
  */
 
-import type { RenameCount, TagAnswer, TagEntry, TagProposal } from "./backend";
+import type { PlannedNote, RenameCount, TagAnswer, TagEntry, TagProposal, VaultEstimate, VaultPhase, VaultTagging } from "./backend";
 
 let list: TagEntry[] = [
   { tag: "ki-modelle", description: "AI models and their releases, collected by the model-news skill" },
@@ -51,6 +51,19 @@ export function mockGraphTags(area: string, index: number): string[] {
   if (area === "Fotografie") return index % 2 === 0 ? ["fotografie"] : [];
   return GRAPH_TAGS[5 + (index % 2)] ?? [];
 }
+
+let vaultPhase: VaultPhase | null = null;
+let plan: PlannedNote[] = [];
+
+const mockEstimate = (phase: VaultPhase): VaultEstimate => ({
+  phase,
+  notes: 252,
+  bytes: 1_150_000,
+  input_tokens: phase === "list" ? 595_000 : 1_240_000,
+  output_tokens: phase === "list" ? 9_000 : 37_800,
+  model: "deepseek/deepseek-v3.2",
+  cost_usd: phase === "list" ? 0.17 : 0.36,
+});
 
 const sorted = (entries: TagEntry[]): TagEntry[] => [...entries].sort((a, b) => a.tag.localeCompare(b.tag));
 
@@ -99,6 +112,45 @@ export function mockTagCommand(cmd: string, args: Record<string, unknown>): { va
       const count: RenameCount = { files: 4, links: 6 };
       return { value: count };
     }
+    case "vault_tagging_status": {
+      const status: VaultTagging = {
+        phase: vaultPhase,
+        list_estimate: mockEstimate("list"),
+        notes_estimate: mockEstimate("notes"),
+        plan,
+      };
+      return { value: status };
+    }
+    case "vault_tagging_start": {
+      const phase = args.phase as VaultPhase;
+      if (phase === "notes") {
+        plan = [
+          { note: "Entwicklung/Rust/Entwicklung Notiz 1.md", tags: ["rust"], related: ["Entwicklung Notiz 4"], proposed: [] },
+          { note: "KI/KI Notiz 2.md", tags: ["ki-news"], related: [], proposed: ["ki/agenten"] },
+          { note: "Persönlich/Persönlich Notiz 1.md", tags: [], related: [], proposed: [] },
+        ];
+      } else {
+        proposals = [
+          ...proposals,
+          { id: 90, tag: "werkzeuge", description: "Tools and their setup", notes: [], proposed_by: "a skill run", proposed_at: new Date().toISOString() },
+        ];
+      }
+      vaultPhase = null;
+      return { value: { id: 1, skill_name: "vault-tagging", status: "success", duration_ms: 1200 } };
+    }
+    case "vault_tagging_apply": {
+      const written = plan.filter((p) => p.tags.length > 0 || p.related.length > 0).length;
+      const applied = { written, unchanged: plan.length - written, failed: [] };
+      plan = [];
+      return { value: applied };
+    }
+    case "vault_tagging_discard":
+      plan = [];
+      vaultPhase = null;
+      return { value: undefined };
+    case "vault_tagging_end":
+      vaultPhase = null;
+      return { value: undefined };
     case "rename_note_links": {
       const count: RenameCount = { files: 2, links: 3 };
       return { value: count };

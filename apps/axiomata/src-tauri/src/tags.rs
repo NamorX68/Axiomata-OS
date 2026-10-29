@@ -11,6 +11,7 @@ use axiomata_core::tags::{
     list::TagEntry,
     proposals::{Answered, TagProposal},
     rename::RenameCount,
+    vault_run,
 };
 use tauri::State;
 
@@ -92,4 +93,99 @@ pub async fn rename_note_links(
 ) -> Result<RenameCount, String> {
     let config = state.config_read().clone();
     blocking(move || tags::rename::rename_note_links(&config, &old_rel, &new_rel, dry_run)).await
+}
+
+/// What the vault run's section shows (`docs/plans/tags-links.md` Q9, TL6): the step under way, the estimate of each
+/// step before it is started, and the preview of the notes step.
+#[derive(Debug, serde::Serialize)]
+pub struct VaultTagging {
+    phase: Option<vault_run::Phase>,
+    list_estimate: vault_run::Estimate,
+    notes_estimate: vault_run::Estimate,
+    plan: Vec<vault_run::PlannedNote>,
+}
+
+/// The vault run as it stands.
+#[tauri::command]
+pub async fn vault_tagging_status(state: State<'_, CoreState>) -> Result<VaultTagging, String> {
+    let db = Arc::clone(&state.db);
+    let config = state.config_read().clone();
+    blocking(move || {
+        let notes = vault_run::taggable_notes(&config)?;
+        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        let plan = vault_run::plan(&db)?;
+        // The notes step goes on where a plan stopped: its estimate counts only the notes still without one.
+        let planned: std::collections::HashSet<String> =
+            plan.iter().map(|entry| entry.note.to_lowercase()).collect();
+        let left: Vec<vault_run::NoteSize> = notes
+            .iter()
+            .filter(|note| !planned.contains(&note.path.to_lowercase()))
+            .cloned()
+            .collect();
+        Ok(VaultTagging {
+            phase: vault_run::phase(&db)?,
+            list_estimate: vault_run::estimate(&config, vault_run::Phase::List, &notes),
+            notes_estimate: vault_run::estimate(&config, vault_run::Phase::Notes, &left),
+            plan,
+        })
+    })
+    .await
+}
+
+/// Starts a step of the vault run — the owner confirmed its estimate — and waits for the skill: `list` proposes the
+/// tag list, `notes` plans every note into the preview. The step is over when the run ends, however it ended; the plan
+/// stays for the preview.
+#[tauri::command]
+pub async fn vault_tagging_start(
+    state: State<'_, CoreState>,
+    phase: String,
+) -> Result<axiomata_core::skills::RunRecord, String> {
+    let phase = vault_run::Phase::parse(&phase).map_err(|err| err.to_string())?;
+    let config = state.config_read().clone();
+    {
+        let db = state.db_lock();
+        if vault_run::phase(&db)
+            .map_err(|err| err.to_string())?
+            .is_some()
+        {
+            return Err("a vault run is under way already".to_owned());
+        }
+        vault_run::set_phase(&db, Some(phase)).map_err(|err| err.to_string())?;
+    }
+    let run =
+        axiomata_core::skills::execute_and_record_skill(vault_run::SKILL, &config, &state.db).await;
+    let _ = vault_run::set_phase(&state.db_lock(), None);
+    run.map_err(|err| err.to_string())
+}
+
+/// Writes the preview into the notes — the owner's step — and clears it.
+#[tauri::command]
+pub async fn vault_tagging_apply(
+    state: State<'_, CoreState>,
+) -> Result<vault_run::Applied, String> {
+    let db = Arc::clone(&state.db);
+    let config = state.config_read().clone();
+    blocking(move || vault_run::apply(&config, &db)).await
+}
+
+/// Throws the preview away.
+#[tauri::command]
+pub async fn vault_tagging_discard(state: State<'_, CoreState>) -> Result<(), String> {
+    let db = Arc::clone(&state.db);
+    blocking(move || {
+        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        vault_run::discard(&db)
+    })
+    .await
+}
+
+/// Ends a step left marked as under way — the app closed during a run — and keeps the preview.
+#[tauri::command]
+pub async fn vault_tagging_end(state: State<'_, CoreState>) -> Result<(), String> {
+    let db = Arc::clone(&state.db);
+    blocking(move || {
+        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        vault_run::set_phase(&db, None)
+    })
+    .await
 }
