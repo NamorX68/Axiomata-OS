@@ -1007,6 +1007,23 @@ decides. In the app (`durable.rs`): every skill/routine run's row is written as 
 Deck's "resume / drop", the chat panel's note for a lost Glut chat turn — never by itself. `axh` journals its own runs
 in `~/.glut/runs` (`glut resume`). Journals of runs never resumed are swept after 7 days.
 
+### Maintenance (`docs/plans/maintenance.md`, MT1–MT4, built 2026-10-29)
+
+Axiomata keeps its own storage clean, without an agent (A1/A2): `axiomata_core::maintenance::{report, clean}` measure
+and prune `~/.axiomata` only — history rows by age (`runs` 90 days but the newest 200, `routine_runs` 30,
+`chat_turns`/`web_searches` 90, `card_events` of cards archived 90 days ago, `session_spend` a year; then a WAL
+checkpoint, `VACUUM` above 10 % free pages), `app.log.*` older than 14 days, the newest two `*.backup-*` per file,
+status folders of deleted agents, and the app's Claude Code sessions older than 30 days (only `claude/projects`,
+`runs`, `shell-snapshots`, `session-env`, never the login). Rules live in `[maintenance]` (`MaintenanceSettings`,
+validated; a home without `axiomata.db` refuses the pass). Every delete lies directly in the folder it was listed from,
+with the folder chain checked for links (`maintenance/fsops.rs`). `runs.log` rotates at 10 MB (`.1`, `.2`). Deleting an
+agent takes its worktree and `axiomata/…` branch (`provision::AgentCheckout`; unsaved work — uncommitted, or commits
+the base lacks, or a worktree git may not inspect (`worktree::safe_to_inspect`) — needs `--force` / the dialog's second
+yes); orphaned worktrees of gone agents are swept (clean ones via `git worktree remove`, the rest wait in Settings →
+Storage). The app runs it weekly from the bootstrap (`spawn_weekly`, 90 s after start, off the main thread); the CLI has
+`maintenance status|clean [--dry-run] [--json]` (a real clean is owner-only); Settings → Storage shows sizes, editable
+rules, "Clean up now" and Glut's row from `glut clean --dry-run --json` (format 1; Axiomata never touches `~/.glut`).
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the

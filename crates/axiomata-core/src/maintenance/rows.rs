@@ -169,7 +169,14 @@ pub(super) fn database(db: &Connection, path: &Path, dry_run: bool) -> Item {
     let before = file_bytes(path);
     match pages(db) {
         Ok((count, free, size)) => {
-            item.freeable_bytes = Some((free.max(0) * size.max(0)) as u64);
+            // Free pages come back only when compacting is worth it; below the share a clean-up frees nothing here.
+            let worth_it = count > 0 && free as f64 / count as f64 > VACUUM_FREE_SHARE;
+            let reclaimable = if worth_it {
+                free.max(0) * size.max(0)
+            } else {
+                0
+            };
+            item.freeable_bytes = Some(reclaimable as u64);
             if !dry_run {
                 if let Err(err) = compact(db, count, free) {
                     tracing::warn!(%err, "maintenance could not compact the database");

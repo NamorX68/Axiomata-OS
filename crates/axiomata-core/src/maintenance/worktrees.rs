@@ -56,7 +56,8 @@ fn agent_id(name: &str) -> Option<i64> {
 }
 
 /// Every orphan under `root`, judged by `agents`.
-fn find(root: &Path, agents: &Agents) -> Vec<Found> {
+/// `measure`: walk each orphan for its size — a report wants it, a single delete does not.
+fn find(root: &Path, agents: &Agents, measure: bool) -> Vec<Found> {
     let recorded: HashSet<PathBuf> = agents
         .worktrees
         .iter()
@@ -103,7 +104,11 @@ fn find(root: &Path, agents: &Agents) -> Vec<Found> {
             found.push(Found {
                 orphan: OrphanWorktree {
                     path: entry.path.clone(),
-                    bytes: fsops::tree_size(&entry.path).0,
+                    bytes: if measure {
+                        fsops::tree_size(&entry.path).0
+                    } else {
+                        0
+                    },
                     dirty,
                     repo_root,
                     removed: false,
@@ -127,7 +132,7 @@ pub(super) fn sweep(root: &Path, agents: &Agents, dry_run: bool) -> (Item, Vec<O
     item.bytes = Some(0);
     item.freeable_bytes = Some(0);
     let mut orphans = Vec::new();
-    for Found { mut orphan, .. } in find(root, agents) {
+    for Found { mut orphan, .. } in find(root, agents, true) {
         item.count += 1;
         *item.bytes.get_or_insert(0) += orphan.bytes;
         if orphan.dirty == Some(false)
@@ -166,7 +171,7 @@ pub(super) fn sweep(root: &Path, agents: &Agents, dry_run: bool) -> (Item, Vec<O
 /// deleted as a folder, which [`fsops::remove_entry`] allows only directly inside its project folder and never
 /// through a link.
 pub(super) fn remove_one(root: &Path, agents: &Agents, path: &Path) -> Result<(), String> {
-    let Some(found) = find(root, agents)
+    let Some(found) = find(root, agents, false)
         .into_iter()
         .find(|found| found.orphan.path == path)
     else {

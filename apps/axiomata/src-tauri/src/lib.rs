@@ -22,6 +22,7 @@ mod limit_watch;
 #[cfg(unix)]
 mod login_path;
 mod lsp;
+mod maintenance;
 #[cfg(target_os = "macos")]
 mod menu;
 mod model_watch;
@@ -363,6 +364,10 @@ pub fn run() {
             commands::installed_fonts,
             commands::ui_displays,
             commands::reduce_transparency,
+            maintenance::maintenance_report,
+            maintenance::maintenance_clean,
+            maintenance::maintenance_save_settings,
+            maintenance::maintenance_remove_worktree,
             wallpaper::wallpaper_pick,
             wallpaper::wallpaper_read,
             wallpaper::wallpaper_clear,

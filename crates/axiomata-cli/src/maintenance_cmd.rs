@@ -1,8 +1,10 @@
 //! `axiomata-cli maintenance status|clean`: Axiomata's own storage (`docs/plans/maintenance.md`, MT3) — what it takes,
-//! what a clean-up frees, and the clean-up itself, the same one the app runs once a week at start.
+//! what a clean-up frees, and the clean-up itself, the same one the app runs once a week at start. Glut's own clean-up
+//! (`glut clean`, A5) is shown beside it and run with a real clean, like the app's "Clean up now".
 
 use anyhow::{Result, bail};
 use axiomata_core::AxiomataCore;
+use axiomata_core::maintenance::glut::{self, GlutRow};
 use axiomata_core::maintenance::{self, Report};
 use clap::Subcommand;
 
@@ -28,20 +30,35 @@ pub enum MaintenanceAction {
 }
 
 pub fn run(core: &AxiomataCore, action: MaintenanceAction) -> Result<()> {
-    let (report, json) = match action {
-        MaintenanceAction::Status { json } => (maintenance::report(core), json),
+    let (report, glut, json) = match action {
+        MaintenanceAction::Status { json } => (maintenance::report(core), glut::report(), json),
         MaintenanceAction::Clean { dry_run, json } => {
-            if !dry_run {
+            if dry_run {
+                (maintenance::clean(core, true), glut::report(), json)
+            } else {
                 // Deleting the owner's data by the owner's rules is the owner's step, never an agent's or a skill's.
                 board_flow::owner_only("cleaning up Axiomata's storage")?;
+                let report = maintenance::clean(core, false);
+                // Glut cleans only when Axiomata's pass ran: a refused pass cleans nothing anywhere.
+                let glut = if report.error.is_none() {
+                    glut::clean()
+                } else {
+                    None
+                };
+                (report, glut, json)
             }
-            (maintenance::clean(core, dry_run), json)
         }
     };
     if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        // Axiomata's report with Glut's row beside its fields (`null` when no Glut answered).
+        let mut both = serde_json::to_value(&report)?;
+        if let Some(fields) = both.as_object_mut() {
+            fields.insert("glut".to_owned(), serde_json::to_value(&glut)?);
+        }
+        println!("{}", serde_json::to_string_pretty(&both)?);
     } else {
         print_report(&report);
+        print_glut(glut.as_ref(), report.dry_run);
     }
     if let Some(error) = &report.error {
         bail!("{error}");
@@ -116,6 +133,22 @@ fn print_report(report: &Report) {
                 "  {}  {}  ({state})",
                 orphan.path.display(),
                 human(orphan.bytes)
+            );
+        }
+    }
+}
+
+fn print_glut(row: Option<&GlutRow>, dry_run: bool) {
+    match row {
+        None => {}
+        Some(GlutRow::UnknownFormat) => println!("Glut: unknown format"),
+        Some(GlutRow::Failed { message }) => println!("Glut: {message}"),
+        Some(GlutRow::Known { report }) => {
+            let verb = if dry_run { "would free" } else { "freed" };
+            println!(
+                "Glut (~/.glut, cleaned by Glut): {}  ({verb} {})",
+                human(report.total_bytes),
+                human(report.freeable_bytes)
             );
         }
     }

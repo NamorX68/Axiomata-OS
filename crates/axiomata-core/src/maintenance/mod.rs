@@ -9,6 +9,7 @@
 
 mod files;
 mod fsops;
+pub mod glut;
 mod rows;
 mod worktrees;
 
@@ -247,6 +248,8 @@ pub(crate) fn run(
             error: Some(error),
         };
     }
+    // The one long hold of the database: the row deletes and, when it is worth it, `VACUUM` of a file of some 16 MB
+    // (plan §3 accepts the short lock). Files, git and Glut all run after the guard is gone.
     let (mut items, agents, last_run) = {
         let db = lock(db);
         let mut items = rows::history(&db, settings, now, dry_run);
