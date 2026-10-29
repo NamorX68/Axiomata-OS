@@ -8,6 +8,8 @@
   through the middle along the vault's folders. Map (UX5, G16) draws the vault as a territory map: every note a field,
   every area a country, links as roads, with a semantic zoom. Hex (the layout before the map, back as a choice) tiles
   every note as a honeycomb cell in its area's wedge. All three follow the Orbit's time travel.
+  "▶ How your vault grew" (BV2) replays the vault's life over the chosen layout in a fixed time, with its own bar
+  (pause, a slider, Esc or a click ends it), and fades into the layout at its end.
   Orbit (the dashboard-centre widget's 3-D cloud) lives only
   there now, not as a full-view option here.
 -->
@@ -40,6 +42,8 @@
   import { clampRect, moved, readRect, resizedEdge, type Edge, type Rect } from "./floatingRect";
   import Legend from "../graph/Legend.svelte";
   import { travelSpan } from "../graph/hive";
+  import { FRESH_LINK_DAYS } from "../graph/bundle";
+  import { countBornBy, GROWTH_FADE_MS, GROWTH_MS, growthMoment } from "../graph/growth";
   import TimeTravel from "../modules/TimeTravel.svelte";
   import { GraphRenderer, type RenderMode } from "../graph/render";
 
@@ -120,7 +124,7 @@
   const HELP = [
     [
       "Bundle",
-      "Every note on one ring, an arc per area, the newest first, clockwise. Links run through the middle, bundled along the folders, in the colour of the note they start from; the links of the last 21 days glow. Point at a note or an area to see its links. Skills ring it outside.",
+      `Every note on one ring, an arc per area, the newest first, clockwise. Links run through the middle, bundled along the folders, in the colour of the note they start from; the links of the last ${FRESH_LINK_DAYS} days glow. Point at a note or an area to see its links. Skills ring it outside.`,
     ],
     [
       "Map",
@@ -306,6 +310,10 @@
     const moved = drag ? Math.hypot(e.clientX - drag.x, e.clientY - drag.y) : 0;
     drag = null;
     if (moved < 4) {
+      if (growth) {
+        endGrowth();
+        return;
+      }
       const p = rel(e);
       select(renderer.hitTest(p.x, p.y, 8));
     }
@@ -383,7 +391,8 @@
     // A staged panel on top consumes Escape first (StagingLayer marks it).
     if (!open || e.key !== "Escape" || e.defaultPrevented) return;
     e.preventDefault();
-    if (selected) select(null);
+    if (growth) endGrowth();
+    else if (selected) select(null);
     else open = false;
   }
 
@@ -406,6 +415,84 @@
   });
   /** The vault's life for the time travel when no Orbit is there to offer it. */
   const span = $derived(graph ? travelSpan(graph.files.map((f) => f.created ?? f.modified), Date.now()) : null);
+
+  // --- "How your vault grew" (docs/plans/brain-views.md, BV2) ---
+  /**
+   * The replay while it is up: how far it has played (ms of `GROWTH_MS`), whether it plays, and when it began to fade
+   * into the layout (`performance.now()`), or `null` while it does not. The vault's life is fixed at its start.
+   */
+  interface Replay {
+    span: { from: number; to: number };
+    elapsed: number;
+    playing: boolean;
+    endedAt: number | null;
+  }
+  // Raw: replaced as a whole every frame, and read by the renderer thousands of times a frame.
+  let growth = $state.raw<Replay | null>(null);
+  /** At motion Off the replay does not play: it shows its end and only the slider to look back with (Q9). */
+  const still = $derived($motion === "off");
+  /** Every note's birth, sorted, for the count the bar shows. */
+  const births = $derived(
+    graph
+      ? graph.files
+          .map((f) => Date.parse(f.created ?? f.modified ?? ""))
+          .filter((at) => !Number.isNaN(at))
+          .sort((a, b) => a - b)
+      : [],
+  );
+  const growthAt = $derived(growth ? growthMoment(growth.elapsed, growth.span) : 0);
+  const growthLabel = $derived.by(() => {
+    if (!growth || !graph) return "";
+    const day = new Date(growthAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    // Notes without a time are there from the start.
+    const count = countBornBy(births, growthAt) + (graph.files.length - births.length);
+    return `${day} · ${count} ${count === 1 ? "note" : "notes"}`;
+  });
+
+  function startGrowth() {
+    if (!span) return;
+    hover = null;
+    if (renderer) renderer.hover = null;
+    growth = { span, elapsed: still ? GROWTH_MS : 0, playing: !still, endedAt: null };
+  }
+
+  /** Esc, a click or ×: the replay fades into the layout, or is simply gone when nothing may move. */
+  function endGrowth() {
+    if (!growth) return;
+    if (still) growth = null;
+    else if (growth.endedAt === null) growth = { ...growth, playing: false, endedAt: performance.now() };
+  }
+
+  function toggleGrowth() {
+    if (!growth) return;
+    // Played to its end: ▶ starts it again from the first note.
+    const elapsed = growth.elapsed >= GROWTH_MS ? 0 : growth.elapsed;
+    growth = { ...growth, elapsed, playing: !growth.playing, endedAt: null };
+  }
+
+  /** The slider moved: the replay holds there (▶ plays on), or the thumb would fight the pointer. */
+  function scrubGrowth(value: number) {
+    if (growth) growth = { ...growth, elapsed: value, playing: false, endedAt: null };
+  }
+
+  /** One frame of the replay: it plays on, at its end begins to fade, and is gone once faded; the renderer is told. */
+  function stepGrowth(now: number, dt: number) {
+    // Motion switched Off while it plays: straight to its end, as it would have begun.
+    if (growth?.playing && still) growth = { ...growth, elapsed: GROWTH_MS, playing: false };
+    if (growth?.playing) {
+      const elapsed = Math.min(GROWTH_MS, growth.elapsed + dt);
+      const done = elapsed >= GROWTH_MS;
+      growth = { ...growth, elapsed, playing: !done, endedAt: done ? now : growth.endedAt };
+    }
+    let fade = 0;
+    if (growth && growth.endedAt !== null) {
+      // The end is stamped in an event handler, a little after this frame's `now`.
+      fade = Math.max(0, Math.min(1, (now - growth.endedAt) / GROWTH_FADE_MS));
+      if (fade >= 1) growth = null;
+    }
+    if (!renderer) return;
+    renderer.growth = growth ? { span: growth.span, at: growthMoment(growth.elapsed, growth.span), fade } : null;
+  }
   // Remember the view preferences in dashboard.json (settings.secondBrain).
   let prefsReady = false;
   $effect(() => {
@@ -458,7 +545,10 @@
     const mo = new MutationObserver(() => rebuild());
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     let raf = 0;
+    let last = 0;
     const tick = (now: number) => {
+      stepGrowth(now, last ? Math.min(100, now - last) : 0);
+      last = now;
       renderer?.frame(now);
       raf = requestAnimationFrame(tick);
     };
@@ -493,8 +583,26 @@
     {#if error}<p class="error">{error}</p>{/if}
   </div>
   <!-- Over the Orbit its own time travel serves every layout; without one, the view brings its own. -->
-  {#if !inOrbit && span}
+  {#if !inOrbit && span && !growth}
     <div class="travel"><TimeTravel {span} onTravel={(at) => travelAt.set(at)} /></div>
+  {/if}
+  {#if growth}
+    <div class="growth" class:away={$staged.length > 0} role="group" aria-label="How your vault grew" transition:fade={{ duration: 120 }}>
+      {#if !still}
+        <button type="button" class="play" aria-label={growth.playing ? "Pause" : "Play"} onclick={toggleGrowth}>{growth.playing ? "❚❚" : "▶"}</button>
+      {/if}
+      <input
+        type="range"
+        min="0"
+        max={GROWTH_MS}
+        step="10"
+        value={growth.elapsed}
+        aria-label="Moment of the replay"
+        oninput={(e) => scrubGrowth(Number((e.currentTarget as HTMLInputElement).value))}
+      />
+      <span class="when">{growthLabel}</span>
+      <button type="button" class="end" aria-label="End the replay" title="End (Esc)" onclick={endGrowth}>×</button>
+    </div>
   {/if}
 
   <aside class="controls" class:away={$staged.length > 0}>
@@ -514,6 +622,7 @@
       </div>
     </div>
     <div class="row">
+      <button type="button" title="Replay the vault's life from its first note, in twenty seconds" disabled={!span || growth !== null} onclick={startGrowth}>▶ How your vault grew</button>
       <button type="button" title="Reset zoom and pan" onclick={resetView}>Reset view</button>
       <button type="button" title="Reload the graph from the workspace" onclick={() => void load()}>Reload</button>
     </div>
@@ -711,6 +820,49 @@
     color: var(--ax-danger);
   }
 
+  /* The replay's bar: over the disc's top, under the app's top bar — the bottom holds the view's own bars. */
+  .growth {
+    position: fixed;
+    z-index: calc(var(--ax-z-staging) - 2);
+    top: calc(72px * var(--ax-ui-scale));
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-3);
+    padding: var(--ax-space-2) var(--ax-space-3);
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    border-bottom: 2px solid var(--ax-border-strong);
+    border-radius: var(--ax-radius-lg);
+    box-shadow: var(--ax-shadow-drag);
+    font-size: var(--ax-font-size-sm);
+    transition: opacity var(--ax-dur-med) var(--ax-ease);
+  }
+  .growth.away {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .growth input {
+    width: calc(320px * var(--ax-ui-scale));
+    accent-color: var(--ax-glow);
+  }
+  .growth .when {
+    min-width: calc(150px * var(--ax-ui-scale));
+    color: var(--ax-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .growth .play,
+  .growth .end {
+    width: calc(30px * var(--ax-ui-scale));
+    padding: 0;
+    border-radius: var(--ax-radius-pill);
+  }
+  .growth .end {
+    color: var(--ax-text-muted);
+  }
+
   /* The bar bottom left, beside the Orbit's own corner buttons (motion, ×). */
   .controls {
     position: fixed;
@@ -787,11 +939,14 @@
   }
   .row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--ax-space-2);
   }
   .row button {
     font-size: var(--ax-font-size-sm);
+    /* A button's label stays on one line; the row wraps instead. */
+    white-space: nowrap;
   }
   .stats {
     margin: 0;

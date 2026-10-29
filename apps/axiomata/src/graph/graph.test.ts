@@ -111,7 +111,9 @@ describe("layouts", () => {
     const span = (a: { start: number; end: number }) => a.end - a.start;
     expect(span(arcs[0]!)).toBeCloseTo(span(arcs[1]!) * 3, 9);
     for (let i = 1; i < arcs.length; i++) expect(arcs[i]!.start).toBeGreaterThan(arcs[i - 1]!.end);
-    const gaps = arcs.reduce((sum, a, i) => sum + ((arcs[(i + 1) % arcs.length]!.start - a.end + 2 * Math.PI) % (2 * Math.PI)), 0);
+    const gapAfter = (a: { end: number }, i: number) =>
+      (arcs[(i + 1) % arcs.length]!.start - a.end + 2 * Math.PI) % (2 * Math.PI);
+    const gaps = arcs.reduce((sum, a, i) => sum + gapAfter(a, i), 0);
     expect(gaps + arcs.reduce((sum, a) => sum + span(a), 0)).toBeCloseTo(2 * Math.PI, 9);
     // Every note of an area lies inside its arc.
     for (const arc of arcs) {
@@ -125,7 +127,9 @@ describe("layouts", () => {
 
   it("bundle lays an arc's newest note first and the older ones after it, clockwise", () => {
     const graph = fixture();
-    graph.files.forEach((f, i) => (f.created = new Date(Date.UTC(2025, 0, 1) + ((i * 7) % 40) * 86_400_000).toISOString()));
+    graph.files.forEach((f, i) => {
+      f.created = new Date(Date.UTC(2025, 0, 1) + ((i * 7) % 40) * 86_400_000).toISOString();
+    });
     const m = buildModel(graph, palette);
     applyLayout(m, "bundle");
     const dev = m.bundle!.arcs.find((a) => a.area === "Dev")!;

@@ -1319,7 +1319,10 @@ arc per area or deepest folder, newest first clockwise, the links as B-splines b
 Holten 2006, `graph/bundle.ts`, coloured by the source note's area, the last 21 days' links in the glow; a link's date
 is the younger of its two notes', the scan having no link dates), Map (since UX5 the default: every area a country of
 hex fields on an axial grid, grown in birth order, links as roads, a semantic zoom; `graph/territory.ts`) and Hex (a
-honeycomb in the areas' wedges); a stored `rings` reads as `bundle` — plus a separate `layoutOrbit` used only
+honeycomb in the areas' wedges); a stored `rings` reads as `bundle`. "▶ How your vault grew" (BV2, `graph/growth.ts`)
+replays the vault's life in a fixed 20 s over the chosen layout — a core, a branch per area, the notes as hex cells on
+sunflower spirals oldest inside, new links flashing in the glow — with pause, a slider, Esc or a click to end, and a
+cross-fade into the layout; at motion Off it shows the end and the slider only — plus a separate `layoutOrbit` used only
 by the dashboard-centre background widget (since UX4 a Goldberg hive sphere, `graph/hive.ts`: notes as cells among dark
 unsettled ones, glowing by age, with skills/routines/newest notes as an icon rim) — Orbit is the fixed name for that background widget
 specifically, distinct from "Second Brain" (the full-screen view it opens into on click).

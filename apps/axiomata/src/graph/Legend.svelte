@@ -5,6 +5,7 @@
 
   import type { BrainLayout } from "../core/brainView";
   import { uiScale } from "../core/uiScale";
+  import { FRESH_LINK_DAYS } from "./bundle";
   import { readPalette, type NodeKind } from "./model";
   import { drawGlyph } from "./render";
 
@@ -33,7 +34,7 @@
   const BUNDLE_KINDS: Entry[] = [
     ...ALL_KINDS.filter((k) => k.kind !== "hub"),
     { kind: "link", label: "Link, in its note's area colour" },
-    { kind: "fresh-link", label: "Link of the last 21 days" },
+    { kind: "fresh-link", label: `Link of the last ${FRESH_LINK_DAYS} days` },
   ];
   const KINDS = $derived(layout === "bundle" ? BUNDLE_KINDS : ALL_KINDS);
 

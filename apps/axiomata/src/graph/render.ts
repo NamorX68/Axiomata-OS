@@ -19,6 +19,7 @@ import {
   type Rgb,
 } from "./hive";
 import { BUNDLE_BETA, bundleCurve, isFreshLink, linkBorn, type BundleCommand } from "./bundle";
+import { ashAt, branchGrowth, flash, layoutGrowth, sprout, type GrowthLayout, type GrowthSpan } from "./growth";
 import { APP_RING, approachAngle, bornOf, BUNDLE, EXPANDED_GROUP_RING, orbitRestAngle, RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 import { cellKey, NEIGHBOURS, pixelToAxial } from "./territory";
@@ -240,6 +241,14 @@ export class GraphRenderer {
   waiting = 0;
   /** Orbit only: the moment the time travel shows (ms), or `null` for now (G17, UX4). */
   timeCutoff: number | null = null;
+  /**
+   * The replay of how the vault grew (`docs/plans/brain-views.md`, BV2), while it runs: the moment it shows (`at`)
+   * over the vault's life (`span`), and how far it has faded into the chosen layout (`fade`, 0 = only the replay,
+   * 1 = only the layout). The view drives it frame by frame; `null` draws the layout alone.
+   */
+  growth: { span: GrowthSpan; at: number; fade: number } | null = null;
+  /** The replay's positions for the current model (`graph/growth.ts`), worked out once per model. */
+  private growthLayout: { model: GraphModel; layout: GrowthLayout } | null = null;
   /** Sparks in flight to cells whose note just changed (W3): from the Studio's ring icon or the hub. */
   private sparks: { fileId: string; fromStudio: boolean; start: number; at: number }[] = [];
   /** Where each note's cell was last drawn, front or back, for sparks to aim at. */
@@ -415,7 +424,8 @@ export class GraphRenderer {
 
   /** Nearest node within `slop` px of a CSS-px point, or null. */
   hitTest(px: number, py: number, slop = 6): GraphNode | null {
-    if (!this.model) return null;
+    // The replay is watched, not pointed at: a click on it ends it (the view).
+    if (!this.model || this.growth) return null;
     if (this.options.mode === "map") return this.hitMap(px, py, slop);
     if (this.options.mode === "bundle") return this.hitBundle(px, py, slop);
     let best: GraphNode | null = null;
@@ -546,6 +556,26 @@ export class GraphRenderer {
     ctx.clearRect(0, 0, width, height);
     const model = this.model;
     if (!model) return;
+    const growth = this.growth;
+    if (growth) {
+      // The cross-fade (Q10): the layout drawn as it is, then thinned to `fade`, the replay over it at the rest.
+      if (growth.fade > 0) {
+        this.drawLayout(t);
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.globalAlpha = growth.fade;
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      }
+      if (growth.fade < 1) this.drawGrowth(model, growth, 1 - growth.fade);
+      return;
+    }
+    this.drawLayout(t);
+  }
+
+  /** The current mode's own drawing. */
+  private drawLayout(t: number): void {
     if (this.options.mode === "orbit") {
       this.drawOrbit(t);
       return;
@@ -1840,7 +1870,8 @@ export class GraphRenderer {
       if (tones[i]?.settled) shown.add(n);
     });
     const now = this.timeCutoff ?? Date.now();
-    const focus = this.hover ?? this.selected;
+    // Only a note or an area has links to lift; a skill or the hub looked at leaves the ring as it is.
+    const focus = [this.hover, this.selected].find((n) => n?.kind === "file" || n?.kind === "area") ?? null;
     const touches = (n: GraphNode) =>
       focus !== null && (focus.kind === "area" ? n.area === focus.area : focus.kind === "file" && n === focus);
     const hl = this.highlight;
@@ -1943,7 +1974,8 @@ export class GraphRenderer {
       ctx.textBaseline = "middle";
       ctx.fillStyle = this.textColor;
       for (const n of notes) {
-        if (!shown.has(n)) continue;
+        // Close enough to carry names, most notes lie off screen: only those in sight are measured.
+        if (!shown.has(n) || !this.isOnScreen(n, -40)) continue;
         const a = Math.atan2(n.y, n.x);
         const p = this.toScreen(n);
         const right = Math.cos(a) >= 0;
@@ -1969,12 +2001,13 @@ export class GraphRenderer {
       const iconR = Math.min(iconCap, (arc.end - arc.start) * BUNDLE.areas * R * 0.45);
       const hot = node === this.hover || node === this.selected;
       ctx.globalAlpha = focus?.kind === "area" && !hot ? 0.45 : 1;
+      const p = this.toScreen(node);
       if (iconR >= 5) {
-        const p = this.toScreen(node);
         this.drawNodeDisc(p.x, p.y, iconR, node.color, hot);
         drawGlyph(ctx, glyphOf(node), p.x, p.y, iconR * 0.62, hot ? this.accentColor : node.color);
-        hits.push({ node, x: p.x, y: p.y, r: iconR });
       }
+      // Too small an arc for an icon: the area is still there to be pointed at.
+      hits.push({ node, x: p.x, y: p.y, r: Math.max(iconR, 5) });
       if (!this.options.labels) continue;
       // Along the ring, upright on either half; cut to the room its arc leaves.
       const font = this.font(areaPx, 600);
@@ -2017,12 +2050,162 @@ export class GraphRenderer {
         this.haloText(n.label, p.x, p.y - Math.sign(Math.sin(a)) * (inward + 4), font, this.textColor);
       } else {
         const right = Math.cos(a) > 0;
-        this.haloText(n.label, p.x - Math.cos(a) * inward, p.y - Math.sin(a) * inward, font, this.textColor, right ? "right" : "left");
+        const x = p.x - Math.cos(a) * inward;
+        const y = p.y - Math.sin(a) * inward;
+        this.haloText(n.label, x, y, font, this.textColor, right ? "right" : "left");
       }
     }
 
     this.bundleHits = hits;
     this.drawPulse();
+  }
+
+  /** The replay's core hexagon's circumradius (px). */
+  private static readonly GROWTH_CORE_PX = 13;
+
+  /** The replay's positions for `model`: its notes by area, in the order of the model's areas, the root's last. */
+  private growthLayoutOf(model: GraphModel): GrowthLayout {
+    if (this.growthLayout?.model === model) return this.growthLayout.layout;
+    const files = model.nodes
+      .filter((n) => n.kind === "file")
+      .map((n) => ({ id: n.id, area: n.area, born: bornOf(n) }));
+    const layout = layoutGrowth(files, [...model.areas.map((a) => a.name), null]);
+    this.growthLayout = { model, layout };
+    return layout;
+  }
+
+  /**
+   * "How your vault grew" (BV2) at the moment `growth.at`, everything at `alpha`: the vault's core in the middle, a
+   * branch out to every area that has a note yet, the notes as hex cells sprouting on their area's sunflower spiral —
+   * glowing while new, darkening in the area's colour as they age — and the links between them, flashing in the glow
+   * when they come.
+   */
+  private drawGrowth(model: GraphModel, growth: { span: GrowthSpan; at: number }, alpha: number): void {
+    const { ctx, width, height } = this;
+    const layout = this.growthLayoutOf(model);
+    const { span, at } = growth;
+    const R = this.radius();
+    const cx = width / 2 + this.view.x;
+    const cy = height / 2 + this.view.y;
+    const toPx = (p: { x: number; y: number }) => ({ x: cx + p.x * R, y: cy + p.y * R });
+    const colorOf = (area: string | null) =>
+      (area !== null ? model.byId.get(`area:${area}`)?.color : undefined) ?? this.mutedColor;
+
+    // The core: the vault itself.
+    ctx.save();
+    ctx.translate(cx, cy);
+    this.hexagonPath(GraphRenderer.GROWTH_CORE_PX * Math.sqrt(this.view.zoom));
+    ctx.strokeStyle = this.textColor;
+    ctx.globalAlpha = 0.3 * alpha;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.restore();
+
+    // The branches, bowed a little, out to each area that has begun.
+    ctx.lineWidth = 1.2;
+    for (const b of layout.branches) {
+      const grow = branchGrowth(at, b.first, span);
+      if (grow <= 0) continue;
+      const end = toPx({ x: b.x * grow, y: b.y * grow });
+      ctx.strokeStyle = colorOf(b.area);
+      ctx.globalAlpha = 0.35 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      const bow = { x: (cx + end.x) / 2 + (end.y - cy) * 0.15, y: (cy + end.y) / 2 - (end.x - cx) * 0.15 };
+      ctx.quadraticCurveTo(bow.x, bow.y, end.x, end.y);
+      ctx.stroke();
+    }
+
+    // The links, once both their notes are there: the calm ones as one faint path, a new one flashing in the glow.
+    const bowTo = (pa: { x: number; y: number }, pb: { x: number; y: number }) =>
+      ctx.quadraticCurveTo(
+        (pa.x + pb.x) / 2 + (pb.y - pa.y) * 0.2,
+        (pa.y + pb.y) / 2 - (pb.x - pa.x) * 0.2,
+        pb.x,
+        pb.y,
+      );
+    const lit: { pa: { x: number; y: number }; pb: { x: number; y: number }; flash: number }[] = [];
+    ctx.strokeStyle = this.textColor;
+    ctx.globalAlpha = 0.07 * alpha;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (const e of model.edges) {
+      const a = layout.cells.get(e.from);
+      const b = layout.cells.get(e.to);
+      if (!a || !b) continue;
+      const born = linkBorn(a.born, b.born);
+      if (born !== null && at < born) continue;
+      const pa = toPx(a);
+      const pb = toPx(b);
+      const glow = flash(at, born, span);
+      if (glow > 0) {
+        lit.push({ pa, pb, flash: glow });
+        continue;
+      }
+      ctx.moveTo(pa.x, pa.y);
+      bowTo(pa, pb);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = this.glowColor;
+    ctx.lineWidth = 1.3;
+    for (const l of lit) {
+      ctx.globalAlpha = (0.15 + 0.75 * l.flash) * alpha;
+      ctx.beginPath();
+      ctx.moveTo(l.pa.x, l.pa.y);
+      bowTo(l.pa, l.pb);
+      ctx.stroke();
+    }
+
+    // The notes, and how many each area has so far (for its name).
+    const unitPx = layout.unit * R;
+    const counts = new Map<string | null, number>();
+    for (const n of model.nodes) {
+      if (n.kind !== "file") continue;
+      const cell = layout.cells.get(n.id);
+      if (!cell) continue;
+      const size = sprout(at, cell.born, span);
+      if (size <= 0) continue;
+      counts.set(cell.area, (counts.get(cell.area) ?? 0) + 1);
+      const p = toPx(cell);
+      const lit = flash(at, cell.born, span);
+      if (lit > 0) {
+        // A plain disc, not a gradient: a bulk import lights thousands of notes at once.
+        ctx.globalAlpha = 0.22 * lit * alpha;
+        ctx.fillStyle = this.glowColor;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, unitPx * 2.6, 0, TWO_PI);
+        ctx.fill();
+      }
+      const [r, g, b] = agedRgb(this.rgb(n.color), ashAt(at, cell.born, span));
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      this.hexagonPath(Math.max(1, unitPx * size));
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+      ctx.fill();
+      if (lit > 0) {
+        ctx.strokeStyle = this.glowColor;
+        ctx.globalAlpha = lit * alpha;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // The areas' names above their spirals, as far out as the spiral has grown.
+    if (this.options.labels) {
+      const size = Math.min(GraphRenderer.FIELD_NAME_MAX_PX, 11.5 * Math.max(1, Math.sqrt(this.view.zoom)));
+      const font = this.font(size, 600);
+      for (const b of layout.branches) {
+        const count = counts.get(b.area) ?? 0;
+        if (b.area === null || count === 0) continue;
+        const label = model.byId.get(`area:${b.area}`)?.label ?? b.area;
+        const p = toPx(b);
+        ctx.globalAlpha = 0.9 * alpha;
+        this.haloText(label, p.x, p.y - layout.spacing * Math.sqrt(count) * R - unitPx - 10, font, colorOf(b.area));
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** `text` cut to `max` px with an ellipsis, in the current font. */

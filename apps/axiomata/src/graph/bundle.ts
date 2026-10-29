@@ -1,8 +1,9 @@
 /**
  * The curves of the Bundle layout (`docs/plans/brain-views.md`, BV1): hierarchical edge bundling after Holten (2006).
  * Every note sits on one ring; a link between two notes is drawn as a B-spline whose control points are the notes'
- * ancestors in the vault's tree (note → folder … → area → root and back down), pulled a little towards the straight
- * line by the bundling strength β. Links that share ancestors share control points, so they run together as bundles.
+ * ancestors in the vault's tree (note → folder … → area → root and back down), pulled a little towards the
+ * straight line by the bundling strength β. Links that share ancestors share control points, so they run together
+ * as bundles.
  * Pure geometry in graph units: `layoutBundle` (`graph/layout.ts`) builds the tree, the renderer draws the commands.
  */
 
@@ -76,7 +77,7 @@ export function bundleControls(layout: BundleLayout, from: string, to: string): 
   const down = chain(layout, to);
   const inDown = new Map(down.map((key, i) => [key, i]));
   let meet = up.findIndex((key) => inDown.has(key));
-  // Two notes without a common root (cannot happen in a layout built by `layoutBundle`): straight from one to the other.
+  // Two notes without a common root (not in a layout built by `layoutBundle`): straight from one to the other.
   if (meet < 0) meet = up.length - 1;
   const meetDown = inDown.get(up[meet]!) ?? down.length;
   const keys = [...up.slice(0, meet + 1), ...down.slice(0, meetDown).reverse()];

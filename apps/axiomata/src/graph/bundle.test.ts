@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { basisCommands, isFreshLink, linkBorn, straighten, type BundlePoint } from "./bundle";
+import {
+  basisCommands,
+  BUNDLE_ROOT,
+  bundleControls,
+  dirKey,
+  isFreshLink,
+  linkBorn,
+  straighten,
+  type BundleLayout,
+  type BundlePoint,
+} from "./bundle";
 
 const DAY = 86_400_000;
 
@@ -40,6 +50,30 @@ describe("bundle curves", () => {
       { kind: "line", x: 0.3, y: 0.1 },
     ]);
     expect(basisCommands([])).toEqual([]);
+  });
+
+  it("finds no curve for an unknown note and does not loop on a parent map that runs in a circle", () => {
+    const p = (x: number) => ({ x, y: 0 });
+    const layout: BundleLayout = {
+      arcs: [],
+      points: new Map([
+        ["a", p(1)],
+        ["b", p(-1)],
+        [dirKey("x"), p(0.5)],
+        [dirKey("y"), p(-0.5)],
+        [BUNDLE_ROOT, p(0)],
+      ]),
+      parent: new Map([
+        ["a", dirKey("x")],
+        ["b", dirKey("y")],
+        [dirKey("x"), dirKey("y")],
+        [dirKey("y"), dirKey("x")],
+      ]),
+    };
+    expect(bundleControls(layout, "a", "missing")).toEqual([]);
+    const path = bundleControls(layout, "a", "b");
+    expect(path[0]).toEqual(p(1));
+    expect(path[path.length - 1]).toEqual(p(-1));
   });
 
   it("a link is as old as the younger of its notes, and new for three weeks", () => {

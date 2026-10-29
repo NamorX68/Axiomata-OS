@@ -514,7 +514,11 @@ export function layoutBundle(model: GraphModel): void {
 
   const files = model.nodes.filter((n) => n.kind === "file");
   const byArea = new Map<string | null, GraphNode[]>();
-  for (const n of files) byArea.set(n.area, [...(byArea.get(n.area) ?? []), n]);
+  for (const n of files) {
+    const list = byArea.get(n.area);
+    if (list) list.push(n);
+    else byArea.set(n.area, [n]);
+  }
   const named = [...byArea.keys()].filter((a): a is string => a !== null).sort(compareFolders);
   const order: (string | null)[] = byArea.has(null) ? [...named, null] : named;
 
