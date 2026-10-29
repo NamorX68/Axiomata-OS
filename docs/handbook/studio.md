@@ -14,7 +14,7 @@ Ein Modus, den du nicht ansiehst, läuft weiter. **Agenten** sind Sitzungen im P
 einer **Engine** (Harness + Modell), mit eigenem Branch in einem eigenen Worktree unter `~/Worktrees/axiomata-agents`.
 Ein **Master** ist dagegen die Engine so, wie du sie selbst benutzt — im echten Projektordner, ohne Worktree. Ein
 weiterer Klick auf die Master-Kachel, während der Master offen ist, startet einen zweiten daneben (`master-glut-2`, …);
-er steht als Karte in der Liste und lässt sich dort entfernen.
+er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
 
 ## Wo die Knöpfe sind
 

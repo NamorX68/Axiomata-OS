@@ -92,10 +92,7 @@
 
   /** The engines a project has a master pane for, in the order the tiles show them. */
   const MASTER_HARNESSES = ["glut", "claude_code", "opencode"] as const satisfies readonly Harness[];
-  /**
-   * The project's first master on each engine: it is the tile at the top. A further one (`master-glut-2`, opened by a
-   * click on the tile while the first is on screen) is a card in the list, so it can be told apart and removed.
-   */
+  /** The project's first master on each engine: the engine's tile at the top, which opens it or starts one more. */
   const masters = $derived(
     new Map(
       agents
@@ -105,7 +102,14 @@
     ),
   );
   const tiled = $derived(new Set([...masters.values()].map((a) => a.id)));
-  const listed = $derived(agents.filter((a) => !tiled.has(a.id)));
+  /**
+   * The further masters (`master-glut-2`, …, started by a click on an engine's tile while its master is open) head the
+   * list of agents, newest first: the owner just opened them and looks for them there.
+   */
+  const listed = $derived([
+    ...agents.filter((a) => a.agent_role === "master" && !tiled.has(a.id)).sort((a, b) => b.id - a.id),
+    ...agents.filter((a) => a.agent_role !== "master"),
+  ]);
 
   async function loadRoles(id: number | null) {
     if (id === null) {

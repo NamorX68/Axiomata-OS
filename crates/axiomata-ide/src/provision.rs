@@ -135,8 +135,11 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
             let base = worktree::current_branch(&project.repo_root);
             // A session made for a card of a plan that runs by itself has its base recorded before it starts: the
             // plan's integration line, which holds what the cards it builds on already did. A new branch is cut from
-            // it; anything else is cut from where the project is.
-            let start = agent.base_branch.as_deref().filter(|_| fresh_branch);
+            // it; anything else is cut from where the project is. A line removed after its plan was integrated is no
+            // base any more: the session, opened again later, starts from where the project is and records that.
+            let recorded = agent.base_branch.as_deref().filter(|_| fresh_branch);
+            let start = recorded.filter(|line| worktree::branch_exists(&project.repo_root, line));
+            let base_gone = recorded.is_some() && start.is_none();
             let created = worktree::add_from(&project.repo_root, &path, &branch, start)?;
             agent_store::set_worktree(
                 db,
@@ -148,7 +151,7 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
             // them, the branch would exist without a recorded base and fall back
             // to the project folder's branch (G1) — an accepted, visible
             // degradation, not a corruption.
-            if fresh_branch && agent.base_branch.is_none() {
+            if fresh_branch && (agent.base_branch.is_none() || base_gone) {
                 agent_store::set_base_branch(db, agent.id, base.as_deref())?;
             }
             (created.path, false)
@@ -1089,6 +1092,21 @@ mod tests {
         prepare(&db, &base, agent).unwrap();
         let again = agent_store::get_agent(&db, agent).unwrap().unwrap();
         assert_eq!(again.base_branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_session_whose_plan_line_is_gone_starts_from_where_the_project_is() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo);
+        let base = locations();
+        let agent = add_agent(&db, project, "Builder");
+        // A card session of a plan whose integration line was removed after the plan was integrated, and whose own
+        // branch and worktree went with its delete.
+        agent_store::set_base_branch(&db, agent, Some("axiomata/line/12")).unwrap();
+
+        let ready = prepare(&db, &base, agent).unwrap();
+        assert!(ready.cwd.is_dir(), "a worktree is made, not a git error");
+        assert_eq!(ready.agent.base_branch.as_deref(), Some("main"));
     }
 
     #[test]
