@@ -262,6 +262,155 @@ impl WorktreeToDiscard {
     }
 }
 
+/// What deleting an agent takes with it on disk: its worktree and its branch (`docs/plans/maintenance.md`, A3c).
+///
+/// Read under the database lock ([`AgentCheckout::read`]), then judged and removed without it — git may take a while
+/// on a large checkout, and the app has one connection. The row itself is the caller's to delete afterwards, so a
+/// refusal here leaves the agent as it was.
+#[derive(Debug, Clone)]
+pub struct AgentCheckout {
+    repo_root: PathBuf,
+    worktree: Option<PathBuf>,
+    branch: Option<String>,
+    base_branch: Option<String>,
+}
+
+/// What [`AgentCheckout::remove`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CheckoutRemoved {
+    /// The worktree was there and is gone.
+    pub worktree: bool,
+    /// The agent's branch was there and is gone.
+    pub branch: bool,
+    /// Why the branch stayed, when it did although there was one: the agent is deleted anyway, the branch only costs
+    /// a name.
+    pub branch_kept: Option<String>,
+}
+
+impl AgentCheckout {
+    /// The checkout of agent `agent_id`, or `None` when there is no such agent.
+    pub fn read(db: &Connection, agent_id: i64) -> Result<Option<Self>> {
+        let Some(agent) = agent_store::get_agent(db, agent_id)? else {
+            return Ok(None);
+        };
+        let repo_root = store::get_project(db, agent.project_id)?
+            .map(|project| project.repo_root)
+            .unwrap_or_default();
+        Ok(Some(Self {
+            repo_root,
+            worktree: agent.worktree_path,
+            branch: agent.branch,
+            base_branch: agent.base_branch,
+        }))
+    }
+
+    /// Where the worktree is, when the agent has one.
+    pub fn worktree(&self) -> Option<&std::path::Path> {
+        self.worktree.as_deref()
+    }
+
+    /// Whether removing the checkout would throw work away: uncommitted changes in the worktree, or commits on the
+    /// agent's branch that its base branch does not have (work that was never taken over).
+    ///
+    /// Fails closed: a worktree git may not be run in by the studio ([`worktree::safe_to_inspect`]) or a branch whose
+    /// base cannot be judged counts as holding unsaved work, so only the owner's explicit "delete anyway" removes it.
+    pub fn has_unsaved_work(&self) -> Result<bool> {
+        if let Some(path) = self.worktree.as_deref().filter(|path| path.is_dir()) {
+            if !worktree::safe_to_inspect(&self.repo_root, path) {
+                return Ok(true);
+            }
+            if worktree::has_uncommitted_changes(path)? {
+                return Ok(true);
+            }
+        }
+        Ok(self.commits_not_taken_over())
+    }
+
+    /// Commits on the agent's branch beyond its base. No branch: nothing to lose. A branch whose base is gone or
+    /// unsafe as an argument, or that git cannot count against it: `true`, its commits might be the only copy.
+    fn commits_not_taken_over(&self) -> bool {
+        let Some(branch) = self.branch.as_deref() else {
+            return false;
+        };
+        if !self.repo_root.is_dir() || !worktree::branch_exists(&self.repo_root, branch) {
+            return false;
+        }
+        let base = self.base_or_folder_branch().filter(|base| {
+            worktree::is_safe_ref(base) && worktree::branch_exists(&self.repo_root, base)
+        });
+        let Some(base) = base.filter(|_| worktree::is_safe_ref(branch)) else {
+            return true;
+        };
+        // Full ref names: neither can be read as an option, whatever the branches are called.
+        let range = format!("refs/heads/{base}..refs/heads/{branch}");
+        worktree::git(&self.repo_root, &["rev-list", "--count", &range])
+            .ok()
+            .and_then(|out| out.trim().parse::<u64>().ok())
+            .is_none_or(|ahead| ahead > 0)
+    }
+
+    fn base_or_folder_branch(&self) -> Option<String> {
+        self.base_branch
+            .clone()
+            .or_else(|| worktree::current_branch(&self.repo_root))
+    }
+
+    /// Removes the worktree, then the branch the studio made for the agent.
+    ///
+    /// Without `force` it refuses while [`AgentCheckout::has_unsaved_work`] says yes, and removes nothing. A project
+    /// folder that is gone (or no repository any more) leaves nothing git could remove; the maintenance's sweep of
+    /// orphaned worktrees picks such a checkout up later.
+    ///
+    /// # Errors
+    ///
+    /// [`IdeError::Invalid`] for unsaved work without `force`; [`IdeError::Git`] when `git worktree remove` fails.
+    pub fn remove(&self, force: bool) -> Result<CheckoutRemoved> {
+        let mut removed = CheckoutRemoved::default();
+        if !self.repo_root.is_dir() {
+            return Ok(removed);
+        }
+        // Without force the branch goes only while it still points where it pointed when it was judged.
+        let judged_tip = self
+            .branch
+            .as_deref()
+            .and_then(|branch| worktree::branch_tip(&self.repo_root, branch));
+        if !force && self.has_unsaved_work()? {
+            return Err(IdeError::Invalid {
+                field: "agent",
+                reason: "the agent has unsaved work in its worktree (uncommitted changes or commits not taken \
+                         over) — delete it anyway to throw that work away"
+                    .into(),
+            });
+        }
+        if let Some(path) = &self.worktree {
+            removed.worktree = worktree::remove(&self.repo_root, path, force)?;
+        }
+        // Only a branch of the studio's own (`delete_branch` refuses any other name); the owner's branches stay.
+        if let Some(branch) = self
+            .branch
+            .as_deref()
+            .filter(|b| b.starts_with("axiomata/"))
+        {
+            let outcome = match (force, &judged_tip) {
+                (true, _) => worktree::delete_branch(&self.repo_root, branch),
+                (false, Some(tip)) => worktree::delete_branch_at(&self.repo_root, branch, tip),
+                (false, None) => Ok(false),
+            };
+            match outcome {
+                Ok(gone) => removed.branch = gone,
+                Err(err) => removed.branch_kept = Some(err.to_string()),
+            }
+            if !removed.branch
+                && removed.branch_kept.is_none()
+                && worktree::branch_exists(&self.repo_root, branch)
+            {
+                removed.branch_kept = Some("it moved while the agent was being deleted".to_owned());
+            }
+        }
+        Ok(removed)
+    }
+}
+
 /// The status of each of these agents — what the UI polls, once per second.
 ///
 /// Takes the agents rather than a connection on purpose: the caller lists
@@ -1076,5 +1225,83 @@ mod tests {
             prepare(&db, &places, reviewer).unwrap().agent.worktree_path,
             ready.agent.worktree_path
         );
+    }
+    #[test]
+    fn deleting_an_agent_takes_its_worktree_and_branch_and_asks_before_unsaved_work_goes() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let agent = add_agent(&db, project, "Builder");
+        let ready = prepare(&db, &base, agent).unwrap();
+        let branch = ready.agent.branch.clone().unwrap();
+
+        let checkout = AgentCheckout::read(&db, agent).unwrap().unwrap();
+        assert!(!checkout.has_unsaved_work().unwrap());
+
+        // Uncommitted work: refused without force, nothing removed.
+        std::fs::write(ready.cwd.join("work.txt"), "unfinished").unwrap();
+        assert!(checkout.has_unsaved_work().unwrap());
+        assert!(checkout.remove(false).is_err());
+        assert!(ready.cwd.join("work.txt").exists());
+        assert!(worktree::branch_exists(&repo, &branch));
+
+        // Committed but never taken over counts as unsaved too.
+        run_git(&ready.cwd, &["add", "."]);
+        run_git(&ready.cwd, &["commit", "-m", "work"]);
+        assert!(checkout.has_unsaved_work().unwrap());
+        assert!(checkout.remove(false).is_err());
+
+        let removed = checkout.remove(true).unwrap();
+        assert!(removed.worktree && removed.branch, "{removed:?}");
+        assert!(!ready.cwd.exists());
+        assert!(!worktree::branch_exists(&repo, &branch));
+    }
+
+    #[test]
+    fn a_clean_checkout_goes_without_force_and_an_agent_without_one_needs_nothing() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let agent = add_agent(&db, project, "Reader");
+        let ready = prepare(&db, &base, agent).unwrap();
+
+        let checkout = AgentCheckout::read(&db, agent).unwrap().unwrap();
+        let removed = checkout.remove(false).unwrap();
+        assert!(removed.worktree && removed.branch);
+        assert!(!ready.cwd.exists());
+
+        // Never started: no worktree, no branch, nothing to do.
+        let fresh = add_agent(&db, project, "Fresh");
+        let checkout = AgentCheckout::read(&db, fresh).unwrap().unwrap();
+        assert_eq!(checkout.remove(false).unwrap(), CheckoutRemoved::default());
+        assert!(AgentCheckout::read(&db, 4242).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_checkout_git_may_not_inspect_or_without_a_base_counts_as_unsaved() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let agent = add_agent(&db, project, "Builder");
+        let ready = prepare(&db, &base, agent).unwrap();
+        let checkout = AgentCheckout::read(&db, agent).unwrap().unwrap();
+        assert!(!checkout.has_unsaved_work().unwrap());
+
+        // A config that would start a program on a status: never run, the checkout waits for the owner's force.
+        run_git(&repo, &["config", "filter.x.clean", "false"]);
+        assert!(checkout.has_unsaved_work().unwrap());
+        assert!(checkout.remove(false).is_err());
+        assert!(ready.cwd.exists());
+        run_git(&repo, &["config", "--unset", "filter.x.clean"]);
+        assert!(!checkout.has_unsaved_work().unwrap());
+
+        // The base branch is gone: the agent's commits might be the only copy.
+        run_git(&repo, &["checkout", "--detach"]);
+        run_git(&repo, &["branch", "-D", "main"]);
+        let unjudged = AgentCheckout {
+            base_branch: None,
+            ..checkout.clone()
+        };
+        assert!(unjudged.has_unsaved_work().unwrap());
     }
 }

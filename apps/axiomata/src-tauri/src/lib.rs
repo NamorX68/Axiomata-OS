@@ -22,6 +22,7 @@ mod limit_watch;
 #[cfg(unix)]
 mod login_path;
 mod lsp;
+mod maintenance;
 #[cfg(target_os = "macos")]
 mod menu;
 mod model_watch;
@@ -37,8 +38,9 @@ mod wallpaper;
 /// touches the run log that lives in the same directory.
 const APP_LOG_PREFIX: &str = "app.log";
 
-/// How many daily app-log files are kept; older ones are deleted by the appender on rotation.
-const APP_LOG_MAX_FILES: usize = 7;
+/// How many daily app-log files are kept; older ones are deleted by the appender on rotation. Two weeks, the same as
+/// the maintenance's default age for them (`[maintenance] app_log_days`, `docs/plans/maintenance.md` §3).
+const APP_LOG_MAX_FILES: usize = 14;
 
 /// Keeps the file writer's background thread alive until the process ends: dropping the guard
 /// stops it and loses the lines still queued.
@@ -347,6 +349,7 @@ pub fn run() {
             commands::project_roles,
             commands::confirm_project_roles,
             commands::delete_ide_agent,
+            commands::ide_agent_unsaved_work,
             commands::prepare_ide_agent,
             commands::ide_mailbox_nudge,
             commands::ide_mailbox_nudged,
@@ -361,6 +364,10 @@ pub fn run() {
             commands::installed_fonts,
             commands::ui_displays,
             commands::reduce_transparency,
+            maintenance::maintenance_report,
+            maintenance::maintenance_clean,
+            maintenance::maintenance_save_settings,
+            maintenance::maintenance_remove_worktree,
             wallpaper::wallpaper_pick,
             wallpaper::wallpaper_read,
             wallpaper::wallpaper_clear,

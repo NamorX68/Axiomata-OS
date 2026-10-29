@@ -9,6 +9,7 @@ mod harness_cmd;
 mod harness_master;
 mod harness_watch;
 mod inbox_cmd;
+mod maintenance_cmd;
 mod models_cmd;
 
 use std::path::{Path, PathBuf};
@@ -144,6 +145,11 @@ enum Command {
     },
     /// Summarise the workspace graph (areas, files, links, skills, routines).
     Graph,
+    /// Axiomata's own storage (`docs/plans/maintenance.md`): status | clean [--dry-run] [--json].
+    Maintenance {
+        #[command(subcommand)]
+        action: maintenance_cmd::MaintenanceAction,
+    },
     /// Axiomata's own agent harness (`docs/plans/harness.md`): run a prompt with a provider from config.toml.
     Harness {
         #[command(subcommand)]
@@ -388,8 +394,14 @@ enum AgentAction {
         #[arg(long)]
         env: Option<String>,
     },
-    /// Remove an agent profile.
-    Delete { id: i64 },
+    /// Remove an agent profile with its worktree and branch. Refused while the worktree holds unsaved work
+    /// (uncommitted changes, or commits not taken over) unless `--force`.
+    Delete {
+        id: i64,
+        /// Throw the unsaved work away.
+        #[arg(long)]
+        force: bool,
+    },
     /// Give an agent its worktree, port and status channel — and an Opencode
     /// agent its session on the Opencode service — and print where and how it
     /// would run. Idempotent — this is what the app does on every start.
@@ -796,6 +808,7 @@ async fn main() -> Result<()> {
                 },
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
         Command::McpServe => return mcp_serve(&core),
+        Command::Maintenance { action } => maintenance_cmd::run(&core, action)?,
         Command::Inbox { .. } => unreachable!("answered before the core starts"),
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
@@ -1773,7 +1786,7 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 model,
                 env,
             } => agent_edit(core, id, name, harness, command, model, env),
-            AgentAction::Delete { id } => agent_delete(core, id).await,
+            AgentAction::Delete { id, force } => agent_delete(core, id, force).await,
             AgentAction::Prepare { id } => agent_prepare(core, id).await,
             AgentAction::Master { project, harness } => {
                 let harness = ide::Harness::parse(&harness).ok_or_else(|| {
@@ -2428,7 +2441,24 @@ async fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Re
     Ok(())
 }
 
-async fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
+async fn agent_delete(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
+    // The checkout first (A3c, docs/plans/maintenance.md): a refusal leaves the agent as it was.
+    let Some(checkout) = ide::provision::AgentCheckout::read(&core.db_lock(), id)? else {
+        anyhow::bail!("no agent #{id}");
+    };
+    if !force && checkout.has_unsaved_work()? {
+        anyhow::bail!(
+            "agent #{id} has unsaved work in its worktree (uncommitted changes or commits not taken over) — \
+             pass --force to delete it anyway"
+        );
+    }
+    let removed = checkout.remove(force)?;
+    if removed.worktree {
+        println!("removed the worktree of agent #{id}");
+    }
+    if let Some(reason) = removed.branch_kept {
+        println!("kept the agent's branch: {reason}");
+    }
     let agent = {
         let db = core.db_lock();
         let Some(agent) = ide::agent_store::get_agent(&db, id)? else {
@@ -3203,6 +3233,8 @@ mod tests {
             &["files", "roots"],
             &["skills", "reseed"],
             &["modules"],
+            &["maintenance", "clean"],
+            &["maintenance", "status"],
         ] {
             assert!(!may(refused), "{refused:?}");
         }
@@ -3220,7 +3252,10 @@ mod tests {
                 project: 1,
                 harness: "opencode".into(),
             },
-            AgentAction::Delete { id: 2 },
+            AgentAction::Delete {
+                id: 2,
+                force: false,
+            },
         ] {
             assert!(ide_owner_gate(&agents(gated)).is_some());
         }

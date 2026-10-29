@@ -360,23 +360,120 @@ fn existing(repo_root: &Path, path: &Path) -> Result<Worktree> {
 /// taken over or thrown away by then. Refuses any other name, so a stray argument cannot delete the owner's branches.
 /// `false` if there was no such branch.
 pub fn delete_branch(repo_root: &Path, branch: &str) -> Result<bool> {
+    ensure_studio_branch(branch)?;
+    if !branch_exists(repo_root, branch) {
+        return Ok(false);
+    }
+    git(repo_root, &["branch", "-D", branch])?;
+    Ok(true)
+}
+
+/// [`delete_branch`], but only while the branch still points at `commit`: a commit made after the caller looked
+/// (an agent still at work) keeps the branch. `false` if there was no such branch or it moved.
+pub fn delete_branch_at(repo_root: &Path, branch: &str, commit: &str) -> Result<bool> {
+    ensure_studio_branch(branch)?;
+    if !crate::agent_store::is_commit_id(commit) {
+        return Err(IdeError::Invalid {
+            field: "commit",
+            reason: format!("{commit:?} is not a commit id"),
+        });
+    }
+    let reference = format!("refs/heads/{branch}");
+    // `update-ref -d <ref> <old>` deletes only if the ref still holds `<old>`, in one step.
+    let (code, _) = git_with(
+        repo_root,
+        &["update-ref", "-d", &reference, commit],
+        &[0, 1, 128],
+    )?;
+    Ok(code == 0)
+}
+
+/// The commit a local branch points at, or `None` when there is no such branch.
+pub fn branch_tip(repo_root: &Path, branch: &str) -> Option<String> {
+    if !is_safe_ref(branch) {
+        return None;
+    }
+    git(
+        repo_root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}^{{commit}}"),
+        ],
+    )
+    .ok()
+    .map(|out| out.trim().to_owned())
+    .filter(|commit| crate::agent_store::is_commit_id(commit))
+}
+
+/// Refuses any branch name but the studio's own (`axiomata/…`, [`branch_name`]), so a stray argument cannot delete the
+/// owner's branches.
+fn ensure_studio_branch(branch: &str) -> Result<()> {
     let ours = branch.strip_prefix("axiomata/").is_some_and(|rest| {
         !rest.is_empty()
             && rest
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
     });
-    if !ours {
-        return Err(IdeError::Invalid {
+    if ours {
+        Ok(())
+    } else {
+        Err(IdeError::Invalid {
             field: "branch",
             reason: format!("{branch:?} is not a branch the studio made for an agent"),
-        });
+        })
     }
-    if !branch_exists(repo_root, branch) {
-        return Ok(false);
+}
+
+/// The largest `.git` file of a linked worktree worth reading: it is one short line.
+const MAX_GIT_FILE_BYTES: u64 = 4096;
+
+/// Reads a small plain file (never a link) as text.
+fn read_small(path: &Path) -> Option<String> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if !meta.file_type().is_file() || meta.len() > MAX_GIT_FILE_BYTES {
+        return None;
     }
-    git(repo_root, &["branch", "-D", branch])?;
-    Ok(true)
+    std::fs::read_to_string(path).ok()
+}
+
+/// The administrative folder a linked worktree's `.git` file names (`<repo>/.git/worktrees/<name>`), read as a file:
+/// nothing runs inside the worktree to find it. `None` for anything that is not such a worktree.
+pub fn admin_dir(worktree: &Path) -> Option<PathBuf> {
+    let text = read_small(&worktree.join(".git"))?;
+    let admin = PathBuf::from(text.trim().strip_prefix("gitdir:")?.trim());
+    let parent = admin.parent()?;
+    (admin.is_absolute()
+        && parent.file_name()? == "worktrees"
+        && parent.parent()?.file_name()? == ".git")
+        .then_some(admin)
+}
+
+/// Whether the studio may run git **inside** the linked worktree `path` of `repo` on its own (a status, a clean
+/// removal): the worktree's `.git` file names an administrative folder of `repo` that names the worktree back, the
+/// worktree has no config file of its own, and the repository's config names no program git would start
+/// ([`unsafe_config`]). Everything in a worktree is the agent's, so a forged `.git`, index or config there must not
+/// get git to run a program as the owner. Read from files and from git run in `repo` only.
+pub fn safe_to_inspect(repo: &Path, path: &Path) -> bool {
+    let Some(admin) = admin_dir(path) else {
+        return false;
+    };
+    let canonical = |p: &Path| p.canonicalize().ok();
+    let admin_of_repo = admin
+        .parent()
+        .and_then(Path::parent)
+        .and_then(canonical)
+        .is_some_and(|common| Some(common) == canonical(&repo.join(".git")));
+    let names_back = read_small(&admin.join("gitdir"))
+        .map(|text| PathBuf::from(text.trim()))
+        .and_then(|named| canonical(&named))
+        .is_some_and(|named| Some(named) == canonical(&path.join(".git")));
+    let own_config = std::fs::symlink_metadata(admin.join("config.worktree")).is_ok();
+    admin_of_repo
+        && names_back
+        && !own_config
+        && unsafe_config(repo).is_ok_and(|keys| keys.is_empty())
 }
 
 /// The full id of the commit `HEAD` points at: what a planner's detached checkout is cut from.

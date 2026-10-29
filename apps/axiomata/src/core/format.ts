@@ -36,12 +36,13 @@ export function shortPath(path: string, keep = 2): string {
   return parts.length <= keep ? path : `…/${parts.slice(-keep).join("/")}`;
 }
 
-/** "340 B", "1.2 KB", "3.4 MB". */
+/** "340 B", "1.2 KB", "3.4 MB", "2.1 GB". */
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "—";
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 /** Locale date + time, or "—". */

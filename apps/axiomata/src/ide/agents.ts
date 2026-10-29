@@ -77,8 +77,17 @@ export function updateAgent(id: number, spec: AgentSpec): Promise<IdeAgent | nul
   return invoke<IdeAgent | null>("update_ide_agent_on_engine", { id, spec });
 }
 
-export function deleteAgent(id: number): Promise<boolean> {
-  return invoke<boolean>("delete_ide_agent", { id });
+/**
+ * Deletes an agent with its worktree and branch. Unsaved work there refuses the delete unless `force` — pass it only
+ * after the owner said yes to it ([`agentUnsavedWork`]).
+ */
+export function deleteAgent(id: number, force = false): Promise<boolean> {
+  return invoke<boolean>("delete_ide_agent", { id, force });
+}
+
+/** Whether deleting this agent would throw work away: uncommitted changes, or commits never taken over. */
+export function agentUnsavedWork(id: number): Promise<boolean> {
+  return invoke<boolean>("ide_agent_unsaved_work", { id });
 }
 
 /**

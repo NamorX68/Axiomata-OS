@@ -37,6 +37,7 @@ pub mod ide_start;
 pub mod ide_status;
 pub mod importer;
 pub mod json_state;
+pub mod maintenance;
 pub mod memory;
 pub mod model_catalog;
 pub mod notes;

@@ -1,0 +1,187 @@
+/**
+ * Settings → Storage (`docs/plans/maintenance.md`, MT4): what Axiomata keeps of its own data, for how long, and what
+ * a clean-up frees. The shapes mirror `axiomata_core::maintenance` (camelCase) and `config::MaintenanceSettings`
+ * (snake_case, as `config.toml` spells it).
+ */
+
+/** The retention rules of `[maintenance]`. */
+export interface MaintenanceSettings {
+  enabled: boolean;
+  runs_days: number;
+  runs_keep: number;
+  routine_runs_days: number;
+  chat_turns_days: number;
+  web_searches_days: number;
+  card_events_days: number;
+  session_spend_days: number;
+  app_log_days: number;
+  backups_keep: number;
+  claude_sessions_days: number;
+}
+
+/** One line of the report. */
+export interface MaintenanceItem {
+  key: string;
+  label: string;
+  unit: string;
+  bytes: number | null;
+  count: number;
+  freeableBytes: number | null;
+  freeableCount: number;
+  keep: string;
+  error: string | null;
+}
+
+/** A worktree whose agent is gone; `dirty` null = git cannot say. */
+export interface OrphanWorktree {
+  path: string;
+  bytes: number;
+  dirty: boolean | null;
+  repoRoot: string | null;
+  removed: boolean;
+}
+
+export interface MaintenanceReport {
+  dryRun: boolean;
+  home: string;
+  totalBytes: number;
+  freeableBytes: number;
+  lastRun: string | null;
+  items: MaintenanceItem[];
+  orphanWorktrees: OrphanWorktree[];
+  error: string | null;
+}
+
+/** Glut's own report (`glut clean --dry-run --json`, format version 1). */
+export interface GlutReport {
+  version: number;
+  dryRun: boolean;
+  totalBytes: number;
+  freeableBytes: number;
+  lastRun: string | null;
+  /** Fixed names (`snapshots`, `journals`, …); `keep` (`7d`) is absent for an item not kept by age. */
+  items: {
+    name: string;
+    bytes: number;
+    freeableBytes: number;
+    count: number;
+    freeableCount: number;
+    keep: string | null;
+  }[];
+}
+
+/**
+ * Glut's row: known, an answer in another format, or Glut's own failure line (`glut clean: …`). No Glut that can
+ * answer → no row at all (`null`).
+ */
+export type GlutRow =
+  | { state: "known"; report: GlutReport }
+  | { state: "unknown_format" }
+  | { state: "failed"; message: string };
+
+/** What "Clean up now" did: the bytes freed (Axiomata's and Glut's) and the state after it. */
+export interface CleanOutcome {
+  freed: number;
+  /** Why Glut did not clean although there is a Glut (its failure line, another format). */
+  glut_note: string | null;
+  view: StorageView;
+}
+
+/** Glut names its items by fixed keys; the labels are Axiomata's. A name added later is shown as Glut spells it. */
+const GLUT_LABELS: Readonly<Record<string, string>> = {
+  snapshots: "Snapshots",
+  journals: "Run journals",
+  sessions: "Sessions",
+  results: "Tool results",
+  images: "Images",
+  exports: "Exports",
+  lean: "Lean savings log",
+  other: "Other",
+};
+
+/** The label of one of Glut's items. */
+export function glutLabel(name: string): string {
+  return GLUT_LABELS[name] ?? name;
+}
+
+/** What the Storage section shows. */
+export interface StorageView {
+  axiomata: MaintenanceReport;
+  glut: GlutRow | null;
+  settings: MaintenanceSettings;
+}
+
+/** The numeric rules a field of the section edits. */
+export type RuleField = Exclude<keyof MaintenanceSettings, "enabled">;
+
+/** The editable rules of each report line, in the order shown: an age in days, and a count where one applies. */
+export const ITEM_RULES: Readonly<
+  Record<string, { field: RuleField; unit: "days" | "kept" }[]>
+> = {
+  runs: [
+    { field: "runs_days", unit: "days" },
+    { field: "runs_keep", unit: "kept" },
+  ],
+  routine_runs: [{ field: "routine_runs_days", unit: "days" }],
+  chat_turns: [{ field: "chat_turns_days", unit: "days" }],
+  web_searches: [{ field: "web_searches_days", unit: "days" }],
+  card_events: [{ field: "card_events_days", unit: "days" }],
+  session_spend: [{ field: "session_spend_days", unit: "days" }],
+  app_log: [{ field: "app_log_days", unit: "days" }],
+  backups: [{ field: "backups_keep", unit: "kept" }],
+  claude_sessions: [{ field: "claude_sessions_days", unit: "days" }],
+};
+
+/** The bounds the backend checks too (`MaintenanceSettings::validate`); the fields refuse to go beyond them. */
+export const RULE_BOUNDS: Readonly<
+  Record<RuleField, { min: number; max: number }>
+> = {
+  runs_days: { min: 1, max: 3650 },
+  runs_keep: { min: 0, max: 100_000 },
+  routine_runs_days: { min: 1, max: 3650 },
+  chat_turns_days: { min: 1, max: 3650 },
+  web_searches_days: { min: 1, max: 3650 },
+  card_events_days: { min: 1, max: 3650 },
+  session_spend_days: { min: 1, max: 3650 },
+  app_log_days: { min: 1, max: 3650 },
+  backups_keep: { min: 1, max: 100 },
+  claude_sessions_days: { min: 1, max: 3650 },
+};
+
+/** The first rule out of its bounds, in words, or `null` when all are fine. */
+export function ruleProblem(settings: MaintenanceSettings): string | null {
+  for (const [field, { min, max }] of Object.entries(RULE_BOUNDS) as [
+    RuleField,
+    { min: number; max: number },
+  ][]) {
+    const value = settings[field];
+    if (!Number.isInteger(value) || value < min || value > max) {
+      return `${field.split("_").join(" ")} must be a whole number from ${min} to ${max}`;
+    }
+  }
+  return null;
+}
+
+/** Whether two rule sets differ — the Save button is offered only then. */
+export function rulesChanged(
+  a: MaintenanceSettings,
+  b: MaintenanceSettings,
+): boolean {
+  return (Object.keys(a) as (keyof MaintenanceSettings)[]).some(
+    (key) => a[key] !== b[key],
+  );
+}
+
+/** The orphaned worktrees still waiting for the owner: with changes, or ones git cannot judge. */
+export function waitingWorktrees(report: MaintenanceReport): OrphanWorktree[] {
+  return report.orphanWorktrees.filter(
+    (orphan) => !orphan.removed && orphan.dirty !== false,
+  );
+}
+
+/** What one click on "Clean up now" frees, Axiomata's part and Glut's together. */
+export function freeableTotal(view: StorageView): number {
+  const glut =
+    view.glut?.state === "known" ? view.glut.report.freeableBytes : 0;
+  return view.axiomata.freeableBytes + glut;
+}

@@ -44,15 +44,17 @@
   import ThemePreview from "../ui/ThemePreview.svelte";
   import { toast } from "../core/toast";
   import { TEMPLATE } from "../theme/validator";
+  import StorageSettings from "./StorageSettings.svelte";
   import Window from "./Window.svelte";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
-  type TabId = "appearance" | "workspace" | "providers" | "about";
+  type TabId = "appearance" | "workspace" | "providers" | "storage" | "about";
   const TABS: { id: TabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "workspace", label: "Workspace" },
     { id: "providers", label: "AI providers" },
+    { id: "storage", label: "Storage" },
     { id: "about", label: "About" },
   ];
   let tab = $state<TabId>("appearance");
@@ -1002,6 +1004,8 @@
             </div>
           </section>
         {/if}
+      {:else if tab === "storage"}
+        <StorageSettings />
       {:else if tab === "about"}
         <section>
           <h3>About</h3>

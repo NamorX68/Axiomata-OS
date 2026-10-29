@@ -2977,10 +2977,28 @@ pub fn confirm_project_roles(
     axiomata_core::roster::confirm_project_roles(&folder, &hash).map_err(|err| err.to_string())
 }
 
-/// Deletes the profile, then its status channel (M7.2 CP6). The row goes
+/// Deletes the agent: its worktree and branch first (A3c, `docs/plans/maintenance.md`), then the profile, then its
+/// status channel (M7.2 CP6). Unsaved work in the worktree refuses the delete unless `force` — the delete dialog asks
+/// ([`ide_agent_unsaved_work`]) and only then passes it. Git runs without the database lock. Of the rest the row goes
 /// first: a channel without a row is harmless, a row whose plan vanished is not.
 #[tauri::command]
-pub async fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+pub async fn delete_ide_agent(
+    state: State<'_, CoreState>,
+    id: i64,
+    force: Option<bool>,
+) -> Result<bool, String> {
+    let force = force.unwrap_or(false);
+    let checkout = {
+        let db = state.db_lock();
+        ide::provision::AgentCheckout::read(&db, id).map_err(|err| err.to_string())?
+    };
+    let Some(checkout) = checkout else {
+        return Ok(false);
+    };
+    let removed = off_main(move || checkout.remove(force)).await?;
+    if let Some(reason) = removed.branch_kept {
+        tracing::warn!(id, %reason, "deleted an agent but kept its branch");
+    }
     let deleted = {
         let db = state.db_lock();
         ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?
@@ -3409,6 +3427,20 @@ pub async fn ide_agent_has_changes(state: State<'_, CoreState>, id: i64) -> Resu
             off_main(move || ide::worktree::has_uncommitted_changes(&path)).await
         }
         _ => Ok(false),
+    }
+}
+
+/// Whether deleting the agent would throw work away: uncommitted changes in its worktree, or commits on its branch
+/// that were never taken over. The delete dialog asks before it passes `force` (A3c).
+#[tauri::command]
+pub async fn ide_agent_unsaved_work(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let checkout = {
+        let db = state.db_lock();
+        ide::provision::AgentCheckout::read(&db, id).map_err(|err| err.to_string())?
+    };
+    match checkout {
+        Some(checkout) => off_main(move || checkout.has_unsaved_work()).await,
+        None => Ok(false),
     }
 }
 

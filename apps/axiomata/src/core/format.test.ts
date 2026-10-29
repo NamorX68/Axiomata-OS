@@ -41,6 +41,7 @@ describe("formatBytes / absoluteTime", () => {
     expect(formatBytes(340)).toBe("340 B");
     expect(formatBytes(1300)).toBe("1.3 KB");
     expect(formatBytes(3.4 * 1024 * 1024)).toBe("3.4 MB");
+    expect(formatBytes(2.1 * 1024 * 1024 * 1024)).toBe("2.1 GB");
     expect(formatBytes(-1)).toBe("—");
   });
   it("formats absolute times", () => {

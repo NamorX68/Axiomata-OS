@@ -6,6 +6,7 @@
  */
 
 import type { Engine, Role } from "./roster";
+import type { MaintenanceItem, MaintenanceSettings, StorageView } from "./maintenance";
 import type {
   AppInfo,
   Board,
@@ -405,6 +406,102 @@ let ideProjects: IdeProject[] = [
     accent_slot: null,
   },
 ];
+
+/* Settings → Storage (maintenance.md, MT4): a home with something to free, one orphaned worktree with changes and a
+ * Glut that answered. A clean-up empties what is freeable; "Delete" drops the orphan. */
+let mockStorageSettings: MaintenanceSettings = {
+  enabled: true,
+  runs_days: 90,
+  runs_keep: 200,
+  routine_runs_days: 30,
+  chat_turns_days: 90,
+  web_searches_days: 90,
+  card_events_days: 90,
+  session_spend_days: 365,
+  app_log_days: 14,
+  backups_keep: 2,
+  claude_sessions_days: 30,
+};
+let mockStorageCleaned = false;
+let mockOrphanDeleted = false;
+
+/** One report line; after a mock clean-up what was freeable is gone. */
+function mockStorageItem(line: [string, string, string, number | null, number, number | null, number, string]) {
+  const [key, label, unit, bytes, count, freeBytes, freeCount, keep] = line;
+  const cleaned = mockStorageCleaned;
+  const item: MaintenanceItem = {
+    key,
+    label,
+    unit,
+    bytes,
+    count: cleaned ? count - freeCount : count,
+    freeableBytes: cleaned && freeBytes !== null ? 0 : freeBytes,
+    freeableCount: cleaned ? 0 : freeCount,
+    keep,
+    error: null,
+  };
+  return item;
+}
+
+function mockStorageView(): StorageView {
+  const items = (
+    [
+      ["runs", "Runs", "rows", null, 1840, null, 412, "90 days, at least the newest 200"],
+      ["routine_runs", "Routine firings", "rows", null, 960, null, 300, "30 days"],
+      ["chat_turns", "Chat turns", "rows", null, 310, null, 12, "90 days"],
+      ["web_searches", "Web searches", "rows", null, 88, null, 0, "90 days"],
+      ["card_events", "Archived card history", "rows", null, 2400, null, 140, "90 days after the card was archived"],
+      ["session_spend", "Session spend", "rows", null, 5200, null, 0, "365 days"],
+      ["database", "Database file", "", 16_338_944, 0, 1_200_000, 0, "compacted when over 10 % is free"],
+      ["app_log", "App log", "files", 2_400_000, 9, 300_000, 2, "14 days"],
+      ["runs_log", "Run log", "files", 15_700_000, 1, 0, 0, "rotated at 10 MB, the last 2 kept"],
+      ["backups", "Backups", "files", 15_300_000, 4, 4_400, 1, "the newest 2 of each file"],
+      ["agent_events", "Agent status folders", "folders", 90_000, 27, 12_000, 4, "while their agent exists"],
+      ["claude_sessions", "Claude sessions", "entries", 5_100_000, 63, 3_900_000, 40, "30 days"],
+      ["worktrees", "Orphaned worktrees", "worktrees", 48_000_000, 2, 12_000_000, 1, "removed with their agent"],
+    ] as [string, string, string, number | null, number, number | null, number, string][]
+  ).map(mockStorageItem);
+  const freeable = items.reduce((sum, item) => sum + (item.freeableBytes ?? 0), 0);
+  const glutFree = mockStorageCleaned ? 0 : 172_000_000;
+  return {
+    axiomata: {
+      dryRun: true,
+      home: "/Users/demo/.axiomata",
+      totalBytes: 60_000_000 - (mockStorageCleaned ? 5_400_000 : 0),
+      freeableBytes: freeable,
+      lastRun: mockStorageCleaned ? new Date().toISOString() : "2026-10-22T08:14:00Z",
+      items,
+      orphanWorktrees: mockOrphanDeleted
+        ? []
+        : [
+            {
+              path: "/Users/demo/Worktrees/axiomata-agents/axiomata-os/builder-12",
+              bytes: 36_000_000,
+              dirty: true,
+              repoRoot: "/Users/demo/code/axiomata-os",
+              removed: false,
+            },
+          ],
+      error: null,
+    },
+    glut: {
+      state: "known",
+      report: {
+        version: 1,
+        dryRun: true,
+        totalBytes: 536_000_000,
+        freeableBytes: glutFree,
+        lastRun: null,
+        items: [
+          { name: "snapshots", bytes: 528_000_000, freeableBytes: glutFree, count: 176, freeableCount: 38, keep: "7d" },
+          { name: "sessions", bytes: 6_000_000, freeableBytes: 0, count: 59, freeableCount: 0, keep: "90d" },
+          { name: "images", bytes: 1_500_000, freeableBytes: 0, count: 2, freeableCount: 0, keep: null },
+        ],
+      },
+    },
+    settings: { ...mockStorageSettings },
+  };
+}
 
 /* Agent fixtures: two profiles on the first project, one per harness that
  * actually exists, so the picker and the agent pane both have something real
@@ -1989,7 +2086,22 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       mockImageSettled = true;
       return { outcome: "done", commit: "facade1234567", committed: true } as T;
     }
+    case "maintenance_report":
+      return mockStorageView() as T;
+    case "maintenance_clean": {
+      const before = mockStorageView();
+      const glut = before.glut?.state === "known" ? before.glut.report.freeableBytes : 0;
+      mockStorageCleaned = true;
+      return { freed: before.axiomata.freeableBytes + glut, glut_note: null, view: mockStorageView() } as T;
+    }
+    case "maintenance_save_settings":
+      mockStorageSettings = { ...(args.settings as MaintenanceSettings) };
+      return { ...mockStorageSettings } as T;
+    case "maintenance_remove_worktree":
+      mockOrphanDeleted = true;
+      return undefined as T;
     case "ide_agent_has_changes":
+    case "ide_agent_unsaved_work":
       return false as T;
     case "discard_ide_agent_worktree":
       return false as T;
