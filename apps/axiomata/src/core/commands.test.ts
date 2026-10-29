@@ -15,6 +15,7 @@ import {
   runCommand,
   suggestions,
 } from "./commands";
+import { on } from "./bus";
 import { busy, newSession, planMode, sessionId, turnEffort, turnModel, turns } from "./chat";
 import { modelCatalog } from "./modelCatalog";
 import { activeTheme, instances, loadInstances } from "./stores";
@@ -147,6 +148,22 @@ describe("runCommand", () => {
     const r = await runCommand("help", []);
     expect(r.ok).toBe(true);
     expect(r.detail).toContain("/tile");
+  });
+
+  it("/help <topic> opens that handbook page, an unknown topic lists the pages", async () => {
+    const opened: unknown[] = [];
+    const off = on("shell:handbook", (detail) => opened.push(detail));
+    try {
+      const found = await runCommand("help", ["Studio"]);
+      expect(found.ok).toBe(true);
+      expect(opened).toEqual([{ page: "studio" }]);
+      const unknown = await runCommand("help", ["nothing", "here"]);
+      expect(unknown.ok).toBe(false);
+      expect(unknown.detail).toContain("`/help kanban`");
+      expect(opened).toHaveLength(1);
+    } finally {
+      off();
+    }
   });
 
   it("/clear starts a new conversation, /plan and /build flip the switch", async () => {

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { registerBuiltins } from "../modules";
 import { listAllRingEligibleBuiltins } from "./apps";
-import { PAGE_FOR_PLACE, pageForRingEntry, pageForSettingsTab } from "./handbook";
+import { PAGE_FOR_PLACE, pageForRingEntry, pageForSettingsTab, pageForTopic, pageOfLink } from "./handbook";
 import { SETTINGS_TABS } from "./settingsTabs";
 
 // The pages as the build embeds them: the same folder `axiomata_core::handbook` reads with `include_str!`.
@@ -44,5 +44,31 @@ describe("the handbook covers every place of the app", () => {
       ...SETTINGS_TABS.map((tab) => `settings:${tab.id}`),
     ]);
     expect(Object.keys(PAGE_FOR_PLACE).filter((place) => !places.has(place))).toEqual([]);
+  });
+});
+
+describe("links and topics", () => {
+  const entries = [
+    { name: "studio", title: "Studio", summary: "" },
+    { name: "second-brain", title: "Second Brain", summary: "" },
+    { name: "spotlight", title: "Spotlight", summary: "" },
+    { name: "kosten", title: "Kosten", summary: "" },
+  ];
+  const known = new Set(entries.map((entry) => entry.name));
+
+  it("reads a link to another page", () => {
+    expect(pageOfLink("studio.md", known)).toBe("studio");
+    expect(pageOfLink("./studio.md#handgriffe", known)).toBe("studio");
+    expect(pageOfLink("nope.md", known)).toBeUndefined();
+    expect(pageOfLink("../studio.md", known)).toBeUndefined();
+    expect(pageOfLink("https://example.com/studio.md", known)).toBeUndefined();
+  });
+
+  it("finds the page a topic means", () => {
+    expect(pageForTopic("studio", entries)).toBe("studio");
+    expect(pageForTopic("Second Brain", entries)).toBe("second-brain");
+    expect(pageForTopic("kos", entries)).toBe("kosten");
+    expect(pageForTopic("s", entries), "several start so").toBeUndefined();
+    expect(pageForTopic("  ", entries)).toBeUndefined();
   });
 });

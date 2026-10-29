@@ -5,6 +5,7 @@
  */
 
 import type { BoardCard, BoardPlan, GraphFile, IdeProject, Routine, SearchHit, Skill } from "./backend";
+import { HANDBOOK_EVENT, type HandbookEntry } from "./handbook";
 import type { SpotlightItem } from "./spotlight";
 
 /** What choosing an item does. A data description, not a closure: the model stays free of the bus and the stores. */
@@ -105,6 +106,16 @@ export function projectItems(projects: IdeProject[]): SpotlightItem[] {
   return projects.map((project) =>
     item("project", String(project.id), project.name, { type: "studio", projectId: project.id }, {
       subtitle: project.repo_root,
+    }),
+  );
+}
+
+/** The handbook's pages by title, their summary matched and shown; choosing one opens it in the Help panel (CH4). */
+export function handbookItems(entries: HandbookEntry[]): SpotlightItem[] {
+  return entries.map((entry) =>
+    item("handbook", entry.name, entry.title, { type: "event", event: HANDBOOK_EVENT, detail: { page: entry.name } }, {
+      subtitle: entry.summary,
+      keywords: `${entry.name} handbuch handbook help hilfe`,
     }),
   );
 }

@@ -14,6 +14,7 @@
 import { get, writable } from "svelte/store";
 
 import { emit } from "./bus";
+import { listHandbook, openHandbook, pageForTopic, type HandbookEntry } from "./handbook";
 import { busy, newSession, planMode, send, sessionId, turnEffort, turnModel, turns } from "./chat";
 import { createInstance, destroyInstance } from "./lifecycle";
 import { loadModelCatalog, modelCatalog, providerOptions } from "./modelCatalog";
@@ -113,7 +114,7 @@ interface ChatSessionWire {
 type AppCommand = Omit<CommandEntry, "source">;
 
 const CONVERSATION: AppCommand[] = [
-  { name: "help", level: 1, description: "List every command" },
+  { name: "help", level: 1, hint: "[topic]", description: "List every command, or open a handbook page" },
   { name: "clear", level: 1, description: "Start a new conversation" },
   { name: "compact", level: 1, description: "Summarise the conversation so far to free context" },
   { name: "model", level: 1, hint: "[model]", description: "Show or change this conversation's model" },
@@ -285,6 +286,30 @@ export function helpText(engine: readonly EngineCommand[] = get(engineCommands))
   ].join("\n");
 }
 
+/**
+ * `/help <topic>` (chat-knows-app CH4): the handbook page the topic means opens in the Help panel; a topic that fits
+ * no page — or several — lists the pages instead.
+ */
+async function helpTopic(topic: string): Promise<CommandResult> {
+  let entries: HandbookEntry[];
+  try {
+    entries = await listHandbook();
+  } catch (err) {
+    return { ok: false, message: `The handbook could not be read: ${String(err)}` };
+  }
+  const page = pageForTopic(topic, entries);
+  if (page) {
+    openHandbook(page);
+    return { ok: true, message: `Handbook: ${entries.find((entry) => entry.name === page)?.title ?? page}.` };
+  }
+  const list = entries.map((entry) => `- \`/help ${entry.name}\` — ${entry.title}: ${entry.summary}`);
+  return {
+    ok: false,
+    message: `No handbook page for “${topic}”; the chat panel lists them.`,
+    detail: ["**Handbook**", "", ...list].join("\n"),
+  };
+}
+
 function listTypes(): string {
   return listModules()
     .filter((m) => !m.stageOnly)
@@ -295,7 +320,7 @@ function listTypes(): string {
 export async function runCommand(name: string, args: string[]): Promise<CommandResult> {
   switch (name) {
     case "help":
-      return { ok: true, message: "See the chat panel.", detail: helpText() };
+      return args.length > 0 ? helpTopic(args.join(" ")) : { ok: true, message: "See the chat panel.", detail: helpText() };
 
     case "clear":
       if (get(busy)) return WHILE_BUSY;
