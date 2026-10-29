@@ -45,7 +45,7 @@
   import { get } from "svelte/store";
 
   import { draggable, type DragDelta } from "../canvas/drag";
-  import { resizable, type ResizeDelta } from "../canvas/resize";
+  import type { ResizeDelta } from "../canvas/resize";
   import { coverGround } from "../core/cover";
   import { getSetting, setSetting } from "../core/persist";
   import { getModule } from "../core/registry";
@@ -54,12 +54,15 @@
     readAnchor,
     readPanelSize,
     readSizeKey,
+    rememberedSize,
+    rememberingSize,
     type PanelSize,
     type StagedPanel,
   } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import { uiScale } from "../core/uiScale";
   import PanelHead from "../ui/PanelHead.svelte";
+  import ResizeEdges from "../ui/ResizeEdges.svelte";
   import { fromOrigin } from "../ui/fromOrigin";
 
   let { panel, ctx, onClose }: { panel: StagedPanel; ctx: ModuleContext; onClose: () => void } = $props();
@@ -107,8 +110,7 @@
    * guess available.
    */
   function savedSize(): PanelSize | null {
-    const perType = getSetting<Record<string, unknown>>(SETTING_KEY_BY_TYPE);
-    const mine = readPanelSize(perType?.[sizeKey()]);
+    const mine = rememberedSize(getSetting<unknown>(SETTING_KEY_BY_TYPE), sizeKey());
     if (mine) return mine;
 
     // An opener that states its own starting size gets it.
@@ -153,9 +155,7 @@
       w: clampW(resizeBase.w + delta.dw),
       h: clampH(resizeBase.h + delta.dh),
     };
-    const byType = { ...(getSetting<Record<string, unknown>>(SETTING_KEY_BY_TYPE) ?? {}) };
-    byType[sizeKey()] = panelSize;
-    setSetting(SETTING_KEY_BY_TYPE, byType);
+    setSetting(SETTING_KEY_BY_TYPE, rememberingSize(getSetting<unknown>(SETTING_KEY_BY_TYPE), sizeKey(), panelSize));
   }
 
   // ---- move (drag by header) ----
@@ -243,10 +243,12 @@
   style:top={pos ? `${liveY}px` : undefined}
   use:draggable={{ handle: ".panel-head", onStart: startMove, onMove: (d) => (moving = d), onEnd: endMove }}
 >
-  <div class="resize-handle resize-w" use:resizable={{ dir: "w", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
-  <div class="resize-handle resize-e" use:resizable={{ dir: "e", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
-  <div class="resize-handle resize-n" use:resizable={{ dir: "n", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
-  <div class="resize-handle resize-s" use:resizable={{ dir: "s", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
+  <ResizeEdges
+    active={resizing !== null}
+    onStart={startResize}
+    onMove={(_dir, d) => (resizing = unscaled(d))}
+    onEnd={(_dir, d) => endResize(d)}
+  />
   <PanelHead title={def?.title ?? panel.type} iconSvg={def?.icon} {onClose} movable />
   <div class="body">
     {#if def}
@@ -297,47 +299,7 @@
     margin-bottom: 0;
   }
 
-  /* Invisible resize handles on the panel's non-screen-edge sides. Thin
-     strips just inside the border so they don't eat into the visible
-     content area; a bit of hover feedback so they're discoverable. */
-  .resize-handle {
-    position: absolute;
-    z-index: 1;
-    background: transparent;
-  }
-  .resize-handle:hover,
-  .panel.resizing .resize-handle {
-    background: var(--ax-text-muted);
-    opacity: 0.5;
-  }
-  .resize-w {
-    top: 0;
-    left: -3px;
-    width: 6px;
-    height: 100%;
-    cursor: ew-resize;
-  }
-  .resize-e {
-    top: 0;
-    right: -3px;
-    width: 6px;
-    height: 100%;
-    cursor: ew-resize;
-  }
-  .resize-n {
-    top: -3px;
-    left: 0;
-    width: 100%;
-    height: 6px;
-    cursor: ns-resize;
-  }
-  .resize-s {
-    bottom: -3px;
-    left: 0;
-    width: 100%;
-    height: 6px;
-    cursor: ns-resize;
-  }
+  /* The four edge grips are `ui/ResizeEdges.svelte`'s, lit while `resizing`. */
 
   .body {
     flex: 1 1 auto;

@@ -51,12 +51,18 @@
   import { countBornBy, GROWTH_FADE_MS, GROWTH_MS, growthMoment } from "../graph/growth";
   import TimeTravel from "../modules/TimeTravel.svelte";
   import { GraphRenderer, type RenderMode } from "../graph/render";
+  import { registerShellView } from "../core/openViews";
 
   let {
     open = $bindable(false),
     focus = null,
     query = null,
   }: { open?: boolean; focus?: string | null; query?: { text: string; seq: number } | null } = $props();
+
+  // Known as open to the chat's `close_view` (CH5); the graph loses nothing by closing — its preferences are settings.
+  $effect(() =>
+    open ? registerShellView("second-brain", { title: "Second Brain", close: () => (open = false) }) : undefined,
+  );
 
   /** The view's own preferences; the layout is a setting of its own now (`brainView.layout`), read from here once. */
   interface Prefs {

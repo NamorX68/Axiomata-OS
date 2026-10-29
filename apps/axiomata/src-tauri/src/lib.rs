@@ -18,6 +18,7 @@ mod commands;
 mod debug;
 mod files;
 mod git;
+mod handbook;
 mod limit_watch;
 #[cfg(unix)]
 mod login_path;
@@ -372,6 +373,8 @@ pub fn run() {
             maintenance::maintenance_clean,
             maintenance::maintenance_save_settings,
             maintenance::maintenance_remove_worktree,
+            handbook::handbook_pages,
+            handbook::handbook_page,
             tags::get_tag_list,
             tags::save_tag_list,
             tags::tag_proposals,
@@ -398,6 +401,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            terminal::terminal_foreground,
             terminal::terminal_scrollback,
             terminal::terminal_set_colors,
         ])

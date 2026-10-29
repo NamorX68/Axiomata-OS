@@ -33,6 +33,7 @@ ICONS=(
   chevron-right
   circle-alert
   circle-check
+  circle-question-mark
   code
   columns-2
   columns-3

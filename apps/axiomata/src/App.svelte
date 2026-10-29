@@ -32,6 +32,9 @@ import { emit, on } from "./core/bus";
   import ModulePicker from "./shell/ModulePicker.svelte";
   import SecondBrainView from "./shell/SecondBrainView.svelte";
   import Settings from "./shell/Settings.svelte";
+  import HandbookPanel from "./shell/HandbookPanel.svelte";
+  import ChatAsks from "./shell/ChatAsks.svelte";
+  import { HANDBOOK_EVENT } from "./core/handbook";
   import Spotlight from "./shell/Spotlight.svelte";
   import StagingLayer from "./shell/StagingLayer.svelte";
   import Toasts from "./shell/Toasts.svelte";
@@ -54,6 +57,9 @@ import { emit, on } from "./core/bus";
   let ideStarted = $state(false);
   let ideOpen = $state(false);
   let spotlightOpen = $state(false);
+  let handbookOpen = $state(false);
+  /** The page asked for with `shell:handbook` (`{ page }`), numbered so the same page asked for again is shown. */
+  let handbookRequest = $state<{ page: string | null; seq: number } | null>(null);
   let brainOpen = $state(false);
   let brainFocus = $state<string | null>(null);
   /** The Second Brain's filter asked for from outside, numbered so the same text asked for twice is set again. */
@@ -124,6 +130,12 @@ import { emit, on } from "./core/bus";
         settingsTab = typeof d.tab === "string" ? d.tab : null;
         settingsOpen = true;
       }),
+      // The handbook (chat-knows-app CH4): the Dock's `?`, a spotlight hit, `/help <topic>`, the chat's open action.
+      on(HANDBOOK_EVENT, (detail) => {
+        const d = (detail ?? {}) as { page?: string };
+        handbookRequest = { page: typeof d.page === "string" ? d.page : null, seq: (handbookRequest?.seq ?? 0) + 1 };
+        handbookOpen = true;
+      }),
       // The ring's "Kanban" entry: the board opens as a large panel (Kanban is an app, it has no tile).
       on("shell:kanban", () => void openKanban()),
       // The ring's single "Studio" entry opens the workbench in the mode it was left in.
@@ -178,6 +190,7 @@ import { emit, on } from "./core/bus";
           mockPickNext: m.mockPickNext,
           mockAgentState: m.mockAgentState,
           mockEmit: m.mockEmit,
+          mockActionRequest: m.mockActionRequest,
         };
       });
     }
@@ -258,6 +271,7 @@ import { emit, on } from "./core/bus";
 <ModulePicker bind:open={pickerOpen} />
 <Settings bind:open={settingsOpen} initialTab={settingsTab} />
 <Spotlight bind:open={spotlightOpen} />
+<HandbookPanel bind:open={handbookOpen} request={handbookRequest} />
 {#if brainOpen}
   <SecondBrainView bind:open={brainOpen} focus={brainFocus} query={brainQuery} />
 {/if}
@@ -266,6 +280,7 @@ import { emit, on } from "./core/bus";
 {/if}
 <StagingLayer />
 <ChatPanel />
+<ChatAsks />
 
 <Canvas />
 <!-- The assistant bar floats over the bottom of the screen, which is fine over

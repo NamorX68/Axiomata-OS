@@ -1,7 +1,8 @@
 # Der Chat kennt Axiomata — Handbuch, Lage, Bedienen (Karte #78)
 
-Stand: 2026-10-29, **gegrillt** (Q1–Q10, Owner), Go zum Bau. Karte #78: „Der Chat muss Axiomata in und auswendig
-kennen.“
+Stand: 2026-10-29, **gebaut** auf Branch `chat` (CH1–CH5; die Handbuchtexte schreibt eine eigene Runde, im Branch
+stehen nur Platzhalter), nicht gemergt; offen: echte Texte, Test am Mac (Claude-Code-Regel `Bash(<cli> app:*)`, Glut-
+Werkzeuge, Rückfragen in der App). Karte #78: „Der Chat muss Axiomata in und auswendig kennen.“
 
 ## 1. Heute
 
@@ -79,6 +80,19 @@ kennen.“
   zwischen Seiten), `/help <Thema>`.
 - **CH5 Bedienen:** Shell-Aktionen für die Ansichten und die Darstellung (direkt), Skill/Routine/Karte mit
   Rückfrage in der App (wie Berechtigungsfragen), die „nie“-Liste in der CLI-Sperre.
+  - **Nachtrag Schließen** (Owner, 2026-10-29, im Geist von Q8: nichts darf verloren gehen): `open_views` listet,
+    was offen ist (Kanban- und Datei-Panels, Terminal-Kacheln, Second Brain, Handbuch, Einstellungen) mit Id, Titel,
+    Pfad und was das Schließen verlöre; `close_view` (`view` + `id`/`path`) schließt **direkt**, wenn nichts verloren
+    geht, und **fragt** sonst in der Leiste der Rückfragen und sagt genau was: ungespeicherter Text einer Datei
+    (`setLossProbe` neben dem Guard, `core/staging.ts`), ein getippter, nicht abgeschickter Kartentitel oder Verlaufs-
+    eintrag oder ein offenes Schritt-Formular im Kanban, ein Programm in einem Terminal (`terminal_foreground`: die
+    Vordergrund-Prozessgruppe des PTY ist nicht die Shell, oder ein Hintergrundjob hängt noch am Terminal — `ps -t`;
+    nicht prüfbar = fragen). `run` prüft erneut, wenn der Owner nicht gefragt wurde (kein Rennen zwischen Prüfen und
+    Schließen). Neue Marke `chat: "guarded"`
+    (`registry.ts`). Geschlossen wird immer über den eigenen Weg des Panels: `requestClose` mit seinem Guard (eine
+    Datei fragt nach dem Ja selbst nach Speichern/Verwerfen), das × der Kachel, das `close` des Fensters
+    (`core/openViews.ts`); ein Kanban-Feld bekommt vorher sein Blur und speichert. Einstellungen verlieren nichts
+    (die Komponente bleibt geladen). Das Studio, seine Panes und Agenten schließt der Chat nie.
 
 Prüfungen: der volle Gate vor jedem Commit; `security-auditor` für CH3 und CH5 (neue Freigaben für den Chat, Lesen
 von Einstellungen, Aktionen); ein kombinierter Review am Ende; Sicht im Browser-Mock.

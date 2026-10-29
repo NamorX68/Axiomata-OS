@@ -5,7 +5,8 @@
  *   their actions is (debounced) written to ~/.axiomata/module-context.md via
  *   `write_module_manifest`, which the agent gets as appended system prompt;
  * - every POLL_MS the inbox queue is drained via `poll_module_actions`, each
- *   request is dispatched to `invokeAction`, and the outcome goes back through
+ *   request is dispatched to `invokeAgentAction` (which asks the owner first or refuses what an action's `chat`
+ *   mark says), and the outcome goes back through
  *   `complete_module_action`.
  */
 
@@ -13,7 +14,7 @@ import { get } from "svelte/store";
 
 import { invokeBackend } from "./backend";
 import { noteToolCall } from "./chat";
-import { invokeAction, manifest, type ManifestEntry } from "./registry";
+import { invokeAgentAction, manifest, type ManifestEntry } from "./registry";
 import { instances } from "./stores";
 
 export const POLL_MS = 3000;
@@ -25,6 +26,8 @@ interface ActionRequest {
   action: string;
   params: unknown;
   created_at: string;
+  /** Who the request says it comes from (`chat`, `agent:<name>`, `terminal`); shown with a question, never trusted. */
+  origin?: string | null;
 }
 
 interface ActionResponse {
@@ -97,7 +100,9 @@ async function pollOnce(): Promise<void> {
     // Named before the action runs: an action that closes its own instance would leave only the raw id after it.
     const label = actionLabel(req);
     try {
-      response.result = (await invokeAction(req.instance_id, req.action, req.params ?? {})) ?? null;
+      // An agent's call: its action's `chat` mark decides whether it runs, asks the owner first or is refused (CH5).
+      const result = await invokeAgentAction(req.instance_id, req.action, req.params ?? {}, req.origin ?? null);
+      response.result = result ?? null;
       response.ok = true;
     } catch (err) {
       response.error = String(err);

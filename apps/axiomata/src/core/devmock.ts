@@ -1160,6 +1160,21 @@ const MOCK_UNCOMMITTED = new Set(["src/words.rs", "src/main.rs"]);
 /** The picture's change was discarded or taken over. */
 let mockImageSettled = false;
 
+/** Agent requests the bridge's next poll hands over (console: `__ax.mockActionRequest("shell", "open_view", {…})`). */
+const mockActionQueue: { id: string; instance_id: string; action: string; params: unknown; created_at: string }[] = [];
+let mockActionSeq = 0;
+
+/** Queues an agent's action request as `axiomata-cli module-action` would: the real bridge path takes it from there. */
+export function mockActionRequest(instance: string, action: string, params: unknown = {}): void {
+  mockActionQueue.push({
+    id: `mock-${++mockActionSeq}`,
+    instance_id: instance,
+    action,
+    params,
+    created_at: new Date().toISOString(),
+  });
+}
+
 /** Status overrides by agent id (console: `__ax.mockAgentState(1, "idle")`). */
 const mockStates = new Map<number, AgentState>();
 
@@ -1510,6 +1525,35 @@ function mockVersion(content: string): string {
   return `${new TextEncoder().encode(content).length}-${h.toString(16).padStart(16, "0")}`;
 }
 
+/** The handbook's pages in the browser mock: enough to see the panel, the spotlight group and a link between pages. */
+const MOCK_HANDBOOK: { name: string; title: string; summary: string; text: string }[] = [
+  {
+    name: "index",
+    title: "Überblick",
+    summary: "Was Axiomata ist und wie die Seiten dieses Handbuchs zusammenhängen.",
+    text:
+      "# Überblick\n\nWas Axiomata ist und wie die Seiten dieses Handbuchs zusammenhängen.\n\n" +
+      "## Die Bereiche\n\n- [Studio](studio.md) — Projekte und Agenten\n- [Kanban](kanban.md) — das Board\n" +
+      "- [Extern](https://example.com) — ein Link nach draußen\n",
+  },
+  {
+    name: "studio",
+    title: "Studio",
+    summary: "Das Studio mit Projekten, Agenten, Panes, Git, Run/Tasks und Debug.",
+    text:
+      "# Studio\n\nDas Studio mit Projekten, Agenten, Panes, Git, Run/Tasks und Debug.\n\n" +
+      "## Handgriffe\n\n1. Ein Projekt öffnen\n2. Einen Agenten starten\n\nZurück zum [Überblick](index.md).\n",
+  },
+  {
+    name: "kanban",
+    title: "Kanban",
+    summary: "Das Kanban-Board mit Spalten, Vorschlägen und Review.",
+    text:
+      "# Kanban\n\nDas Kanban-Board mit Spalten, Vorschlägen und Review.\n\n" +
+      "Siehe auch [Studio](./studio.md#handgriffe).\n",
+  },
+];
+
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   await delay();
   const tagAnswer = mockTagCommand(cmd, args);
@@ -1613,6 +1657,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "save_editor_vi_state":
       editorViJson = String(args.json);
       return undefined as T;
+    // No shell runs under the mock (`terminal_spawn` is not served), so nothing is ever in a terminal's foreground.
+    case "terminal_foreground":
+      return null as T;
     case "get_terminal_settings":
       return {
         json: terminalSettingsJson ?? '{"version":1}',
@@ -2673,6 +2720,14 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return "Undid the last turn (mock): no files were touched in the browser mock." as T;
     case "get_workspace_graph":
       return mockGraph() as T;
+    // The handbook (chat-knows-app CH4): a few pages with links between them; the real ones are the build's.
+    case "handbook_pages":
+      return MOCK_HANDBOOK.map(({ name, title, summary }) => ({ name, title, summary })) as T;
+    case "handbook_page": {
+      const page = MOCK_HANDBOOK.find((entry) => entry.name === args.name);
+      if (!page) throw new Error(`the handbook has no page "${String(args.name)}"`);
+      return { name: page.name, title: page.title, text: page.text } as T;
+    }
     // The vault's tag list (`TAGS.md`, tags-links V1) and the links that follow a renamed note (V3).
     case "get_tag_list":
       return [
@@ -2688,7 +2743,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "write_module_manifest":
       return true as T;
     case "poll_module_actions":
-      return [] as T;
+      return mockActionQueue.splice(0) as T;
     case "complete_module_action":
       return undefined as T;
     case "read_workspace_file": {

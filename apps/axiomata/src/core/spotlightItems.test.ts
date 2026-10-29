@@ -6,6 +6,7 @@ import {
   cardItems,
   commandItems,
   fileNameItems,
+  handbookItems,
   moduleItems,
   planItems,
   projectItems,
@@ -99,5 +100,13 @@ describe("spotlight items", () => {
     const rows = rankItems("#rust/async", { tag: tags, file: fileNameItems(files) });
     expect(rows.map((r) => `${r.group}:${r.item.id}`)).toEqual(["tag:rust/async", "file:Dev/a.md"]);
     expect(rankItems("#gamma", { file: fileNameItems(files) })).toHaveLength(0);
+  });
+});
+
+describe("handbookItems", () => {
+  it("offers each page by title and opens it in the Help panel", () => {
+    const [entry] = handbookItems([{ name: "studio", title: "Studio", summary: "Projekte und Agenten." }]);
+    expect(entry).toMatchObject({ kind: "handbook", id: "studio", title: "Studio", subtitle: "Projekte und Agenten." });
+    expect(entry.payload).toEqual({ type: "event", event: "shell:handbook", detail: { page: "studio" } });
   });
 });

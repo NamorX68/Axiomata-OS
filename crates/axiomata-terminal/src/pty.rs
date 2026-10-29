@@ -180,6 +180,51 @@ impl PtySession {
             .map_err(io::Error::other)
     }
 
+    /// The process id of the program running in the terminal's foreground, when that is not the shell itself — a
+    /// build, an editor, an agent; `Ok(None)` while the shell waits at its prompt.
+    ///
+    /// The terminal's foreground process group (`tcgetpgrp` on the PTY) is the shell's own while it reads a command
+    /// line; a shell with job control gives each command line a group of its own and hands it the foreground. That
+    /// is what tells "closing would end something" apart from "closing loses an idle prompt" (the chat closes only
+    /// the latter by itself, `docs/plans/chat-knows-app.md` CH5). Jobs sent to the background are not seen here —
+    /// see [`PtySession::tty_name`].
+    ///
+    /// # Errors
+    ///
+    /// When it cannot be told (no foreground group, the shell's id unknown, no Unix): the caller must not read that
+    /// as "nothing runs".
+    pub fn foreground_job(&self) -> io::Result<Option<u32>> {
+        let unknown =
+            |what: &str| io::Error::other(format!("cannot tell what runs in the terminal: {what}"));
+        #[cfg(unix)]
+        {
+            let leader = self
+                .master
+                .process_group_leader()
+                .and_then(|pid| u32::try_from(pid).ok())
+                .ok_or_else(|| unknown("no foreground process group"))?;
+            let shell = self
+                .shell_pid()
+                .ok_or_else(|| unknown("the shell's process id is unknown"))?;
+            Ok((leader != shell).then_some(leader))
+        }
+        #[cfg(not(unix))]
+        {
+            Err(unknown("not supported on this system"))
+        }
+    }
+
+    /// The shell's process id, while it runs.
+    pub fn shell_pid(&self) -> Option<u32> {
+        self.child.as_ref()?.process_id()
+    }
+
+    /// The terminal device the shell and everything it started hold (`/dev/ttys003`): every process on it ends when
+    /// the PTY closes (`SIGHUP`), background jobs included.
+    pub fn tty_name(&self) -> Option<std::path::PathBuf> {
+        self.master.tty_name()
+    }
+
     /// Returns a fresh handle for reading the shell's output.
     ///
     /// Separate from the struct's own I/O because `portable_pty`'s reader is
@@ -322,6 +367,46 @@ mod tests {
                 took < Duration::from_secs(2),
                 "dropping a session blocked for {took:?} — it must hand the \
                  child to the reaper thread rather than wait on the caller's"
+            );
+        });
+    }
+
+    /// A shell at its prompt has nothing in the foreground; a command it runs does, and once that has ended the
+    /// foreground is the shell's again.
+    #[test]
+    fn foreground_job_tells_a_running_program_from_an_idle_prompt() {
+        with_watchdog(|| {
+            let mut session = PtySession::spawn(24, 80, Some("/bin/sh"), None, &[])
+                .expect("failed to spawn pty session");
+            // The output is drained so the shell never blocks on a full PTY.
+            let mut reader = session.try_clone_reader().expect("failed to clone reader");
+            thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                while matches!(reader.read(&mut buf), Ok(n) if n > 0) {}
+            });
+            let settle = |want: bool, session: &PtySession| {
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let job = || {
+                    session
+                        .foreground_job()
+                        .expect("the foreground is known on Unix")
+                };
+                while job().is_some() != want && std::time::Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                job()
+            };
+            assert_eq!(settle(false, &session), None, "an idle prompt runs nothing");
+
+            session.write(b"sleep 1\n").expect("failed to write to pty");
+            assert!(
+                settle(true, &session).is_some(),
+                "the sleep holds the foreground"
+            );
+            assert_eq!(
+                settle(false, &session),
+                None,
+                "the prompt is back once it ended"
             );
         });
     }

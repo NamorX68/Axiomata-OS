@@ -78,7 +78,7 @@
     type DropTarget,
   } from "../core/kanban";
   import { listRoles } from "../core/roster";
-  import { closeStaged, staged } from "../core/staging";
+  import { closeStaged, setLossProbe, staged } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import { cardStripes, lastBoard, rememberLastBoard } from "./kanbanPrefs";
   import { boardPathPatch, KANBAN_SHOW_CARD } from "./kanbanApp";
@@ -686,6 +686,23 @@
     });
   }
   let note = $state("");
+
+  // What closing the panel would lose (the chat's `close_view`, CH5): a card field saves on blur, which the close
+  // gives it first; a typed new card title or history note is sent only by Enter, and an open step form only by its
+  // button, so those would be lost.
+  $effect(() => {
+    const id = ctx.instanceId;
+    setLossProbe(id, () => {
+      const lost = [
+        newTitle.trim() && `the new card title “${newTitle.trim()}” not yet added`,
+        note.trim() && `the history note “${note.trim()}” not yet written`,
+        // A step's form (start, plan, review, take over) holds what was chosen and typed in it until it is sent.
+        stepForm && `the open ${stepForm.step} form of card #${stepForm.card} with what was entered in it`,
+      ].filter(Boolean);
+      return lost.length ? lost.join(" and ") : null;
+    });
+    return () => setLossProbe(id, null);
+  });
   /** The form of a card step that is open — start, review or take-over (A2A CP-A6) — and the card it belongs to. */
   let stepForm = $state<{ card: number; step: "plan" | "start" | "review" | "take-over"; state: string } | null>(
     null,

@@ -9,6 +9,7 @@
 pub mod agent_entry;
 pub mod agent_mcp;
 pub mod agents;
+pub mod app_state;
 /// The Kanban board core, re-exported so callers reach it as
 /// `axiomata_core::board::…` without taking a direct dependency on the crate.
 /// It is a plain re-export, not a wrapper: the board owns its own types and
@@ -30,6 +31,7 @@ pub mod error;
 pub mod files;
 pub mod glut_card;
 pub mod graph;
+pub mod handbook;
 /// The agentic IDE's core, re-exported as `axiomata_core::ide::…` for the same
 /// reason as `board` above — a plain re-export, not a wrapper.
 pub use axiomata_ide as ide;

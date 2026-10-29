@@ -10,6 +10,8 @@ import {
   openNewNote,
   openStaged,
   readAnchor,
+  rememberedSize,
+  rememberingSize,
   requestClose,
   setCloseGuard,
   staged,
@@ -153,5 +155,30 @@ describe("the shell's openFile action (W2)", () => {
     expect(get(staged)).toMatchObject([{ type: "file", config: { path: "Mail/x.md", mode: "read" } }]);
     await expect(invokeAction("shell", "openFile", { path: " " })).rejects.toThrow(/needs a path/);
     await expect(invokeAction("shell", "nope", {})).rejects.toThrow(/no action/);
+  });
+});
+
+describe("remembered sizes", () => {
+  it("reads the size filed under a key, and nothing that is not one", () => {
+    const sizes = { kanban: { w: 900, h: 600 }, broken: { w: "wide", h: 3 } };
+    expect(rememberedSize(sizes, "kanban")).toEqual({ w: 900, h: 600 });
+    expect(rememberedSize(sizes, "broken")).toBeNull();
+    expect(rememberedSize(sizes, "missing")).toBeNull();
+    expect(rememberedSize(undefined, "kanban")).toBeNull();
+    expect(rememberedSize([{ w: 1, h: 1 }], "0")).toBeNull();
+  });
+
+  it("files a size under its key and keeps every other entry", () => {
+    const sizes = { kanban: { w: 900, h: 600 } };
+    expect(rememberingSize(sizes, "handbook", { w: 700, h: 500 })).toEqual({
+      kanban: { w: 900, h: 600 },
+      handbook: { w: 700, h: 500 },
+    });
+    expect(sizes).toEqual({ kanban: { w: 900, h: 600 } });
+  });
+
+  it("starts afresh from a setting that is not a map", () => {
+    expect(rememberingSize("nonsense", "handbook", { w: 700, h: 500 })).toEqual({ handbook: { w: 700, h: 500 } });
+    expect(rememberingSize(null, "handbook", { w: 700, h: 500 })).toEqual({ handbook: { w: 700, h: 500 } });
   });
 });

@@ -290,6 +290,12 @@ pub(crate) async fn chat(
     let mut harness =
         Harness::prepare(&home, &request.cwd, &rights, request.timeout, config).await?;
     harness.compact_for(config, ProviderRole::Chat, &endpoint.model);
+    // The handbook and the app's live state (chat-knows-app CH3): the sandbox hides `~/.axiomata` from the shell, and
+    // an undeclared chat turn starts no CLI command directly, so they come as tools of the app's own process.
+    // A declared turn (an instruct turn, a command file) keeps its declaration as its whole set.
+    if declared.is_empty() {
+        harness.tools.extend(super::app_tools::chat_tools(config));
+    }
     // Glut 2 (D): an approved plan goes on in the mode the chat has without the switch. Nobody answers `exit_plan`
     // in the app's chat, so there the model presents its plan and the owner flips the switch.
     harness.run_config.build_mode = chat_mode(&declared, request.auto_approve_tools);

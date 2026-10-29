@@ -25,6 +25,7 @@ use std::time::Duration;
 use crate::config::{Config, HarnessId, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 
+pub mod app_tools;
 pub mod axh;
 pub mod claude_auth;
 pub mod claude_code;
@@ -629,10 +630,11 @@ fn check_command(command: Option<&ChatCommand>) -> Result<(), AxiomataError> {
     }
 }
 
-/// One dashboard-assistant turn on the opencode backend, built from the
-/// config: cwd = workspace root (so opencode loads the workspace context), the
-/// skill timeout, and the module manifest (`paths::module_context_path()`)
-/// prepended to the message if present.
+/// One turn of the chat in the assistant bar, on the chat harness of the settings (`agents.chat_harness`: Claude Code
+/// or Glut), built from the config: cwd = the workspace root (whose `AGENTS.md` the harness is handed), the skill
+/// timeout, and `~/.axiomata/module-context.md` as instructions beside the system prompt when present — the app guide
+/// with the handbook's contents and the mounted modules' actions (`bridge::render_manifest`). Claude Code gets it with
+/// `--append-system-prompt-file`, Glut as the run's instructions; neither gets it inside the message.
 pub async fn chat(
     config: &Config,
     message: String,

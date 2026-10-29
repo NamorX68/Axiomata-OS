@@ -2,7 +2,8 @@
   The dock (`docs/plans/ui-ux-round.md` UX3, G5): one floating bar at the top centre in place of the old title block
   and its six unlabelled icons. The brand on the left (hexagon, name, the workspace), then the places to go — Studio,
   Kanban, Second Brain, a new note — with their names, today's heartbeat and spend (`Heartbeat.svelte`), the spotlight
-  as a magnifier (its key on hover), and the quiet tools at the end (add a module, the theme choice, the settings).
+  as a magnifier (its key on hover), and the quiet tools at the end (add a module, the theme choice, the handbook, the
+  settings).
 
   The Studio's hex mark glows while card sessions are at work (`core/studioActivity.ts`, the same signal as the Orbit's
   live pulse). Below ~1500 px of window width the names go and the icons stay, with the name and key as tooltip.
@@ -12,6 +13,7 @@
 
   import { type AppInfo, invokeBackend as invoke } from "../core/backend";
   import { emit } from "../core/bus";
+  import { openHandbook } from "../core/handbook";
   import { keyHints } from "../core/keyHints";
   import { platform } from "../core/keys";
   import { studioActivity, watchActivity } from "../core/studioActivity";
@@ -115,6 +117,7 @@
       <IconButton icon="palette" label="Theme" pressed={themeOpen} onclick={() => (themeOpen = !themeOpen)} />
       {#if themeOpen}<ThemePicker onClose={() => (themeOpen = false)} />{/if}
     </span>
+    <IconButton icon="circle-question-mark" label="Handbook" onclick={() => openHandbook()} />
     <IconButton icon="settings" label="Settings ({settingsKey})" onclick={() => emit("shell:settings")} />
     <HexCount
       count={$tagProposals.length}

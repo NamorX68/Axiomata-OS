@@ -23,6 +23,7 @@ import {
   type WorkspaceGraph,
 } from "./backend";
 import { emit } from "./bus";
+import { listHandbook } from "./handbook";
 import { createInstance, isPlacedSingleton } from "./lifecycle";
 import { listModules } from "./registry";
 import type { SpotlightSources } from "./spotlight";
@@ -30,6 +31,7 @@ import {
   cardItems,
   commandItems,
   fileNameItems,
+  handbookItems,
   moduleItems,
   planItems,
   projectItems,
@@ -59,12 +61,13 @@ async function orEmpty<T>(load: Promise<T[]>): Promise<T[]> {
 
 /** Loads every instant source. Called each time the spotlight opens, so a new card or skill is there at once. */
 export async function loadInstantSources(): Promise<SpotlightSources> {
-  const [skills, routines, boards, projects, graph] = await Promise.all([
+  const [skills, routines, boards, projects, graph, handbook] = await Promise.all([
     orEmpty(invokeBackend<Skill[]>("list_skills")),
     orEmpty(invokeBackend<Routine[]>("list_routines")),
     orEmpty(invokeBackend<Board[]>("list_boards")),
     orEmpty(listProjects()),
     invokeBackend<WorkspaceGraph>("get_workspace_graph").catch(() => null),
+    orEmpty(listHandbook()),
   ]);
   const perBoard = await Promise.all(
     boards.map(async (board) => ({
@@ -85,6 +88,7 @@ export async function loadInstantSources(): Promise<SpotlightSources> {
     ),
     plan: planItems(perBoard.flatMap((entry) => entry.plans)),
     project: projectItems(projects),
+    handbook: handbookItems(handbook),
     tag: tagItems(graph?.files ?? []),
     file: fileNameItems(graph?.files ?? []),
   };
