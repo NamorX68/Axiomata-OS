@@ -26,7 +26,7 @@
     it, and offers to update them; alias and `#Heading` stay as they are.
 -->
 <script lang="ts">
-  import { invokeBackend, type FileRootInfo, type NoteLinksRenamed } from "../core/backend";
+  import { invokeBackend, type FileRootInfo, type RenameCount } from "../core/backend";
   import { messageOf } from "../core/errors";
   import { toast } from "../core/toast";
   import { countTree, createFile, deleteTree, listDir, makeDir, renameEntry, type Listing } from "./backend";
@@ -65,7 +65,7 @@
   /** A name being typed in place. */
   type Edit =
     | { kind: "new-file" | "new-dir"; root: string; dir: string; value: string }
-    | { kind: "rename"; root: string; rel: string; value: string };
+    | { kind: "rename"; root: string; rel: string; value: string; folder: boolean };
   let editing = $state<Edit | null>(null);
   let problem = $state<string | null>(null);
   /** Delete asked about: the entry and how many go with it. */
@@ -247,10 +247,10 @@
     editing = { kind, root, dir, value: "" };
   }
 
-  function startRename(root: string, rel: string): void {
+  function startRename(root: string, rel: string, folder: boolean): void {
     menu = null;
     problem = null;
-    editing = { kind: "rename", root, rel, value: baseName(rel) };
+    editing = { kind: "rename", root, rel, value: baseName(rel), folder };
   }
 
   async function startDelete(root: string, rel: string, isDir: boolean): Promise<void> {
@@ -278,7 +278,8 @@
         const to = joinRel(parentOf(edit.rel), name);
         if (to !== edit.rel) {
           await renameEntry(edit.root, edit.rel, to);
-          void offerRelink(edit.root, edit.rel, to);
+          if (edit.folder) void sayFolderLinks(edit.root);
+          else void offerRelink(edit.root, edit.rel, to);
           expanded = expandedAfterRename(expanded, edit.root, edit.rel, to);
         }
         editing = null;
@@ -298,18 +299,26 @@
 
   /** Whether the wikilinks to a note renamed from `from` to `to` should follow it (V3) — asked only when there are any. */
   async function offerRelink(root: string, from: string, to: string): Promise<void> {
-    if (!/\.md$/i.test(from)) return;
+    // Only a note stays a note: `rename_note_links` refuses a path that is no Markdown (a note renamed to `.txt`).
+    if (!/\.md$/i.test(from) || !/\.md$/i.test(to)) return;
     const prefix = await vaultPrefix(root);
     if (prefix === null) return;
     invalidateNoteIndex();
     const oldRel = vaultRel(prefix, from);
     const newRel = vaultRel(prefix, to);
     try {
-      const found = await invokeBackend<NoteLinksRenamed>("rename_note_links", { oldRel, newRel, dryRun: true });
+      const found = await invokeBackend<RenameCount>("rename_note_links", { oldRel, newRel, dryRun: true });
       if (found.links > 0) relinking = { root, from, to, oldRel, newRel, ...found };
     } catch (err) {
       onError(`The links to ${baseName(from)} were not checked: ${messageOf(err)}`);
     }
+  }
+
+  /** A renamed folder of the vault: its notes' links are not followed (`rename_note_links` takes one note) — say so. */
+  async function sayFolderLinks(root: string): Promise<void> {
+    if ((await vaultPrefix(root)) === null) return;
+    invalidateNoteIndex();
+    toast("Links into the renamed folder by path were not updated — links by note name still work", "info");
   }
 
   async function commitRelink(): Promise<void> {
@@ -317,7 +326,7 @@
     if (!r) return;
     relinking = null;
     try {
-      const done = await invokeBackend<NoteLinksRenamed>("rename_note_links", {
+      const done = await invokeBackend<RenameCount>("rename_note_links", {
         oldRel: r.oldRel,
         newRel: r.newRel,
         dryRun: false,
@@ -524,7 +533,7 @@
       <button type="button" role="menuitem" onclick={() => startNew("new-dir", m.root, m.rel)}>New folder</button>
     {/if}
     {#if m.kind !== "root"}
-      <button type="button" role="menuitem" onclick={() => startRename(m.root, m.rel)}>Rename</button>
+      <button type="button" role="menuitem" onclick={() => startRename(m.root, m.rel, m.kind === "dir")}>Rename</button>
       <button type="button" role="menuitem" class="danger" onclick={() => void startDelete(m.root, m.rel, m.kind === "dir")}
         >Delete…</button
       >

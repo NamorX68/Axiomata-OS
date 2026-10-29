@@ -888,12 +888,12 @@
     return index ? index.resolve(from, target) !== null : null;
   }
 
-  /** The surface's colours: in a Markdown note its links and tags over the grammar's (dangling ones only in the vault). */
+  /** The surface's colours: in a note of the vault its links and tags over the grammar's. */
   const shownHighlighter = $derived.by(() => {
     const s = session;
-    if (!s || previewKind !== "markdown" || s.light) return highlighter;
     const from = linkFrom;
-    return withNoteMarks(highlighter, s.doc, (m) => (from === null ? null : linkExists(from, m.target)));
+    if (!s || from === null || s.light) return highlighter;
+    return withNoteMarks(highlighter, s.doc, (m) => linkExists(from, m.target));
   });
 
   /** The reading view's links, for a vault note; a new object once the vault is known, so it renders again. */
@@ -935,7 +935,8 @@
    */
   function followMarkAt(at: { line: number; col: number }): boolean {
     const s = session;
-    if (!s || previewKind !== "markdown") return false;
+    // Outside the vault (a code project's README) a `#word` or `[[x]]` is no note's: the language server answers.
+    if (!s || linkFrom === null) return false;
     const mark: NoteMark | null = noteMarkAt(s.doc, at);
     if (!mark) return false;
     if (mark.kind === "tag") showTag(mark.tag);
@@ -957,16 +958,23 @@
     const s = session;
     const from = linkFrom;
     if (!s) return;
+    // Where the jump starts, before anything is awaited: the cursor may move meanwhile.
+    const here = placeOf(s);
     if (from === null) return void toast("Wikilinks lead to notes of the workspace", "info");
     if (!target) {
       const line = heading ? headingLine(s.doc.store.text(), heading) : null;
       if (line === null) return void toast(`No heading “${heading ?? ""}” in this note`, "info");
-      if (!s.untitled) jumpHistory.record(placeOf(s));
+      if (!s.untitled) jumpHistory.record(here);
       surface?.goTo({ line, col: 0 });
       if (viewMode !== "source") preview?.scrollToLine(line);
       return;
     }
-    const index = await loadNoteIndex();
+    let index = await loadNoteIndex();
+    // A read that failed a while ago is not trusted for a click: the owner asks now, so ask the vault again.
+    if (!index) {
+      invalidateNoteIndex();
+      index = await loadNoteIndex();
+    }
     if (session !== s) return;
     if (!index) return void toast("The vault's notes could not be read", "danger");
     const rel = index.resolve(from, target);
@@ -976,7 +984,7 @@
         const names = several.map((p) => p.replace(/\.md$/i, "")).join(", ");
         return void toast(`“${target}” fits several notes — name its folder: ${names}`, "info");
       }
-      return void createLinkedNote(s, from, target);
+      return void createLinkedNote(s, from, target, here);
     }
     const file = vaultFile(rel);
     let line: number | null = null;
@@ -988,7 +996,7 @@
       }
       if (session !== s) return;
     }
-    if (!s.untitled) jumpHistory.record(placeOf(s));
+    if (!s.untitled) jumpHistory.record(here);
     if (file.root === s.root && file.rel === s.rel) {
       surface?.goTo({ line: line ?? 0, col: 0 });
       if (viewMode !== "source" && line !== null) preview?.scrollToLine(line);
@@ -998,7 +1006,7 @@
   }
 
   /** A link into nothing (Q3): its note, created beside `from` with the target as its title, then opened. */
-  async function createLinkedNote(s: FileSession, from: string, target: string): Promise<void> {
+  async function createLinkedNote(s: FileSession, from: string, target: string, here: JumpPlace): Promise<void> {
     if (s.untitled) return void toast("File this note first (⌘S) — a linked note is created beside it", "info");
     const path = newNotePath(from, target);
     if (!path) return void toast(`“${target}” is no usable file name`, "info");
@@ -1013,7 +1021,7 @@
     invalidateNoteIndex();
     void loadNoteIndex();
     if (session !== s) return;
-    jumpHistory.record(placeOf(s));
+    jumpHistory.record(here);
     toast(`Created ${path}`, "info");
     // Below the title, ready to write — in the source, since a new note has nothing to read yet.
     goToFile(file, 2, "edit");
@@ -1352,7 +1360,7 @@
    * ⌘+ ⌘- ⌘0 resize the text of the floating window, and only there.
    */
   function onKeydownCapture(e: KeyboardEvent): void {
-    // ⌃- / ⌃⇧- (Alt+← / Alt+→ off the Mac): the app-wide jump history (TL2), from the source and the reading view.
+    // ⌃- / ⌃⇧- (Ctrl+Alt+← / → off the Mac): the app-wide jump history (TL2), from the source and the reading view.
     const walk = jumpKey(e, $platform);
     if (walk && (session || image)) {
       e.preventDefault();

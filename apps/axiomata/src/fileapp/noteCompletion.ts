@@ -8,7 +8,7 @@
 import type { TagEntry } from "../core/backend";
 import type { EditorDocument } from "../editor/document";
 import type { CompletionAnswer, CompletionItem } from "../editor/lsp/completion";
-import type { Pos } from "../editor/position";
+import { pos, type Pos } from "../editor/position";
 import type { CompletionPort, CompletionSpan } from "./completionMenu";
 import { codeLines, codeSpans, fileStem, type NoteIndex } from "./noteLinks";
 
@@ -44,7 +44,8 @@ export function noteSpanAt(line: string, col: number): (CompletionSpan & { kind:
     return { kind: "link", start: open + 2, char: LINK_CHAR };
   }
   const tag = TAG_BEFORE.exec(before);
-  if (tag) {
+  // `#` alone at the line start is how a heading begins: a menu there would take ⏎ for a tag.
+  if (tag && !/^\s*#+$/.test(before)) {
     const hash = col - tag[1].length - 1;
     if (!inCode(hash)) return { kind: "tag", start: hash + 1, char: TAG_CHAR };
   }
@@ -140,12 +141,13 @@ export function noteCompletion(
       }
       const index = await sources.notes();
       if (!index) return empty;
+      // A link already closed after the cursor: the item replaces up to and with its `]]`, so the cursor lands
+      // after the link. The range is the cursor's of this ask — asked again on every key, it never goes stale.
       const closed = doc.store.line(at.line).slice(at.col).startsWith("]]");
       const items = noteItems(index, rel);
-      return {
-        items: closed ? items.map((i) => ({ ...i, insertText: i.insertText.slice(0, -2) })) : items,
-        incomplete: false,
-      };
+      if (!closed) return { items, incomplete: false };
+      const range = { start: pos(at.line, found.start), end: pos(at.line, at.col + 2) };
+      return { items: items.map((i) => ({ ...i, range })), incomplete: true };
     },
     resolve: (i) => (i.raw === OURS || !server ? Promise.resolve(i) : server.resolve(i)),
     triggers: () => server?.triggers() ?? [],

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { keyAction } from "../editor/keymap";
+import { editorKeyInput } from "./editorKeys";
 import { JumpHistory, jumpKey, MAX_JUMPS, type JumpPlace } from "./jumpHistory";
 
 const at = (rel: string, line = 0): JumpPlace => ({ root: "workspace", rel, line, col: 0 });
@@ -57,10 +59,20 @@ describe("jumpKey", () => {
     expect(jumpKey(key("-"), "mac")).toBeNull();
   });
 
-  it("is Alt+← / Alt+→ elsewhere, where Ctrl+- zooms", () => {
-    expect(jumpKey(key("ArrowLeft", { altKey: true }), "other")).toBe("back");
-    expect(jumpKey(key("ArrowRight", { altKey: true }), "other")).toBe("forward");
+  it("is Ctrl+Alt+← / → elsewhere, where Ctrl+- zooms and Alt+← moves by a word", () => {
+    expect(jumpKey(key("ArrowLeft", { altKey: true, ctrlKey: true }), "other")).toBe("back");
+    expect(jumpKey(key("ArrowRight", { altKey: true, ctrlKey: true }), "other")).toBe("forward");
     expect(jumpKey(key("-", { ctrlKey: true }), "other")).toBeNull();
-    expect(jumpKey(key("ArrowLeft", { altKey: true, shiftKey: true }), "other")).toBeNull();
+    expect(jumpKey(key("ArrowLeft", { altKey: true }), "other")).toBeNull();
+  });
+
+  it("takes no key the editor itself answers to off the Mac", () => {
+    for (const [k, mods] of [
+      ["ArrowLeft", { altKey: true, ctrlKey: true }],
+      ["ArrowRight", { altKey: true, ctrlKey: true }],
+    ] as const) {
+      const input = editorKeyInput(key(k, mods), "other", false);
+      expect(keyAction(input)).toBeNull();
+    }
   });
 });

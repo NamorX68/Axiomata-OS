@@ -38,8 +38,11 @@ let watching = false;
 function watch(): void {
   if (watching) return;
   watching = true;
-  // Any root may be the vault (a project opened on its folder); marking it stale costs nothing until the next ask.
-  const forget = (_root: string) => invalidateNoteIndex();
+  // Only a root that lies in the vault: a build or an agent's worktree making files elsewhere must not rescan it.
+  const forget = (root: string) => {
+    if (root === "workspace") return invalidateNoteIndex();
+    void vaultPrefix(root).then((prefix) => prefix !== null && invalidateNoteIndex());
+  };
   void listenBackend<FileChange>("files:changed", (c) => {
     // Only a note that came or went changes the links; a saved note's new tags wait for the age limit, since
     // autosave would otherwise rescan the vault every second while typing.
@@ -55,16 +58,20 @@ export function invalidateNoteIndex(): void {
   tagList = null;
 }
 
+/** The least time between two reads a draw starts — a burst of file events rescans the vault once. */
+export const MIN_RESCAN_MS = 3_000;
+
 /** What is loaded now, for drawing; starts a fresh read in the background when it is old. */
 export function peekNoteIndex(): NoteIndex | null {
-  if (stale || Date.now() - readAt > MAX_AGE_MS) void loadNoteIndex();
+  const age = Date.now() - readAt;
+  if ((stale || age > MAX_AGE_MS) && age > MIN_RESCAN_MS) void loadNoteIndex();
   return index;
 }
 
 /** The vault's notes, read when what is loaded is old; `null` when the scan fails (no workspace). */
 export function loadNoteIndex(): Promise<NoteIndex | null> {
   watch();
-  if (!stale && index && Date.now() - readAt <= MAX_AGE_MS) return Promise.resolve(index);
+  if (!stale && Date.now() - readAt <= MAX_AGE_MS) return Promise.resolve(index);
   if (loading) return loading;
   stale = false;
   loading = invokeBackend<WorkspaceGraph>("get_workspace_graph")
@@ -75,7 +82,9 @@ export function loadNoteIndex(): Promise<NoteIndex | null> {
       return index;
     })
     .catch(() => {
-      stale = true;
+      // No vault to read (or the scan failed): tried again after the age limit or the next file event, not on
+      // every frame that draws a link.
+      readAt = Date.now();
       return index;
     })
     .finally(() => {
@@ -117,11 +126,14 @@ export function prefixIn(workspacePath: string, rootPath: string): string | null
 /** Where the root `root` lies in the vault (see {@link prefixIn}); `"workspace"` is the vault itself. */
 export async function vaultPrefix(root: string): Promise<string | null> {
   if (root === "workspace") return "";
-  roots ??= listRoots().catch(() => {
-    roots = null;
-    return [];
-  });
-  const all = await roots;
+  const list = () =>
+    (roots = listRoots().catch(() => {
+      roots = null;
+      return [];
+    }));
+  let all = await (roots ?? list());
+  // A project or folder added since the roots were listed: list them again once.
+  if (!all.some((r) => r.id === root)) all = await list();
   const workspace = all.find((r) => r.kind === "workspace");
   const here = all.find((r) => r.id === root);
   // A worktree or a granted file is a copy or a single file — never where the vault's notes live.

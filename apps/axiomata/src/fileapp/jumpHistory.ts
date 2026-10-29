@@ -61,7 +61,10 @@ export class JumpHistory {
 /** The one history of the app. */
 export const jumpHistory = new JumpHistory();
 
-/** The keys that walk the history: ⌃- / ⌃⇧- on the Mac, Alt+← / Alt+→ elsewhere (Ctrl+- is zoom there). */
+/**
+ * The keys that walk the history: ⌃- / ⌃⇧- on the Mac; elsewhere Ctrl+Alt+← / Ctrl+Alt+→ — Ctrl+- zooms there, Alt+←/→
+ * moves by words, and Ctrl+Alt+←/→ is the one pair the editor leaves free (`editorKeys.ts`).
+ */
 export function jumpKey(
   e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
   on: Platform,
@@ -73,7 +76,7 @@ export function jumpKey(
     if ((e.key === "_" || e.key === "-") && e.shiftKey) return "forward";
     return null;
   }
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  if (!e.altKey || !e.ctrlKey || e.metaKey || e.shiftKey) return null;
   if (e.key === "ArrowLeft") return "back";
   if (e.key === "ArrowRight") return "forward";
   return null;

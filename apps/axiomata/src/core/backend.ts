@@ -839,8 +839,8 @@ export interface TagEntry {
   description: string;
 }
 
-/** What `rename_note_links` changed — or, as a dry run, would change (V3). */
-export interface NoteLinksRenamed {
+/** What a rename changed or would change (`rename_note_links`, V3): notes, and links in them. */
+export interface RenameCount {
   files: number;
   links: number;
 }

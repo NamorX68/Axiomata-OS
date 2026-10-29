@@ -67,3 +67,16 @@ describe("the shared note index", () => {
     expect(await loadTagList()).toEqual([{ tag: "rust", description: "Rust" }]);
   });
 });
+
+describe("a vault that cannot be read", () => {
+  it("is not asked again on every draw", async () => {
+    const { invokeBackend } = await import("../core/backend");
+    const mocked = vi.mocked(invokeBackend);
+    mocked.mockRejectedValueOnce(new Error("no workspace"));
+    expect(await loadNoteIndex()).toBeNull();
+    const calls = mocked.mock.calls.length;
+    peekNoteIndex();
+    peekNoteIndex();
+    expect(mocked.mock.calls.length).toBe(calls);
+  });
+});

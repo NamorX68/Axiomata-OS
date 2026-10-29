@@ -139,7 +139,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
     items: [
       { keys: "⌘-click", what: "Follow a [[wikilink]] (into nothing: create the note beside this one), or show a #tag" },
       { keys: "Click", what: "In the reading view: follow a wikilink or show a tag" },
-      { keys: "⌃- / ⌃⇧-", what: "Back / forward along the jumps across files", other: "Alt+← / Alt+→" },
+      { keys: "⌃- / ⌃⇧-", what: "Back / forward along the jumps across files", other: "Ctrl+Alt+← / Ctrl+Alt+→" },
       { keys: "[[ / #", what: "Complete a note name / a tag" },
     ],
   },

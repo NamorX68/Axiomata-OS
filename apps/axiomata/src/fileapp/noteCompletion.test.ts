@@ -56,7 +56,8 @@ describe("noteSpanAt", () => {
     expect(noteSpanAt("see [[Mod", 9)).toMatchObject({ kind: "link", start: 6 });
     expect(noteSpanAt("see [[", 6)).toMatchObject({ kind: "link", start: 6 });
     expect(noteSpanAt("tag #ru", 7)).toMatchObject({ kind: "tag", start: 5 });
-    expect(noteSpanAt("#", 1)).toMatchObject({ kind: "tag", start: 1 });
+    expect(noteSpanAt("x #", 3)).toMatchObject({ kind: "tag", start: 3 });
+    expect(noteSpanAt("#ab", 3)).toMatchObject({ kind: "tag", start: 1 });
   });
 
   it("finds none past the link's end, mid-word, or in inline code", () => {
@@ -65,6 +66,8 @@ describe("noteSpanAt", () => {
     expect(noteSpanAt("C#", 2)).toBeNull();
     expect(noteSpanAt("`[[x", 4)).toBeNull();
     expect(noteSpanAt("## ", 3)).toBeNull();
+    expect(noteSpanAt("#", 1)).toBeNull();
+    expect(noteSpanAt("  ##", 4)).toBeNull();
   });
 });
 
@@ -103,11 +106,11 @@ describe("note completion through the menu (Q4)", () => {
     expect(words).not.toHaveBeenCalled();
   });
 
-  it("does not close the link twice when ]] is already there", async () => {
+  it("does not close the link twice when ]] is already there, and lands after it", async () => {
     const { d, menu } = setup("[[]]", pos(0, 2));
-    type(d, "m", menu);
+    type(d, "mo", menu);
     await settle();
-    expect(await menu.take(d)).toMatchObject({ text: "Modelle", before: 1, after: 0 });
+    expect(await menu.take(d)).toMatchObject({ text: "Modelle]]", before: 2, after: 2 });
   });
 
   it("closes once the link is closed", async () => {
