@@ -573,6 +573,8 @@ fn render(event: &Event) -> Option<String> {
         } => format!(
             "⇣ conversation compacted · {before_tokens} → {after_tokens} tokens · {replaced} messages summarised"
         ),
+        // Glut T63: near the threshold the summary is made beside the run.
+        Event::Preparing { turn } => format!("⇣ summary prepared beside step {turn}"),
         // Glut TUI3b (T10): a message the owner sent while the run worked, taken in before this step.
         Event::Steered { text, .. } => format!("› {}", plain(text)),
         // Glut's own word to the model (T73): why the run went on.
