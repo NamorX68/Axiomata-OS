@@ -16,8 +16,8 @@ import type {
 } from "./backend";
 
 let list: TagEntry[] = [
-  { tag: "ki-modelle", description: "AI models and their releases, collected by the model-news skill" },
-  { tag: "ki-news", description: "AI news, collected by the news skills" },
+  { tag: "ai/models", description: "Neue KI-Modelle und ihre Veröffentlichungen, gesammelt vom Skill model-news" },
+  { tag: "ai/news", description: "KI-Nachrichten, gesammelt von den News-Skills (RSS und Web)" },
   { tag: "rust", description: "Rust, the language and its tools" },
   { tag: "rust/async", description: "Async Rust: tokio, futures" },
   { tag: "fotografie", description: "Photography: gear, technique, trips" },
@@ -46,8 +46,8 @@ let proposals: TagProposal[] = [
 const GRAPH_TAGS: readonly string[][] = [
   ["rust"],
   ["rust", "rust/async"],
-  ["ki-news"],
-  ["ki-modelle", "ki-news"],
+  ["ai/news"],
+  ["ai/models", "ai/news"],
   ["fotografie"],
   [],
   [],
@@ -153,7 +153,7 @@ export function mockTagCommand(cmd: string, args: Record<string, unknown>): { va
             related: ["Entwicklung Notiz 4"],
             proposed: [],
           },
-          { note: "KI/KI Notiz 2.md", tags: ["ki-news"], related: [], proposed: ["ki/agenten"] },
+          { note: "KI/KI Notiz 2.md", tags: ["ai/news"], related: [], proposed: ["ki/agenten"] },
           { note: "Persönlich/Persönlich Notiz 1.md", tags: [], related: [], proposed: [] },
         ];
       } else {

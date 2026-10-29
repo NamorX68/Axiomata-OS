@@ -10,11 +10,13 @@
 
   A vault note's wikilinks and tags are links (`docs/plans/tags-links.md`,
   TL2) when `notes` is given: a click on one is handed to the owner, nothing
-  navigates by itself.
+  navigates by itself. Its frontmatter is not drawn, so its `tags:` show as
+  chips at the top (concept note Q6, 2026-10-29); a chip is a tag's click too.
 -->
 <script lang="ts">
   import { KEEP_SCROLL } from "./keepScroll";
   import { invokeBackend } from "../core/backend";
+  import { frontmatterTags } from "../core/frontmatterTags";
   import { NOTE_HREF, renderMarkdownBlocks, TAG_HREF, type NoteLinkRendering } from "../core/markdown";
   import { resolveMarkdownImagesWith } from "../core/markdownImages";
 
@@ -39,6 +41,8 @@
   const RENDER_DELAY_MS = 150;
 
   let html = $state("");
+  /** The frontmatter's tags, for a vault note only: elsewhere a `tags:` key is no tag of the vault. */
+  const chips = $derived(notes ? frontmatterTags(text) : []);
   let scroller: HTMLDivElement;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
@@ -124,6 +128,18 @@
   onscroll={onScroll}
   onclick={onClick}
 >
+  {#if chips.length > 0}
+    <div class="front-tags" role="group" aria-label="Tags">
+      {#each chips as tag (tag)}
+        <button
+          type="button"
+          class="chip"
+          title="Show the notes tagged #{tag} in the Second Brain"
+          onclick={() => onTag?.(tag)}>#{tag}</button
+        >
+      {/each}
+    </div>
+  {/if}
   {@html html}
 </div>
 
@@ -144,6 +160,30 @@
 
   .preview:focus {
     outline: none;
+  }
+
+  /* The frontmatter's tags: plain chips as in the Second Brain's detail panel — no accent, a tag is not alive. */
+  .front-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-1);
+    margin-bottom: var(--ax-space-3);
+  }
+  .chip {
+    padding: calc(1px * var(--ax-ui-scale)) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-2);
+    color: var(--ax-text-muted);
+    font: inherit;
+    font-size: var(--ax-font-size-xs);
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .chip:hover,
+  .chip:focus-visible {
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
   }
 
   /* A note's wikilinks (a dangling one faded) and tags (TL2): the editor's colours, no accent. */

@@ -181,7 +181,7 @@ const files = new Map<string, string>([
   ["README.md", "# Axiomata-Workspace\n\nSecond-brain root.\n"],
   [
     "notes/links.md",
-    "---\ntags: [rust]\n---\n# Links\n\nSee [[inbox]], the [[ToDo#Done|done list]] and [[GLOSSARY]].\n\nA note that is not there yet: [[Neue Idee]].\n\nTagged #rust/async and #ki-news, not #1 or `#code` or `[[code]]`.\n\n```md\n[[not a link]] #not-a-tag\n```\n",
+    "---\ntags: [rust, ai/news]\n---\n# Links\n\nSee [[inbox]], the [[ToDo#Done|done list]] and [[GLOSSARY]].\n\nA note that is not there yet: [[Neue Idee]].\n\nTagged #rust/async and #ai/news, not #1 or `#code` or `[[code]]`.\n\n```md\n[[not a link]] #not-a-tag\n```\n",
   ],
   [
     "ToDo.md",
@@ -971,7 +971,7 @@ function mockGraph(): WorkspaceGraph {
     const title = /^#\s+(.+)/m.exec(text)?.[1] ?? path;
     files.push({ path, area, title, bytes: text.length, modified: null, is_markdown: path.endsWith(".md"), tags });
   }
-  for (const [i, f] of files.entries()) if (!f.tags) f.tags = i % 7 === 0 ? ["ki-news"] : i % 5 === 0 ? ["rust"] : [];
+  for (const [i, f] of files.entries()) if (!f.tags) f.tags = i % 7 === 0 ? ["ai/news"] : i % 5 === 0 ? ["rust"] : [];
   for (let i = 0; i < 70; i++) {
     const a = files[Math.floor(rnd() * files.length)];
     const b = files[Math.floor(rnd() * files.length)];
@@ -2676,8 +2676,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     // The vault's tag list (`TAGS.md`, tags-links V1) and the links that follow a renamed note (V3).
     case "get_tag_list":
       return [
-        { tag: "ki-news", description: "News about AI, from the news skills" },
-        { tag: "ki-modelle", description: "AI models and their releases" },
+        { tag: "ai/news", description: "KI-Nachrichten, gesammelt von den News-Skills (RSS und Web)" },
+        { tag: "ai/models", description: "Neue KI-Modelle und ihre Veröffentlichungen, gesammelt vom Skill model-news" },
         { tag: "rust", description: "The Rust language" },
         { tag: "rust/async", description: "Async Rust: tokio, futures" },
       ] as T;
