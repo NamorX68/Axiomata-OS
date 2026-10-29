@@ -1,8 +1,7 @@
 # Der Chat kennt Axiomata — Handbuch, Lage, Bedienen (Karte #78)
 
-Stand: 2026-10-29, **gebaut** auf Branch `chat` (CH1–CH5; die Handbuchtexte schreibt eine eigene Runde, im Branch
-stehen nur Platzhalter), nicht gemergt; offen: echte Texte, Test am Mac (Claude-Code-Regel `Bash(<cli> app:*)`, Glut-
-Werkzeuge, Rückfragen in der App). Karte #78: „Der Chat muss Axiomata in und auswendig kennen.“
+Stand: 2026-10-29, CH1–CH5 **gebaut, am Mac abgenommen und gemergt**; dazu verschiebbare, größenveränderliche Fenster
+(das Handbuch) und `close_view` — der Chat schließt große Fenster (Grundlage für Sprache, #104). Karte #78: „Der Chat muss Axiomata in und auswendig kennen.“
 
 ## 1. Heute
 
