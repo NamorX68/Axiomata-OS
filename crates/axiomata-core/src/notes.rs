@@ -194,6 +194,7 @@ pub fn note_names(config: &crate::config::Config, content: &str) -> Vec<String> 
     let wanted = words(content);
     let mut scored: Vec<(usize, String)> = vault
         .notes()
+        .filter(|rel| !crate::tags::is_protected(rel))
         .map(|rel| vault.link_name(rel))
         .filter(|name| crate::tags::note::link_safe(name) && name.chars().count() <= MAX_NAME_CHARS)
         .map(|name| (words(&name).intersection(&wanted).count(), name))

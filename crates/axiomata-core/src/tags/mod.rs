@@ -41,6 +41,13 @@ const PROTECTED_FILES: [&str; 6] = [
     TAGS_FILE,
 ];
 
+/// Whether `rel` names one of the [`PROTECTED_FILES`] (by its file name, without case): such a file is no topic, so it
+/// is never an agent's related note either — the tag list was offered as one (owner, 2026-10-29).
+pub fn is_protected(rel: &str) -> bool {
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    PROTECTED_FILES.iter().any(|known| same_name(known, name))
+}
+
 /// Top-level folders whose files the app rewrites from its own data (`Kanban/`, the board mirror): a tag written
 /// there would be gone at the next change.
 const APP_FOLDERS: [&str; 1] = ["Kanban"];

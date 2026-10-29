@@ -408,6 +408,13 @@ fn related_names(
             ));
             continue;
         };
+        if super::is_protected(&path) {
+            outcome.refused.push(format!(
+                "{} is kept by the app, not a related note",
+                shown(target)
+            ));
+            continue;
+        }
         let lower = path.to_lowercase();
         if lower == note.to_lowercase() || linked.contains(&lower) || !seen.insert(lower) {
             continue;

@@ -468,6 +468,26 @@ mod tests {
     }
 
     #[test]
+    fn the_tag_list_and_the_routers_are_never_a_related_note() {
+        let (root, config, db) = fixture();
+        fs::write(root.join("AGENTS.md"), "# Router\n").unwrap();
+        let request = TagRequest {
+            note: "A/one.md".into(),
+            related: vec!["TAGS".into(), "AGENTS".into(), "two".into()],
+            dry_run: true,
+            ..TagRequest::default()
+        };
+        let outcome = note::tag_note(&config, &db, "t", &request).unwrap();
+        assert_eq!(outcome.related, vec!["two"]);
+        assert_eq!(outcome.refused.len(), 2, "{:?}", outcome.refused);
+        let names = crate::notes::note_names(&config, "tags agents two");
+        assert!(
+            names.iter().all(|n| n != "TAGS" && n != "AGENTS"),
+            "{names:?}"
+        );
+    }
+
+    #[test]
     fn a_dry_run_records_only_in_the_notes_step_and_apply_writes_the_plan() {
         let (root, config, db) = fixture();
         let dry = TagRequest {
