@@ -1,6 +1,19 @@
+<!--
+  The Skills Deck's flip side: the deck's filter and order, and "Bundled skills" — every skill that ships with the
+  app, its installed copy's state, and the update that brings it to the bundled version (`skills::bundled`). The seed
+  never overwrites, so this is where a newer bundled skill reaches an install; a copy that may hold the owner's edits
+  is only replaced after the question under its row.
+-->
 <script lang="ts">
+  import { onMount, tick } from "svelte";
+
+  import type { BundledSkill } from "../core/backend";
   import { BACKEND_CHOICES } from "../core/harness";
   import type { ModuleContext } from "../core/types";
+  import Notice from "../ui/Notice.svelte";
+  import SectionHead from "../ui/SectionHead.svelte";
+  import StatusMark from "../ui/StatusMark.svelte";
+  import { bundledFocus, bundledSkills, isOwners, stateLabel, stateTone, updatableCount } from "./bundledSkills";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -11,6 +24,45 @@
     config.update((c) => ({ ...c, [key]: value }));
   }
   const value = (e: Event) => (e.currentTarget as HTMLSelectElement).value;
+
+  let section = $state<HTMLElement | null>(null);
+  let busy = $state(false);
+  let error = $state("");
+  /** The skill whose replacement waits for the owner's answer. */
+  let asking = $state<string | null>(null);
+  const updatable = $derived($bundledSkills ? updatableCount($bundledSkills) : 0);
+
+  async function call(cmd: string, args?: Record<string, unknown>) {
+    busy = true;
+    try {
+      bundledSkills.set(await ctx.invoke<BundledSkill[]>(cmd, args));
+      error = "";
+    } catch (err) {
+      error = String(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function update(skill: BundledSkill) {
+    if (isOwners(skill.state)) {
+      asking = skill.name;
+      return;
+    }
+    void call("bundled_skill_update", { name: skill.name, replaceOwnEdit: false });
+  }
+
+  function replace(name: string) {
+    asking = null;
+    void call("bundled_skill_update", { name, replaceOwnEdit: true });
+  }
+
+  onMount(() => void call("bundled_skills_status"));
+
+  // The front's notice asks for this section: scroll it into view on every ask, the first one included.
+  $effect(() => {
+    if ($bundledFocus > 0 && section) void tick().then(() => section?.scrollIntoView({ block: "start" }));
+  });
 </script>
 
 <div class="settings">
@@ -28,6 +80,56 @@
       <option value="recent">recently run first</option>
     </select>
   </label>
+
+  <section class="bundled" bind:this={section} aria-label="Bundled skills">
+    <SectionHead label="Bundled skills" rule>
+      {#snippet actions()}
+        <button
+          type="button"
+          class="ax-btn"
+          disabled={busy || updatable === 0}
+          title="Updates every outdated or missing bundled skill; never a copy you changed"
+          onclick={() => void call("bundled_skills_update_outdated")}>Update all outdated</button
+        >
+      {/snippet}
+    </SectionHead>
+    {#if error}<p class="error">{error}</p>{/if}
+    {#if $bundledSkills === null}
+      <p class="muted">Reading the bundled skills…</p>
+    {:else}
+      <ul>
+        {#each $bundledSkills as skill (skill.name)}
+          <li>
+            <span class="row">
+              <span class="name">/{skill.name}</span>
+              <span class="state">
+                <StatusMark tone={stateTone(skill.state)} />
+                {stateLabel(skill.state)}
+              </span>
+              <button
+                type="button"
+                class="ax-btn"
+                disabled={busy || skill.state === "up_to_date"}
+                aria-label="Update {skill.name}"
+                onclick={() => update(skill)}>Update</button
+              >
+            </span>
+            {#if asking === skill.name}
+              <Notice title="Your copy of /{skill.name} will be replaced by the bundled version." alert>
+                {#snippet action()}
+                  <button type="button" class="ax-btn danger" disabled={busy} onclick={() => replace(skill.name)}>
+                    Replace
+                  </button>
+                  <button type="button" class="ax-btn" onclick={() => (asking = null)}>Keep mine</button>
+                {/snippet}
+              </Notice>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+      <p class="muted">Only skills that ship with the app are listed; your own skills are never touched.</p>
+    {/if}
+  </section>
 </div>
 
 <style>
@@ -43,5 +145,55 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--ax-space-3);
+  }
+
+  .bundled {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    margin-top: var(--ax-space-3);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+  }
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--ax-space-3);
+  }
+  .name {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    color: var(--ax-text-muted);
+    font: var(--ax-type-caption);
+    white-space: nowrap;
+  }
+  p {
+    margin: 0;
+  }
+  .muted {
+    color: var(--ax-text-muted);
+    font: var(--ax-type-caption);
+  }
+  .error {
+    color: var(--ax-danger);
   }
 </style>

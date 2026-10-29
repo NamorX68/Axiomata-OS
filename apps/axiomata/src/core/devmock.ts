@@ -48,6 +48,7 @@ import type {
   BoardPlan,
   CardEvent,
   TaskState,
+  BundledSkill,
 } from "./backend";
 import { mockGraphTags, mockTagCommand } from "./devmockTags";
 import { hunksFromTexts, parseHunkHeader } from "../editor/diff/hunks";
@@ -55,6 +56,27 @@ import { textLines } from "../editor/diff/model";
 
 const LATENCY_MS = 120;
 const delay = () => new Promise((r) => setTimeout(r, LATENCY_MS));
+
+/** One of every state, so the Skills Deck's notice and its "Bundled skills" section both show in a browser. */
+let mockBundled: BundledSkill[] = [
+  { name: "calendar-digest", state: "up_to_date" },
+  { name: "mail-digest", state: "outdated" },
+  { name: "reminders-digest", state: "up_to_date" },
+  { name: "cleanup", state: "changed" },
+  { name: "inbox-sort", state: "missing" },
+  { name: "news-web", state: "differs" },
+];
+
+/** The core's `bundled::update` in small: refuses a copy that may be the owner's unless confirmed. */
+function mockBundledUpdate(name: string, replaceOwnEdit: boolean): BundledSkill[] {
+  const skill = mockBundled.find((s) => s.name === name);
+  if (!skill) throw new Error(`bundled skill "${name}": not a bundled skill`);
+  if ((skill.state === "changed" || skill.state === "differs") && !replaceOwnEdit) {
+    throw new Error(`bundled skill "${name}": the installed copy may hold your own edits; confirm to replace it`);
+  }
+  mockBundled = mockBundled.map((s) => (s.name === name ? { ...s, state: "up_to_date" } : s));
+  return mockBundled;
+}
 
 let dashboardJson: string | null = null;
 let terminalSettingsJson: string | null = null;
@@ -1618,6 +1640,15 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       // warning row untriggered in dev-mock runs the same way it is in a
       // real, healthy `~/.axiomata/skills/`.
       return [] as T;
+    case "bundled_skills_status":
+      return mockBundled as T;
+    case "bundled_skill_update":
+      return mockBundledUpdate(String(args.name), args.replaceOwnEdit === true) as T;
+    case "bundled_skills_update_outdated":
+      mockBundled = mockBundled.map((s) =>
+        s.state === "outdated" || s.state === "missing" ? { ...s, state: "up_to_date" } : s,
+      );
+      return mockBundled as T;
     case "run_skill": {
       const name = String(args.name);
       const startedAt = new Date();

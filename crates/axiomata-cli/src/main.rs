@@ -208,16 +208,23 @@ enum SkillsAction {
     /// Re-copy the bundled skills from `resources/` into `~/.axiomata/skills/`.
     ///
     /// Without `--force` this only seeds any *missing* bundled skill (the
-    /// app's normal every-start behaviour). With `--force` the bundled skills
-    /// (`calendar-digest`, `mail-digest`, `reminders-digest`, `cleanup`) are
-    /// overwritten from `resources/` — the escape hatch for the seed's
-    /// seed-if-absent gotcha, where a bundled `SKILL.md` edit never reaches an
-    /// install whose copy already exists. User-created skills are never
-    /// touched.
+    /// app's normal every-start behaviour). With `--force` every bundled skill
+    /// is overwritten from `resources/`, the owner's edits to one included —
+    /// the app's Skills Deck settings ("Bundled skills") update one at a time
+    /// and ask first. Each copy written is recorded by its hash, so the app
+    /// can tell an outdated copy from an edited one. User-created skills are
+    /// never touched.
     Reseed {
         /// Overwrite the bundled skills even where a copy already exists.
         #[arg(long)]
         force: bool,
+    },
+    /// List every bundled skill with its state: up to date, outdated, missing,
+    /// changed by you, or differs (may be yours — seeded before hashes were recorded).
+    Bundled {
+        /// Print the list as JSON (`[{"name": …, "state": "up_to_date"}, …]`).
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -794,6 +801,7 @@ async fn main() -> Result<()> {
                 board_flow::owner_only("reseeding the bundled skills")?;
                 skills_reseed(force)?
             }
+            SkillsAction::Bundled { json } => skills_bundled(json)?,
         },
         Command::Models { action } => return models_cmd::run(&core, action).await,
         Command::Routines { action } => return routines_cmd(&core, action).await,
@@ -1122,6 +1130,29 @@ fn list_skills() -> Result<()> {
             "⚠ skipped {name}: {reason}",
             name = skill.name,
             reason = skill.reason
+        );
+    }
+    Ok(())
+}
+
+/// Prints each bundled skill's state against its installed copy (`skills::bundled`).
+fn skills_bundled(json: bool) -> Result<()> {
+    let list = skills::bundled::status().context("could not read the bundled skills")?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&list)?);
+        return Ok(());
+    }
+    let width = list.iter().map(|skill| skill.name.len()).max().unwrap_or(0);
+    for skill in &list {
+        println!("{:width$}  {}", skill.name, skill.state.label());
+    }
+    let outdated = list
+        .iter()
+        .filter(|skill| skill.state.needs_update())
+        .count();
+    if outdated > 0 {
+        println!(
+            "\n{outdated} can be updated in the app (Skills Deck → settings → Bundled skills)."
         );
     }
     Ok(())

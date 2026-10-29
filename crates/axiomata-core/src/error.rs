@@ -220,4 +220,9 @@ pub enum AxiomataError {
     /// `docs/plans/tags-links.md`): no tag, no note an agent may tag, a link to no note, an answered proposal.
     #[error("tags: {reason}")]
     Tags { reason: String },
+
+    /// A bundled skill could not be brought up to date (`crate::skills::bundled`): the name is no bundled skill, the
+    /// installed copy is the owner's own edit and replacing it was not confirmed, or its folder is a link.
+    #[error("bundled skill {name:?}: {reason}")]
+    BundledSkill { name: String, reason: String },
 }

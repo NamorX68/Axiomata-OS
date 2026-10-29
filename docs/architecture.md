@@ -1179,7 +1179,18 @@ balanced `{…}` that parses; a balanced `{…}` of prose is stepped over, a tru
 Ollama ignores the field. On the dashboard side `loadLatestSkillRun` reports the newer run it passed
 over (`skipped`), and the Mail, Calendar and Reminders tiles say so (`staleDigestNote`,
 now in `core/skillRun.ts`) instead of quietly showing an older digest. Bundled skills are
-seed-if-absent: an edited `SKILL.md` reaches an install through `skills reseed --force`.
+seed-if-absent: an edited `SKILL.md` reaches an install through the Skills Deck's settings, section "Bundled skills"
+(2026-10-29, `skills/bundled.rs`), or `skills reseed --force`. Every write of a bundled skill — the seed, an update,
+a forced reseed — records the SHA-256 of what it wrote in `~/.axiomata/bundled-skills.json` (beside the skills folder,
+so the registry never meets it). The installed copy is then compared with the bundled text and that record: equal to
+the bundled one is *up to date*; equal to the record only is *outdated*; neither is *changed by you*; no record and not
+the bundled one (seeded before the record existed) is *differs — may be yours*. The seed backfills the record for any
+copy equal to the bundled one; a copy seeded before the record that a later build has changed shows as "differs" once
+(owner's decision: rather ask once than overwrite an edit), and its update asks first. "Update all outdated" takes only outdated and missing ones; a copy that may be the
+owner's is replaced only after the question under its row (`bundled::update`'s `replace_own_edit` guards it in the
+core too), a linked skill folder is never written through, and a name outside `DEFAULT_SKILLS` is refused. The deck
+reads the state once at mount and shows a neutral notice ("N bundled skills have updates") that turns the tile to
+that section. `axiomata-cli skills bundled [--json]` prints the same list.
 
 ### Skills runner (`skills/`)
 

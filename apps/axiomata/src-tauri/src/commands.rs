@@ -1779,6 +1779,44 @@ pub fn list_skipped_skills() -> Result<Vec<SkippedSkill>, String> {
     skills::list_skipped_skills().map_err(|err| err.to_string())
 }
 
+/// Every bundled skill with its state against the installed copy (`skills::bundled`) — the Skills Deck's
+/// "Bundled skills" section and its notice. Off the main thread: it reads every bundled `SKILL.md`.
+#[tauri::command]
+pub async fn bundled_skills_status() -> Result<Vec<skills::BundledSkill>, String> {
+    bundled_off_main(skills::bundled::status).await
+}
+
+/// Brings one bundled skill up to date and returns the fresh list. `replace_own_edit` is the owner's answer to the
+/// section's question when the copy may hold their edits; without it such a copy is refused, never overwritten.
+/// A name that is no bundled skill is refused too — the owner's own skills are not reachable from here.
+#[tauri::command]
+pub async fn bundled_skill_update(
+    name: String,
+    replace_own_edit: bool,
+) -> Result<Vec<skills::BundledSkill>, String> {
+    bundled_off_main(move || {
+        skills::bundled::update(&name, replace_own_edit)?;
+        skills::bundled::status()
+    })
+    .await
+}
+
+/// Brings every outdated or missing bundled skill up to date — never one that may hold the owner's edits — and
+/// returns the fresh list.
+#[tauri::command]
+pub async fn bundled_skills_update_outdated() -> Result<Vec<skills::BundledSkill>, String> {
+    bundled_off_main(skills::bundled::update_outdated).await
+}
+
+async fn bundled_off_main<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, axiomata_core::AxiomataError> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|err| format!("bundled skills task failed: {err}"))?
+        .map_err(|err| err.to_string())
+}
+
 /// Returns the most recent skill runs as slim summaries, newest first. `limit`
 /// is clamped to `skills::MAX_RUN_LIMIT` in the core.
 #[tauri::command]

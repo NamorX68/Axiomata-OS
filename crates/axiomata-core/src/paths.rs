@@ -145,6 +145,13 @@ pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")
 }
 
+/// The SHA-256 of what each bundled skill's `SKILL.md` was last seeded or updated with
+/// (`~/.axiomata/bundled-skills.json`, `crate::skills::bundled`): beside, not inside, the skills folder, so the
+/// registry never meets it, and it is how an owner's own edit is told apart from an outdated copy.
+pub fn bundled_skills_record_path() -> PathBuf {
+    axiomata_home().join("bundled-skills.json")
+}
+
 /// Where the owner's agent roles live (`~/.axiomata/agents/<name>/AGENT.md`,
 /// `docs/plans/a2a.md` CP-A1) — one file per role, like skills.
 pub fn agent_roles_dir() -> PathBuf {

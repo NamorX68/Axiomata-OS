@@ -161,6 +161,16 @@ export interface Skill {
   harness: string;
 }
 
+/** Where an installed bundled skill stands against the version bundled with the app (`skills::bundled`): `changed`
+ *  — the owner edited it after its seed; `differs` — it differs and nothing records its seed, so it may be theirs. */
+export type BundledState = "up_to_date" | "outdated" | "missing" | "changed" | "differs";
+
+/** One bundled skill and its state (`bundled_skills_status`). */
+export interface BundledSkill {
+  name: string;
+  state: BundledState;
+}
+
 /** A skill directory `list_skills` could not turn into a `Skill` — a broken
  *  `SKILL.md`, a symlink, … — surfaced instead of just vanishing. */
 export interface SkippedSkill {

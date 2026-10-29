@@ -61,7 +61,7 @@ cargo test -p axiomata-core                # run just the core engine's tests
 
 cargo run -p axiomata-cli                  # headless: init the core, print status, exit
 cargo run -p axiomata-cli -- --help        # every subcommand; each has its own --help. The groups:
-#   list-skills | run-skill <name> | list-runs | get-run <id> | skills reseed [--force]
+#   list-skills | run-skill <name> | list-runs | get-run <id> | skills reseed [--force] | skills bundled [--json]
 #   models refresh|list [--provider p]      (provider model catalogs; refresh also writes OpenRouter's prices into agents.costs)
 #   memory sync|status                       (the workspace router blocks)
 #   routines list|add|edit|delete|tick       (cron is 6–7 fields, seconds first)
@@ -170,8 +170,12 @@ from the code itself:
   their frontmatter, routines, the board, "ask when unclear, confirm before moving or deleting").
 - **Bundled skills are seed-if-absent**: a `resources/<name>/SKILL.md` edit does **not**
   reach an install whose `~/.axiomata/skills/<name>/SKILL.md` already exists (the seed never
-  overwrites). Bring it up to date with `cargo run -p axiomata-cli -- skills reseed --force`
-  (re-copies only the bundled ones — the four digests/cleanup plus `inbox-sort`, `todo-to-kanban`, `news-rss`, `news-web`, `model-news` and `vault-tagging`; user skills untouched).
+  overwrites). The owner brings one up to date in the app: Skills Deck → settings → "Bundled skills"
+  (`skills::bundled`: up to date / outdated / missing / changed by you, by the SHA-256 of each seed in
+  `~/.axiomata/bundled-skills.json`; an own edit is replaced only after a question; a quiet notice on the deck when
+  one is outdated). From the shell: `skills bundled [--json]`, and `skills reseed --force` overwrites all of them
+  (the four digests/cleanup plus `inbox-sort`, `todo-to-kanban`, `news-rss`, `news-web`, `model-news` and
+  `vault-tagging`; user skills untouched).
 - **HTML/course pages render via `<iframe sandbox srcdoc=…>`, not `asset://`** — an
   `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
   WebKit sandboxing wall); don't re-attempt it without reading the postmortem in
