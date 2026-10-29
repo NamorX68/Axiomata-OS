@@ -1,12 +1,13 @@
 <!--
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
-  labels, layout Rings / Map / Hex (the app-wide `brainView.layout`, also in the settings), grouping
+  labels, layout Bundle / Map / Hex (the app-wide `brainView.layout`, also in the settings), grouping
   by areas or folders, spin + file-name toggles, and a detail panel for the
   selected node (file → open in the file panel / copy path / fly to / connections;
   skill → run; hub → open). "Back to the OS" closes.
-  Map (UX5, G16) draws the vault as a territory map: every note a field, every
-  area a country, links as roads, with a semantic zoom and the Orbit's time travel. Hex (the layout before the map,
-  back as a choice) tiles every note as a honeycomb cell in its area's Rings wedge, with the time travel too.
+  Bundle (`docs/plans/brain-views.md`, BV1) puts the notes on one ring, an arc per area, and bundles their links
+  through the middle along the vault's folders. Map (UX5, G16) draws the vault as a territory map: every note a field,
+  every area a country, links as roads, with a semantic zoom. Hex (the layout before the map, back as a choice) tiles
+  every note as a honeycomb cell in its area's wedge. All three follow the Orbit's time travel.
   Orbit (the dashboard-centre widget's 3-D cloud) lives only
   there now, not as a full-view option here.
 -->
@@ -117,17 +118,23 @@
   let areaFilter = $state("");
 
   const HELP = [
-    ["Rings", "Notes sit on arcs inside their area's segment; skills inside, areas on the next ring. Shows the size of each area."],
+    [
+      "Bundle",
+      "Every note on one ring, an arc per area, the newest first, clockwise. Links run through the middle, bundled along the folders, in the colour of the note they start from; the links of the last 21 days glow. Point at a note or an area to see its links. Skills ring it outside.",
+    ],
     [
       "Map",
       "A map of the vault: every note a field, every area a country, the oldest notes at its heart. Links are roads (zoom in); close up every field shows its name. Skills ring the map.",
     ],
     [
       "Hex",
-      "Honeycomb instead of arcs: every note its own hex cell, packed tight, in the same area segment as in Rings, the newest nearest the middle. Skills and areas stay as in Rings.",
+      "A honeycomb: every note its own hex cell, packed tight, each area in its own wedge, the newest nearest the middle. Skills and areas sit inside it.",
     ],
     ["Areas", "One segment per top-level vault folder."],
-    ["Folders", "One segment per deepest folder, e.g. Learning/Rust/lessons. A finer split of large areas."],
+    [
+      "Folders",
+      "One segment per deepest folder, e.g. Learning/Rust/lessons. A finer split of large areas; in Bundle the links bundle along the folder tree.",
+    ],
   ] as const;
   /** Looks up a HELP entry's text by its term, so the buttons below reference
    *  entries by name instead of a fragile array index. */
@@ -190,6 +197,9 @@
     const current = untrack(() => selected);
     selected = current ? (m.byId.get(current.id) ?? null) : null;
     renderer.selected = selected;
+    const pointed = untrack(() => hover);
+    hover = pointed ? (m.byId.get(pointed.id) ?? null) : null;
+    renderer.hover = hover;
   }
 
   async function load() {
@@ -299,6 +309,12 @@
       const p = rel(e);
       select(renderer.hitTest(p.x, p.y, 8));
     }
+  }
+  /** The pointer left the disc: nothing is pointed at any more (the bundle would keep the last note's links lit). */
+  function onLeave() {
+    drag = null;
+    hover = null;
+    if (renderer) renderer.hover = null;
   }
   function onWheel(e: WheelEvent) {
     if (!renderer) return;
@@ -470,14 +486,14 @@
     onmousedown={onDown}
     onmousemove={onMove}
     onmouseup={onUp}
-    onmouseleave={() => (drag = null)}
+    onmouseleave={onLeave}
     onwheel={onWheel}
   >
     <canvas bind:this={canvas}></canvas>
     {#if error}<p class="error">{error}</p>{/if}
   </div>
-  <!-- Over the Orbit its own time travel serves the map and the honeycomb too; without one, they bring their own. -->
-  {#if !inOrbit && span && layout !== "rings"}
+  <!-- Over the Orbit its own time travel serves every layout; without one, the view brings its own. -->
+  {#if !inOrbit && span}
     <div class="travel"><TimeTravel {span} onTravel={(at) => travelAt.set(at)} /></div>
   {/if}
 

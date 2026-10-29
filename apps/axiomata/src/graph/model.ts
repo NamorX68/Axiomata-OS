@@ -7,6 +7,7 @@
 import type { AppGroup } from "../core/appGroups";
 import type { BuiltinApp, UserApp } from "../core/apps";
 import type { WorkspaceGraph } from "../core/backend";
+import type { BundleLayout } from "./bundle";
 
 export type NodeKind = "hub" | "area" | "file" | "skill" | "app";
 
@@ -108,6 +109,8 @@ export interface GraphModel {
   /** Map layout only: the map's middle on the axial grid's own scale (circumradius 1), which graph (0, 0) stands for —
    *  with `hexUnit` it turns a point back into a field (the hit test). */
   mapCentre?: { x: number; y: number };
+  /** Bundle layout only: the arcs of the ring and the tree its links bundle along (`layout.ts` `layoutBundle`). */
+  bundle?: BundleLayout;
 }
 
 export interface Palette {

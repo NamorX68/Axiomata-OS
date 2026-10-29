@@ -564,7 +564,7 @@
                 <option value={l.id}>{l.label}</option>
               {/each}
             </select>
-            <span class="hint">(the Second Brain: arcs, countries or a honeycomb)</span>
+            <span class="hint">(the Second Brain: a ring of bundled links, countries or a honeycomb)</span>
           </label>
         </section>
 

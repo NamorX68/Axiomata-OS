@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceGraph } from "../core/backend";
-import { applyLayout, approachAngle, layoutOrbit, MAP_EDGE, MAP_SKILLS, orbitRestAngle, RING, shortestTurn } from "./layout";
+import { BUNDLE_ROOT, bundleControls, dirKey } from "./bundle";
+import {
+  applyLayout,
+  approachAngle,
+  BUNDLE,
+  layoutOrbit,
+  MAP_EDGE,
+  MAP_SKILLS,
+  orbitRestAngle,
+  RING,
+  shortestTurn,
+} from "./layout";
 import { buildModel, glyphForArea, neighbours, regroup, searchNodes, type Palette } from "./model";
 import { cellKey, NEIGHBOURS } from "./territory";
 
@@ -77,20 +88,96 @@ describe("buildModel", () => {
 });
 
 describe("layouts", () => {
-  it("rings keep files inside the band and skills / hub where expected", () => {
+  it("bundle puts every note on one ring and the skills on a ring further out, nothing in the middle", () => {
     const m = buildModel(fixture(), palette);
-    applyLayout(m, "rings");
-    const hub = m.byId.get("hub")!;
-    expect([hub.x, hub.y]).toEqual([0, 0]);
-    const skill = m.byId.get("skill:a")!;
-    expect(Math.hypot(skill.x, skill.y)).toBeCloseTo(RING.skills, 5);
-    const area = m.byId.get("area:Dev")!;
-    expect(Math.hypot(area.x, area.y)).toBeCloseTo(RING.areas, 5);
-    for (const n of m.nodes.filter((n) => n.kind === "file" && n.area)) {
-      const r = Math.hypot(n.x, n.y);
-      expect(r).toBeGreaterThanOrEqual(RING.filesInner - 1e-9);
-      expect(r).toBeLessThanOrEqual(RING.filesOuter + 1e-9);
+    applyLayout(m, "bundle");
+    for (const n of m.nodes.filter((x) => x.kind === "file")) expect(Math.hypot(n.x, n.y)).toBeCloseTo(BUNDLE.notes, 9);
+    expect(Math.hypot(m.byId.get("skill:a")!.x, m.byId.get("skill:a")!.y)).toBeCloseTo(BUNDLE.skills, 9);
+    // The area's icon sits outside the ring, at the middle of its arc.
+    const dev = m.bundle!.arcs.find((a) => a.area === "Dev")!;
+    const icon = m.byId.get("area:Dev")!;
+    expect(Math.hypot(icon.x, icon.y)).toBeCloseTo(BUNDLE.areas, 9);
+    expect(Math.atan2(icon.y, icon.x)).toBeCloseTo((dev.start + dev.end) / 2, 9);
+    expect(BUNDLE.areas).toBeGreaterThan(BUNDLE.notes);
+    expect(BUNDLE.skills).toBeGreaterThan(BUNDLE.names);
+  });
+
+  it("bundle gives each area one arc, sized by its notes, with gaps between, around the whole ring", () => {
+    const m = buildModel(fixture(), palette);
+    applyLayout(m, "bundle");
+    const arcs = m.bundle!.arcs;
+    expect(arcs.map((a) => a.area)).toEqual(["Dev", "Work", null]);
+    expect(arcs.map((a) => a.count)).toEqual([30, 10, 1]);
+    const span = (a: { start: number; end: number }) => a.end - a.start;
+    expect(span(arcs[0]!)).toBeCloseTo(span(arcs[1]!) * 3, 9);
+    for (let i = 1; i < arcs.length; i++) expect(arcs[i]!.start).toBeGreaterThan(arcs[i - 1]!.end);
+    const gaps = arcs.reduce((sum, a, i) => sum + ((arcs[(i + 1) % arcs.length]!.start - a.end + 2 * Math.PI) % (2 * Math.PI)), 0);
+    expect(gaps + arcs.reduce((sum, a) => sum + span(a), 0)).toBeCloseTo(2 * Math.PI, 9);
+    // Every note of an area lies inside its arc.
+    for (const arc of arcs) {
+      for (const n of m.nodes.filter((x) => x.kind === "file" && x.area === arc.area)) {
+        let a = Math.atan2(n.y, n.x);
+        while (a < arc.start) a += 2 * Math.PI;
+        expect(a).toBeLessThanOrEqual(arc.end);
+      }
     }
+  });
+
+  it("bundle lays an arc's newest note first and the older ones after it, clockwise", () => {
+    const graph = fixture();
+    graph.files.forEach((f, i) => (f.created = new Date(Date.UTC(2025, 0, 1) + ((i * 7) % 40) * 86_400_000).toISOString()));
+    const m = buildModel(graph, palette);
+    applyLayout(m, "bundle");
+    const dev = m.bundle!.arcs.find((a) => a.area === "Dev")!;
+    // Clockwise on screen is the growing angle (y points down), measured from the arc's start.
+    const along = (n: { x: number; y: number }) => {
+      let a = Math.atan2(n.y, n.x);
+      while (a < dev.start) a += 2 * Math.PI;
+      return a;
+    };
+    const clockwise = m.nodes
+      .filter((n) => n.kind === "file" && n.area === "Dev")
+      .sort((a, b) => along(a) - along(b))
+      .map((n) => Date.parse(n.created!));
+    expect(clockwise).toEqual([...clockwise].sort((a, b) => b - a));
+  });
+
+  it("bundle grouped by folders splits the ring finer, siblings side by side", () => {
+    const m = buildModel(regroup(fixture(), "folders"), palette);
+    applyLayout(m, "bundle");
+    expect(m.bundle!.arcs.map((a) => a.area)).toEqual(["Dev/sub0", "Dev/sub1", "Work/sub0", "Work/sub1", null]);
+    const parent = m.bundle!.parent;
+    expect(parent.get("file:Dev/sub0/n0.md")).toBe(dirKey("Dev/sub0"));
+    expect(parent.get(dirKey("Dev/sub0"))).toBe(dirKey("Dev"));
+    expect(parent.get(dirKey("Dev"))).toBe(BUNDLE_ROOT);
+    expect(parent.get("file:loose.md")).toBe(BUNDLE_ROOT);
+    // A folder's point lies between the ring and the centre, its parent's further in.
+    const r = (key: string) => Math.hypot(m.bundle!.points.get(key)!.x, m.bundle!.points.get(key)!.y);
+    expect(r(dirKey("Dev/sub0"))).toBeLessThan(BUNDLE.notes);
+    expect(r(dirKey("Dev"))).toBeLessThan(r(dirKey("Dev/sub0")));
+    expect(r(BUNDLE_ROOT)).toBe(0);
+  });
+
+  it("bundle runs a link's control points up the tree to the common ancestor and down again", () => {
+    const at = (m: ReturnType<typeof buildModel>, key: string) => m.bundle!.points.get(key)!;
+    const byArea = buildModel(fixture(), palette);
+    applyLayout(byArea, "bundle");
+    const a = "file:Dev/sub0/n0.md";
+    const b = "file:Work/sub1/n1.md";
+    expect(bundleControls(byArea.bundle!, a, b)).toEqual(
+      [a, dirKey("Dev"), BUNDLE_ROOT, dirKey("Work"), b].map((k) => at(byArea, k)),
+    );
+    const byFolder = buildModel(regroup(fixture(), "folders"), palette);
+    applyLayout(byFolder, "bundle");
+    expect(bundleControls(byFolder.bundle!, a, b)).toEqual(
+      [a, dirKey("Dev/sub0"), dirKey("Dev"), BUNDLE_ROOT, dirKey("Work"), dirKey("Work/sub1"), b].map((k) =>
+        at(byFolder, k),
+      ),
+    );
+    // Two notes of one folder meet in that folder; a note unknown to the layout has no curve.
+    const c = "file:Dev/sub0/n2.md";
+    expect(bundleControls(byFolder.bundle!, a, c)).toEqual([a, dirKey("Dev/sub0"), c].map((k) => at(byFolder, k)));
+    expect(bundleControls(byFolder.bundle!, a, "file:missing.md")).toEqual([]);
   });
 
   it("orbit puts the hub at the centre, gives every file a 3-D cloud point, and marks the rim", () => {
@@ -131,7 +218,7 @@ describe("layouts", () => {
     expect(orbitRestAngle(m)).toBe(0);
   });
 
-  it("hex gives every file its own cell, tiled in its area's wedge, hub/skills as in rings", () => {
+  it("hex gives every file its own cell, tiled in its area's wedge, hub and skills in the middle", () => {
     const m = buildModel(fixture(), palette);
     applyLayout(m, "hex");
     const hub = m.byId.get("hub")!;

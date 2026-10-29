@@ -18,15 +18,16 @@ import {
   type HiveCell,
   type Rgb,
 } from "./hive";
-import { APP_RING, approachAngle, bornOf, EXPANDED_GROUP_RING, orbitRestAngle } from "./layout";
+import { BUNDLE_BETA, bundleCurve, isFreshLink, linkBorn, type BundleCommand } from "./bundle";
+import { APP_RING, approachAngle, bornOf, BUNDLE, EXPANDED_GROUP_RING, orbitRestAngle, RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 import { cellKey, NEIGHBOURS, pixelToAxial } from "./territory";
 
-export type RenderMode = "rings" | "orbit" | "map" | "hex";
+export type RenderMode = "bundle" | "orbit" | "map" | "hex";
 
 export interface RenderOptions {
-  /** `rings`/`map`/`hex` = the Second Brain view (dots on arcs, the territory
-   *  map's fields, or honeycomb cells in the rings' wedges); `orbit` = the dashboard centre. */
+  /** `bundle`/`map`/`hex` = the Second Brain view (a ring of notes with bundled links, the territory map's fields, or
+   *  honeycomb cells in the areas' wedges); `orbit` = the dashboard centre. */
   mode?: RenderMode;
   /** Radians per second of ring rotation. */
   spin: number;
@@ -64,6 +65,14 @@ interface HiveTone {
   settled: boolean;
   /** One of the hottest cells, drawn with the glow's blur. */
   blur: boolean;
+}
+
+/** One link of the bundle: its two notes, its birth (`linkBorn`) and its curve in graph units. */
+interface BundleLink {
+  a: GraphNode;
+  b: GraphNode;
+  born: number | null;
+  path: BundleCommand[];
 }
 
 export interface View {
@@ -276,12 +285,12 @@ export class GraphRenderer {
   private turning = false;
   /** When the drag last moved the hive (`performance.now()` ms): a release after holding still does not coast. */
   private turnedAt = 0;
-  /** The map's fields' or the honeycomb's notes for the current model (`cellNotes`). */
-  private cellFiles: { model: GraphModel; hex: boolean; files: GraphNode[] } | null = null;
+  /** The notes the current layout draws one by one, for the current model (`cellNotes`). */
+  private cellFiles: { model: GraphModel; mode: RenderMode | undefined; files: GraphNode[] } | null = null;
   /** Where the countries' names were drawn in the last frame, for the hit test (they lie on top of the fields). */
   private mapLabels: { node: GraphNode; x: number; y: number; w: number; h: number }[] = [];
   private rgbCache = new Map<string, Rgb>();
-  /** Ring captions (rings mode). */
+  /** Hex's captions over the skills' ring and the notes' band. */
   captions = { skills: "SKILLS", memory: "MEMORY" };
   /** In-flight `flyTo` pan/zoom tween, consumed by `frame`. */
   private flyAnim: { fromX: number; fromY: number; fromZoom: number; toX: number; toY: number; toZoom: number; start: number; duration: number } | null = null;
@@ -408,6 +417,7 @@ export class GraphRenderer {
   hitTest(px: number, py: number, slop = 6): GraphNode | null {
     if (!this.model) return null;
     if (this.options.mode === "map") return this.hitMap(px, py, slop);
+    if (this.options.mode === "bundle") return this.hitBundle(px, py, slop);
     let best: GraphNode | null = null;
     let bestD = Infinity;
     const orbit = this.options.mode === "orbit";
@@ -480,8 +490,8 @@ export class GraphRenderer {
     // highlight ring was never actually missing, just off-centre after a
     // moment) — pausing here fixes the camera side of that mismatch rather
     // than chasing the node's math every frame.
-    if (this.options.mode === "map") {
-      // A map is read north up: it never turns.
+    if (this.options.mode === "map" || this.options.mode === "bundle") {
+      // A map is read north up, and the bundle's ring of names is read too: neither turns.
       this.angle = 0;
     } else if (!this.selected && !this.flyAnim && !this.pulse) {
       if (this.options.spin !== 0) {
@@ -544,11 +554,25 @@ export class GraphRenderer {
       this.drawMap(t);
       return;
     }
+    if (this.options.mode === "bundle") {
+      this.drawBundle(t);
+      return;
+    }
+    this.drawHex(t);
+  }
+
+  /**
+   * The honeycomb (Hex): hub, skills and area markers in the middle with faint spokes, every note a cell in its area's
+   * wedge in its tone (`noteTones`) — in the time travel only the notes born by then.
+   */
+  private drawHex(t: number): void {
+    const { ctx, width, height } = this;
+    const model = this.model!;
     const R = this.radius();
     const cx = width / 2 + this.view.x;
     const cy = height / 2 + this.view.y;
 
-    // Ring captions at 12 o'clock (they don't spin — they name the rings).
+    // Captions at 12 o'clock naming the skills' ring and the notes' band (they don't spin).
     if (this.options.labels) {
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
@@ -556,7 +580,7 @@ export class GraphRenderer {
         ctx.font = this.font(size, 700);
         const label = text.split("").join("\u2009");
         const w = ctx.measureText(label).width;
-        // Backdrop so the caption stays legible over dots and edges.
+        // Backdrop so the caption stays legible over cells and edges.
         ctx.fillStyle = this.surfaceColor;
         ctx.globalAlpha = 0.85;
         ctx.beginPath();
@@ -566,19 +590,17 @@ export class GraphRenderer {
         ctx.globalAlpha = 0.9;
         ctx.fillText(label, cx, cy - radius - 6);
       };
-      cap(this.captions.skills, R * 0.17 + 10, this.accentColor, Math.max(10, Math.min(15, R * 0.05)));
-      cap(this.captions.memory, R * 0.84 + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
+      cap(this.captions.skills, R * RING.skills + 10, this.accentColor, Math.max(10, Math.min(15, R * 0.05)));
+      cap(this.captions.memory, R * RING.filesOuter + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
       ctx.globalAlpha = 1;
     }
 
-    // The honeycomb's cells, each in its note's tone (`noteTones`); in the time travel only the notes born by then.
-    const hex = this.options.mode === "hex";
     const hexR = this.hexCellRadius();
-    const cellNotes = hex ? this.cellNotes(model) : [];
-    const cellTones = hex ? this.noteTones(cellNotes) : [];
-    const unborn = (n: GraphNode) => hex && n.kind === "file" && !this.bornBy(n);
+    const cellNotes = this.cellNotes(model);
+    const cellTones = this.noteTones(cellNotes);
+    const unborn = (n: GraphNode) => n.kind === "file" && !this.bornBy(n);
 
-    // Edges.
+    // Edges: the hub's spokes, each area's to its notes, and the links between notes.
     ctx.lineWidth = 0.6;
     for (const e of model.edges) {
       const a = model.byId.get(e.from);
@@ -596,60 +618,50 @@ export class GraphRenderer {
     }
     ctx.globalAlpha = 1;
 
-    // Nodes.
+    // The cells, then the hub, skills and areas over them.
     const hl = this.highlight;
-    if (hex) {
-      const light = this.cellLight(t);
-      cellNotes.forEach((n, i) => {
-        const tone = cellTones[i];
-        if (!tone?.settled) return;
-        const p = this.toScreen(n);
-        const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
-        const fill = this.shimmerFill(tone.col, p.x, p.y, n.phase, t, light);
-        const hot = n === this.selected ? "selected" : n === this.hover ? "hover" : null;
-        this.drawHexCell(p.x, p.y, hexR, fill, dimmed ? 0.12 : 1, hot, tone);
-      });
-    }
-    for (const n of model.nodes) {
-      if (hex && n.kind === "file") continue;
+    const light = this.cellLight(t);
+    cellNotes.forEach((n, i) => {
+      const tone = cellTones[i];
+      if (!tone?.settled) return;
       const p = this.toScreen(n);
       const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
-      const twinkle = n.kind === "file" ? 0.75 + 0.25 * Math.sin(t * 1.7 + n.phase * TWO_PI) : 1;
+      const fill = this.shimmerFill(tone.col, p.x, p.y, n.phase, t, light);
+      const hot = n === this.selected ? "selected" : n === this.hover ? "hover" : null;
+      this.drawHexCell(p.x, p.y, hexR, fill, dimmed ? 0.12 : 1, hot, tone);
+    });
+    for (const n of model.nodes) {
+      if (n.kind === "file") continue;
+      const p = this.toScreen(n);
+      const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
       const r = Math.max(1.2, n.r * Math.sqrt(this.view.zoom)) * (n === this.hover || n === this.selected ? 1.8 : 1);
-      if (n.kind !== "file") {
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
-        g.addColorStop(0, n.color);
-        g.addColorStop(1, "transparent");
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r * 3.2, 0, TWO_PI);
-        ctx.fill();
-      }
-      ctx.globalAlpha = dimmed ? 0.12 : twinkle;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
+      g.addColorStop(0, n.color);
+      g.addColorStop(1, "transparent");
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 3.2, 0, TWO_PI);
+      ctx.fill();
+      ctx.globalAlpha = dimmed ? 0.12 : 1;
       ctx.fillStyle = n.color;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TWO_PI);
       ctx.fill();
-      if (n.kind !== "file") {
-        // Ring + a glyph so the kinds read at a glance (see legend).
-        ctx.globalAlpha = dimmed ? 0.2 : 0.9;
-        ctx.strokeStyle = n.color;
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r + 5, 0, TWO_PI);
-        ctx.stroke();
-        drawGlyph(ctx, glyphOf(n), p.x, p.y, r, n.kind === "hub" ? this.hubGlyphColor : this.glyphColor);
-      }
+      // Ring + a glyph so the kinds read at a glance (see legend).
+      ctx.globalAlpha = dimmed ? 0.2 : 0.9;
+      ctx.strokeStyle = n.color;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 5, 0, TWO_PI);
+      ctx.stroke();
+      drawGlyph(ctx, glyphOf(n), p.x, p.y, r, n.kind === "hub" ? this.hubGlyphColor : this.glyphColor);
     }
     ctx.globalAlpha = 1;
 
     // Labels.
     if (this.options.labels) {
-      // Grows when zoomed in, gently (square root), up to the map's largest field name.
-      const base = Math.max(9, Math.min(11, R * 0.04));
-      const px = Math.min(GraphRenderer.FIELD_NAME_MAX_PX, base * Math.max(1, Math.sqrt(this.view.zoom)));
-      ctx.font = `500 ${px}px ${getComputedStyle(this.canvas).fontFamily}`;
+      ctx.font = `500 ${this.labelPx(R)}px ${getComputedStyle(this.canvas).fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       for (const n of model.nodes) {
@@ -662,13 +674,20 @@ export class GraphRenderer {
         const p = this.toScreen(n);
         ctx.fillStyle = n.kind === "file" || n.kind === "hub" ? this.textColor : n.kind === "area" ? n.color : this.mutedColor;
         ctx.globalAlpha = n === this.hover || n === this.selected ? 1 : 0.8;
-        const below = hex && n.kind === "file" ? hexR : n.r * this.view.zoom;
+        const below = n.kind === "file" ? hexR : n.r * this.view.zoom;
         ctx.fillText(n.label, p.x, p.y + below + 6);
       }
       ctx.globalAlpha = 1;
     }
 
     this.drawPulse();
+  }
+
+  /** A caption's px size for a ring of radius `R` px: it grows when zoomed in, gently (square root), up to the map's
+   *  largest field name. */
+  private labelPx(R: number): number {
+    const base = Math.max(9, Math.min(11, R * 0.04));
+    return Math.min(GraphRenderer.FIELD_NAME_MAX_PX, base * Math.max(1, Math.sqrt(this.view.zoom)));
   }
 
   /** "Fly to" lands instantly once the tween finishes; this is what makes
@@ -1438,15 +1457,16 @@ export class GraphRenderer {
   }
 
   /**
-   * The notes that have a cell — the map's fields (those placed on its grid) or the honeycomb's cells (every note) —
-   * in a list kept for as long as the model, so their tones are worked out once a second.
+   * The notes the layout draws one by one — the map's fields (those placed on its grid), or every note for the
+   * honeycomb and the bundle's ring — in a list kept for as long as the model, so their tones are worked out once a
+   * second.
    */
   private cellNotes(model: GraphModel): GraphNode[] {
     // Keyed by the mode too: a frame may fall between a layout switch and the new model it brings.
-    const hex = this.options.mode === "hex";
-    if (this.cellFiles?.model !== model || this.cellFiles.hex !== hex) {
-      const files = model.nodes.filter((n) => n.kind === "file" && (hex || n.cell !== undefined));
-      this.cellFiles = { model, hex, files };
+    const mode = this.options.mode;
+    if (this.cellFiles?.model !== model || this.cellFiles.mode !== mode) {
+      const files = model.nodes.filter((n) => n.kind === "file" && (mode !== "map" || n.cell !== undefined));
+      this.cellFiles = { model, mode, files };
     }
     return this.cellFiles.files;
   }
@@ -1743,6 +1763,268 @@ export class GraphRenderer {
     this.drawPulse();
   }
 
+  /** How far an old note darkens on the bundle's ring: a dot is small, so it keeps more of its area's light. */
+  private static readonly BUNDLE_COOLING = 0.6;
+  /** A calm link's strength, a new one's (in the glow), and a link's while another note's are being looked at. */
+  private static readonly LINK_ALPHA = 0.22;
+  private static readonly FRESH_LINK_ALPHA = 0.6;
+  private static readonly DIMMED_LINK_ALPHA = 0.05;
+
+  /** The bundle's link curves for the current model, worked out once per model (`graph/bundle.ts`). */
+  private bundleLinks: { model: GraphModel; links: BundleLink[] } | null = null;
+  /** What the last bundle frame drew where — notes, area icons, skills — for the hit test. */
+  private bundleHits: { node: GraphNode; x: number; y: number; r: number }[] = [];
+
+  /** Every link between two notes with its curve along the vault's tree and its birth (`linkBorn`). */
+  private linksOf(model: GraphModel): BundleLink[] {
+    if (this.bundleLinks?.model === model) return this.bundleLinks.links;
+    const layout = model.bundle;
+    const links: BundleLink[] = [];
+    if (layout) {
+      for (const e of model.edges) {
+        const a = model.byId.get(e.from);
+        const b = model.byId.get(e.to);
+        if (a?.kind !== "file" || b?.kind !== "file" || a === b) continue;
+        const path = bundleCurve(layout, a.id, b.id, BUNDLE_BETA);
+        if (path.length > 0) links.push({ a, b, born: linkBorn(bornOf(a), bornOf(b)), path });
+      }
+    }
+    this.bundleLinks = { model, links };
+    return links;
+  }
+
+  /** Adds a curve in graph units to the current path, on a ring of `R` px around (`cx`, `cy`). */
+  private tracePath(path: readonly BundleCommand[], cx: number, cy: number, R: number): void {
+    const { ctx } = this;
+    for (const c of path) {
+      if (c.kind === "move") ctx.moveTo(cx + c.x * R, cy + c.y * R);
+      else if (c.kind === "line") ctx.lineTo(cx + c.x * R, cy + c.y * R);
+      else ctx.bezierCurveTo(cx + c.x1 * R, cy + c.y1 * R, cx + c.x2 * R, cy + c.y2 * R, cx + c.x * R, cy + c.y * R);
+    }
+  }
+
+  /** The bundle: the nearest of the notes, area icons and skills drawn in the last frame, within reach. */
+  private hitBundle(px: number, py: number, slop: number): GraphNode | null {
+    let best: GraphNode | null = null;
+    let bestD = Infinity;
+    for (const h of this.bundleHits) {
+      const d = Math.hypot(h.x - px, h.y - py);
+      if (d < h.r + slop && d < bestD) {
+        best = h.node;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * The Bundle layout (`docs/plans/brain-views.md`, BV1): the notes on one ring, an arc per area with the area's
+   * colour as a band outside it, its icon and name further out, the skills on a ring beyond. The links run through the
+   * middle as curves bundled along the vault's tree, in the colour of the note they start from, faint — the links of
+   * the last weeks in the glow (Q11). Looking at a note (or an area) lifts its links and dims the rest. In the time
+   * travel a note not yet born and its links are not there (Q3).
+   */
+  private drawBundle(_t: number): void {
+    const { ctx, width, height } = this;
+    const model = this.model!;
+    const layout = model.bundle;
+    if (!layout) return;
+    const R = this.radius();
+    const zoom = this.view.zoom;
+    const cx = width / 2 + this.view.x;
+    const cy = height / 2 + this.view.y;
+    const notes = this.cellNotes(model);
+    const tones = this.noteTones(notes, GraphRenderer.BUNDLE_COOLING);
+    const shown = new Set<GraphNode>();
+    notes.forEach((n, i) => {
+      if (tones[i]?.settled) shown.add(n);
+    });
+    const now = this.timeCutoff ?? Date.now();
+    const focus = this.hover ?? this.selected;
+    const touches = (n: GraphNode) =>
+      focus !== null && (focus.kind === "area" ? n.area === focus.area : focus.kind === "file" && n === focus);
+    const hl = this.highlight;
+    const hits: typeof this.bundleHits = [];
+    const areaColor = new Map(model.nodes.filter((n) => n.kind === "area").map((n) => [n.area, n.color]));
+
+    // The areas' band, just outside their notes.
+    ctx.lineWidth = Math.max(2, 3 * Math.sqrt(zoom));
+    ctx.lineCap = "butt";
+    for (const arc of layout.arcs) {
+      if (arc.end <= arc.start) continue;
+      ctx.strokeStyle = (arc.area !== null ? areaColor.get(arc.area) : undefined) ?? this.mutedColor;
+      ctx.globalAlpha = focus?.kind === "area" && focus.area !== arc.area ? 0.25 : 0.75;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * BUNDLE.band, arc.start, arc.end);
+      ctx.stroke();
+    }
+
+    // The links: calm ones grouped by colour into one path each, the looked-at ones on top.
+    const calm = new Map<string, { color: string; fresh: boolean; links: BundleLink[] }>();
+    const hot: BundleLink[] = [];
+    const hotNotes = new Set<GraphNode>();
+    for (const l of this.linksOf(model)) {
+      if (!shown.has(l.a) || !shown.has(l.b)) continue;
+      if (touches(l.a) || touches(l.b)) {
+        hot.push(l);
+        hotNotes.add(l.a);
+        hotNotes.add(l.b);
+        continue;
+      }
+      const fresh = isFreshLink(l.born, now);
+      const color = fresh ? this.glowColor : l.a.color;
+      const key = `${fresh ? 1 : 0}${color}`;
+      const group = calm.get(key) ?? { color, fresh, links: [] };
+      group.links.push(l);
+      calm.set(key, group);
+    }
+    ctx.save();
+    // On a dark ground the bundles add up to light where many run together; on a light one that would wash out.
+    if (!this.lightScheme) ctx.globalCompositeOperation = "screen";
+    ctx.lineWidth = 1;
+    for (const group of calm.values()) {
+      ctx.strokeStyle = group.color;
+      ctx.globalAlpha =
+        focus !== null || hl !== null
+          ? GraphRenderer.DIMMED_LINK_ALPHA
+          : group.fresh
+            ? GraphRenderer.FRESH_LINK_ALPHA
+            : GraphRenderer.LINK_ALPHA;
+      ctx.beginPath();
+      for (const l of group.links) this.tracePath(l.path, cx, cy, R);
+      ctx.stroke();
+    }
+    ctx.lineWidth = 1.7;
+    ctx.globalAlpha = 0.95;
+    for (const l of hot) {
+      ctx.strokeStyle = isFreshLink(l.born, now) ? this.glowColor : l.a.color;
+      ctx.beginPath();
+      this.tracePath(l.path, cx, cy, R);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // The notes: a dot each in its tone, an ember while it is fresh.
+    const spacing = (TWO_PI * BUNDLE.notes * R) / Math.max(1, notes.length);
+    const dotCap = Math.max(1.2, spacing * 0.42);
+    const dotOf = (n: GraphNode) => Math.min(dotCap, Math.max(1.2, n.r * Math.sqrt(zoom)));
+    notes.forEach((n, i) => {
+      const tone = tones[i];
+      if (!tone?.settled) return;
+      const p = this.toScreen(n);
+      const r = dotOf(n);
+      const dimmed = (focus !== null && !touches(n) && !hotNotes.has(n)) || (hl !== null && !hl.has(n.id));
+      const alpha = dimmed ? 0.3 : 1;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = `rgb(${Math.round(tone.col[0])},${Math.round(tone.col[1])},${Math.round(tone.col[2])})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TWO_PI);
+      ctx.fill();
+      // The ember's size is a share of its cell's; a dot's ember is about half the dot.
+      if (this.drawEmber(ctx, p.x, p.y, Math.max(1, r * 0.5) / GraphRenderer.EMBER_SIZE, alpha, tone)) {
+        ctx.shadowBlur = 0;
+      }
+      if (n === this.selected || n === this.hover) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = n === this.selected ? this.glowColor : this.textColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 3, 0, TWO_PI);
+        ctx.stroke();
+      }
+      hits.push({ node: n, x: p.x, y: p.y, r: Math.max(r, 3) });
+    });
+    ctx.globalAlpha = 1;
+
+    // File names along the radius, inside the ring, once the dots are far enough apart to carry them.
+    const namePx = this.labelPx(R);
+    if (this.options.fileLabels && spacing >= namePx * 1.05) {
+      ctx.font = this.font(namePx, 500);
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = this.textColor;
+      for (const n of notes) {
+        if (!shown.has(n)) continue;
+        const a = Math.atan2(n.y, n.x);
+        const p = this.toScreen(n);
+        const right = Math.cos(a) >= 0;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(right ? a : a + Math.PI);
+        ctx.textAlign = right ? "right" : "left";
+        ctx.globalAlpha = focus !== null && !touches(n) && !hotNotes.has(n) ? 0.3 : 0.85;
+        ctx.fillText(this.fitText(n.label, R * 0.3), right ? -dotOf(n) - 5 : dotOf(n) + 5, 0);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // The areas' icons and names outside the band.
+    const iconCap = this.mapSkillPx() * 0.85;
+    const areaPx = Math.min(GraphRenderer.FIELD_NAME_MAX_PX, 11.5 * Math.max(1, Math.sqrt(zoom)));
+    for (const arc of layout.arcs) {
+      if (arc.area === null) continue;
+      const node = model.byId.get(`area:${arc.area}`);
+      if (!node) continue;
+      const mid = (arc.start + arc.end) / 2;
+      const iconR = Math.min(iconCap, (arc.end - arc.start) * BUNDLE.areas * R * 0.45);
+      const hot = node === this.hover || node === this.selected;
+      ctx.globalAlpha = focus?.kind === "area" && !hot ? 0.45 : 1;
+      if (iconR >= 5) {
+        const p = this.toScreen(node);
+        this.drawNodeDisc(p.x, p.y, iconR, node.color, hot);
+        drawGlyph(ctx, glyphOf(node), p.x, p.y, iconR * 0.62, hot ? this.accentColor : node.color);
+        hits.push({ node, x: p.x, y: p.y, r: iconR });
+      }
+      if (!this.options.labels) continue;
+      // Along the ring, upright on either half; cut to the room its arc leaves.
+      const font = this.font(areaPx, 600);
+      ctx.font = font;
+      // A name may reach a little past its arc, into the gaps on either side.
+      const room = (arc.end - arc.start) * BUNDLE.names * R + 20;
+      const text = this.fitText(node.label, room);
+      // Nothing left but a letter and the ellipsis says nothing: the icon (and the detail panel) name it then.
+      if (text.endsWith("…") && text.length < 4) continue;
+      const x = cx + Math.cos(mid) * BUNDLE.names * R;
+      const y = cy + Math.sin(mid) * BUNDLE.names * R;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.sin(mid) <= 0 ? mid + Math.PI / 2 : mid - Math.PI / 2);
+      this.haloText(text, 0, 0, font, node.color);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
+    // The skills' ring.
+    const skillR = this.mapSkillPx();
+    for (const n of model.nodes) {
+      if (n.kind !== "skill") continue;
+      const p = this.toScreen(n);
+      const hot = n === this.hover || n === this.selected;
+      this.drawNodeDisc(p.x, p.y, skillR, n.color, hot);
+      drawGlyph(ctx, glyphOf(n), p.x, p.y, skillR * 0.62, hot ? this.accentColor : n.color);
+      if (hot) this.drawHotLabel(p.x, p.y, skillR, n.label, 0.75, 0.6);
+      hits.push({ node: n, x: p.x, y: p.y, r: skillR });
+    }
+
+    // The looked-at note's name, inside the ring beside its dot.
+    for (const n of [this.selected, this.hover]) {
+      if (!n || n.kind !== "file" || !shown.has(n)) continue;
+      const a = Math.atan2(n.y, n.x);
+      const p = this.toScreen(n);
+      const inward = dotOf(n) + 10;
+      const font = this.font(Math.max(12, namePx), 600);
+      if (Math.abs(Math.cos(a)) < 0.35) {
+        this.haloText(n.label, p.x, p.y - Math.sign(Math.sin(a)) * (inward + 4), font, this.textColor);
+      } else {
+        const right = Math.cos(a) > 0;
+        this.haloText(n.label, p.x - Math.cos(a) * inward, p.y - Math.sin(a) * inward, font, this.textColor, right ? "right" : "left");
+      }
+    }
+
+    this.bundleHits = hits;
+    this.drawPulse();
+  }
+
   /** `text` cut to `max` px with an ellipsis, in the current font. */
   private fitText(text: string, max: number): string {
     const { ctx } = this;
@@ -1753,10 +2035,17 @@ export class GraphRenderer {
   }
 
   /** Text on a halo of the ground colour, so it reads over the fields; returns its width. */
-  private haloText(text: string, x: number, y: number, font: string, color: string): number {
+  private haloText(
+    text: string,
+    x: number,
+    y: number,
+    font: string,
+    color: string,
+    align: CanvasTextAlign = "center",
+  ): number {
     const { ctx } = this;
     ctx.font = font;
-    ctx.textAlign = "center";
+    ctx.textAlign = align;
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
     ctx.lineWidth = 4;

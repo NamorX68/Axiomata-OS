@@ -1313,9 +1313,13 @@ carrying its own config.
 `axiomata_core::graph::build` (command `get_workspace_graph`) walks every tracked file
 (reusing the memory walker) plus skills and routines as graph nodes, and every `[[wiki]]` /
 relative Markdown link / relative HTML `href` as an edge, capped at 5000 files. The frontend
-(`apps/axiomata/src/graph/`) renders this with Canvas 2D (no graph library) in two
-full-view layouts (Rings, and Map — since UX5 the default: every area a country of hex fields on an axial grid,
-grown in birth order, links as roads, a semantic zoom; `graph/territory.ts`) plus a separate `layoutOrbit` used only
+(`apps/axiomata/src/graph/`) renders this with Canvas 2D (no graph library) in three
+full-view layouts — Bundle (since 2026-10-29, replacing Rings, `docs/plans/brain-views.md`: every note on one ring, an
+arc per area or deepest folder, newest first clockwise, the links as B-splines bundled along the folder tree after
+Holten 2006, `graph/bundle.ts`, coloured by the source note's area, the last 21 days' links in the glow; a link's date
+is the younger of its two notes', the scan having no link dates), Map (since UX5 the default: every area a country of
+hex fields on an axial grid, grown in birth order, links as roads, a semantic zoom; `graph/territory.ts`) and Hex (a
+honeycomb in the areas' wedges); a stored `rings` reads as `bundle` — plus a separate `layoutOrbit` used only
 by the dashboard-centre background widget (since UX4 a Goldberg hive sphere, `graph/hive.ts`: notes as cells among dark
 unsettled ones, glowing by age, with skills/routines/newest notes as an icon rim) — Orbit is the fixed name for that background widget
 specifically, distinct from "Second Brain" (the full-screen view it opens into on click).

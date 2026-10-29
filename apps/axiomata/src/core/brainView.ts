@@ -23,19 +23,26 @@ export interface BrainView {
 }
 
 /**
- * The Second Brain's layouts: `rings` puts the notes on arcs in their area's segment, `map` makes every area a
- * country of hex fields (UX5), `hex` tiles the notes as a honeycomb in the rings' area wedges (the layout before the
- * map, brought back as a choice).
+ * The Second Brain's layouts (`docs/plans/brain-views.md`): `bundle` puts the notes on one ring, an arc per area, and
+ * bundles their links through the middle (it replaced the earlier `rings`, Q1), `map` makes every area a country of hex
+ * fields (UX5), `hex` tiles the notes as a honeycomb in the areas' wedges (the layout before the map, brought back as a
+ * choice).
  */
-export type BrainLayout = "rings" | "map" | "hex";
+export type BrainLayout = "bundle" | "map" | "hex";
 
 export const BRAIN_LAYOUTS: readonly { id: BrainLayout; label: string }[] = [
-  { id: "rings", label: "Rings" },
+  { id: "bundle", label: "Bundle" },
   { id: "map", label: "Map" },
   { id: "hex", label: "Hex" },
 ];
 
 const isLayout = (value: unknown): value is BrainLayout => BRAIN_LAYOUTS.some((x) => x.id === value);
+
+/** A stored layout read as today's: `rings` was replaced by `bundle` (brain-views Q7), so its choosers land there. */
+function readLayout(value: unknown): BrainLayout | undefined {
+  if (value === "rings") return "bundle";
+  return isLayout(value) ? value : undefined;
+}
 
 /** The hex cells' shimmer: `calm` holds still, `twinkle` breathes each cell, `metal` lights each by its tilt. */
 export type Shine = "calm" | "twinkle" | "metal";
@@ -79,7 +86,7 @@ const isSpeed = (value: unknown): value is number =>
 /**
  * The stored view setting, read defensively. A file written before the setting existed has the old Second Brain
  * preferences (`spin`: the slider, 0 = off; `fileNames`; `layout`, which the view kept there until it became a setting)
- * instead, and those are taken over.
+ * instead, and those are taken over. A layout that no longer exists by its stored name is read as its successor.
  */
 export function readBrainView(stored: unknown, legacySecondBrain?: unknown): BrainView {
   const own = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
@@ -95,7 +102,7 @@ export function readBrainView(stored: unknown, legacySecondBrain?: unknown): Bra
     fileNames:
       typeof own.fileNames === "boolean" ? own.fileNames : legacy.fileNames === true || DEFAULT_BRAIN_VIEW.fileNames,
     shine: SHINES.some((x) => x.id === own.shine) ? (own.shine as Shine) : DEFAULT_BRAIN_VIEW.shine,
-    layout: isLayout(own.layout) ? own.layout : isLayout(legacy.layout) ? legacy.layout : DEFAULT_BRAIN_VIEW.layout,
+    layout: readLayout(own.layout) ?? readLayout(legacy.layout) ?? DEFAULT_BRAIN_VIEW.layout,
   };
 }
 

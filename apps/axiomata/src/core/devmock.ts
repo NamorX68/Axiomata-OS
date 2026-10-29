@@ -774,14 +774,19 @@ function mockGraph(): WorkspaceGraph {
   for (const [area, n] of areas) {
     for (let i = 0; i < n; i++) {
       const title = `${area.split(" ")[0]} Notiz ${i + 1}`;
+      // A few sub-folders, for grouping by folders (the Bundle bundles along them).
+      const sub = area === "Entwicklung" ? ["Rust/", "Web/", ""][i % 3] : area === "KI" && i % 4 === 0 ? "Modelle/" : "";
+      const modified = new Date(Date.now() - rnd() * 90 * 86_400_000).toISOString();
+      // A vault grown over a year, area by area, for the time travel; every eleventh note is new (the glow).
+      const created = new Date(Date.now() - (90 + rnd() * 270) * 86_400_000).toISOString();
+      const fresh = files.length % 11 === 5 ? new Date(Date.now() - (files.length % 18) * 86_400_000).toISOString() : null;
       files.push({
-        path: `${area}/${title}.md`,
+        path: `${area}/${sub}${title}.md`,
         area,
         title,
         bytes: Math.floor(200 + rnd() * 9000),
-        modified: new Date(Date.now() - rnd() * 90 * 86_400_000).toISOString(),
-        // A vault grown over a year, area by area, for the time travel.
-        created: new Date(Date.now() - (90 + rnd() * 270) * 86_400_000).toISOString(),
+        modified: fresh ?? modified,
+        created: fresh ?? created,
         is_markdown: true,
       });
     }

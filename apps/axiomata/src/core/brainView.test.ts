@@ -31,11 +31,17 @@ describe("readBrainView", () => {
   it("offers three layouts, the map by default, and keeps the layout the view stored before it was a setting", () => {
     expect(readBrainView(undefined).layout).toBe("map");
     expect(readBrainView({ layout: "hex" }).layout).toBe("hex");
-    expect(readBrainView({ layout: "rings" }).layout).toBe("rings");
-    expect(readBrainView(undefined, { layout: "rings", grouping: "folders" }).layout).toBe("rings");
+    expect(readBrainView({ layout: "bundle" }).layout).toBe("bundle");
+    expect(readBrainView(undefined, { layout: "bundle", grouping: "folders" }).layout).toBe("bundle");
     expect(readBrainView(undefined, { layout: "hex" }).layout).toBe("hex");
     expect(readBrainView({ layout: "map" }, { layout: "rings" }).layout).toBe("map");
     expect(readBrainView({ layout: "circle" }, { layout: "spiral" }).layout).toBe("map");
+  });
+
+  it("reads a stored Rings layout as Bundle, which replaced it (brain-views Q7)", () => {
+    expect(readBrainView({ layout: "rings" }).layout).toBe("bundle");
+    expect(readBrainView(undefined, { layout: "rings", grouping: "folders" }).layout).toBe("bundle");
+    expect(readBrainView({ layout: "rings" }, { layout: "hex" }).layout).toBe("bundle");
   });
 
   it("lights the cells like metal unless another shimmer was chosen (G7)", () => {

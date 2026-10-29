@@ -1,6 +1,6 @@
 # Bündel + Wachstum — zwei neue Darstellungen im Second Brain
 
-Stand: 2026-10-29, **gegrillt** (Q1–Q11, Owner). Grundlage: der Mock `docs/plans/brain-views/brain-views-mock.html`
+Stand: 2026-10-29, **gegrillt** (Q1–Q11, Owner); **BV1 gebaut** (Branch `brain`). Grundlage: der Mock `docs/plans/brain-views/brain-views-mock.html`
 (sechs Alternativen, Recherche und Quellen in `docs/plans/brain-views/README.md`); der Owner wählte daraus „Bündel“
 und „Wachstum“. Heute: Rings, Map, Hex (`core/brainView.ts` `layout`, `graph/layout.ts`, `graph/render.ts`,
 `shell/SecondBrainView.svelte`).

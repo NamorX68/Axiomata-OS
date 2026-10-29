@@ -1,34 +1,23 @@
 /**
- * Ring layout (the reference look): hub at the centre, skills on an inner
- * ring, files on concentric arcs inside their area's angular segment.
- * Routines are not drawn (owner, 2026-10-07: they live on the Routines board). Positions are in graph units where 1 = the
- * outer radius; the renderer scales to the canvas.
+ * Where the graph's nodes sit: the Orbit's cloud and rings, and the Second Brain's layouts — Bundle (one ring of
+ * notes, `layoutBundle`), Map (`layoutMap`) and Hex (`layoutHex`). Routines are not drawn (owner, 2026-10-07: they live
+ * on the Routines board). Positions are in graph units where 1 = the outer radius; the renderer scales to the canvas.
  */
 
 import type { BrainLayout } from "../core/brainView";
+import { BUNDLE_ROOT, dirKey, type BundleArc, type BundleLayout, type BundlePoint } from "./bundle";
 import type { AreaSegment, GraphModel, GraphNode } from "./model";
 import { axialToPixel, buildTerritory, cellKey, NEIGHBOURS } from "./territory";
 
+/** Hex's frame around the honeycomb: the skills' ring and the areas' markers inside it, the cells' outer edge. */
 export const RING = {
   skills: 0.17,
   areas: 0.3,
-  filesInner: 0.39,
   filesOuter: 0.84,
 } as const;
 
-/** Hex's own file-band inner radius, deliberately independent of
- *  `RING.filesInner` (Rings only) rather than derived from it —
- *  owner feedback was that Rings' gap to the hub cluster was too
- *  large (fixed by shrinking `RING.filesInner` above) while Hex's existing
- *  gap already looked right, so the two must not move together. This is
- *  the same absolute radius Hex used before that change (was
- *  `RING.filesInner + 0.32` back when `RING.filesInner` was `0.4`). */
+/** Where the honeycomb's cells begin (graph units): clear of the skill and area markers in the middle. */
 const HEX_FILES_INNER = 0.72;
-
-/** Arc spacing between file dots in graph units (at radius r the dot
- *  spacing along the arc is this). */
-const ARC_STEP = 0.028;
-const RING_STEP = 0.032;
 
 function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2): void {
   const n = nodes.length;
@@ -203,10 +192,12 @@ export function layoutExpandedGroup(members: GraphNode[], anchorAngle: number): 
 export function applyLayout(model: GraphModel, kind: LayoutKind): void {
   if (kind === "map") layoutMap(model);
   else if (kind === "hex") layoutHex(model);
-  else layoutRings(model);
+  else layoutBundle(model);
 }
 
-export function layoutRings(model: GraphModel): void {
+/** Hex's frame: the hub at the centre, the skills on a small ring around it, each area's marker at the middle of its
+ *  wedge — the honeycomb (`layoutHex`) fills the band outside them. */
+function layoutHexFrame(model: GraphModel): void {
   const hub = model.byId.get("hub");
   if (hub) {
     hub.x = 0;
@@ -217,7 +208,6 @@ export function layoutRings(model: GraphModel): void {
     RING.skills,
     -Math.PI / 2 + 0.6,
   );
-  // Area nodes sit at the middle angle of their own segment.
   for (const seg of model.areas) {
     const node = model.byId.get(`area:${seg.name}`);
     if (!node) continue;
@@ -225,48 +215,6 @@ export function layoutRings(model: GraphModel): void {
     node.x = Math.cos(a) * RING.areas;
     node.y = Math.sin(a) * RING.areas;
   }
-
-  // Files: per area, fill successive arcs from the inner radius outwards.
-  const files = model.nodes.filter((n) => n.kind === "file");
-  const loose = files.filter((n) => n.area === null);
-  for (const seg of model.areas) {
-    const mine = files
-      .filter((n) => n.area === seg.name)
-      .sort((a, b) => a.label.localeCompare(b.label));
-    const span = seg.end - seg.start;
-    // First pass: how many arcs does this segment need at the natural
-    // spacing?
-    const rows: GraphNode[][] = [];
-    let radius: number = RING.filesInner;
-    let i = 0;
-    while (i < mine.length) {
-      const perArc = Math.max(1, Math.floor((span * radius) / ARC_STEP));
-      rows.push(mine.slice(i, i + perArc));
-      i += perArc;
-      radius = Math.min(RING.filesOuter, radius + RING_STEP);
-    }
-    const bandSpan = RING.filesOuter - RING.filesInner;
-    // Rows are spread a little past the natural minimum spacing so a vault
-    // needing just a couple of rows doesn't look huddled at the very inner
-    // edge — but capped at a modest multiple of RING_STEP. Spreading them
-    // across the *whole* band instead (bandSpan / (rows.length - 1)) reads
-    // fine with many rows (naturally close to that already), but for
-    // exactly two rows it flung the second one all the way to the outer
-    // edge, reading as an unrelated second cluster rather than more of the
-    // same folder's files (owner feedback, live testing).
-    const stepR = rows.length > 1 ? Math.min(RING_STEP * 3, Math.max(RING_STEP, bandSpan / (rows.length - 1))) : 0;
-    rows.forEach((row, k) => {
-      const r = Math.min(RING.filesOuter, RING.filesInner + k * stepR);
-      const step = row.length > 1 ? span / (row.length - 1) : 0;
-      row.forEach((node, j) => {
-        const a = row.length > 1 ? seg.start + j * step : (seg.start + seg.end) / 2;
-        node.x = Math.cos(a) * r;
-        node.y = Math.sin(a) * r;
-      });
-    });
-  }
-  // Loose root files sit on a small ring between skills and the areas.
-  placeRing(loose, (RING.skills + RING.filesInner) / 2, Math.PI / 2);
 }
 
 /** The 6 axial unit directions, in ring-walking order — convention-
@@ -322,13 +270,10 @@ interface HexCell {
 }
 
 /** Solves one hex circumradius `u` (graph units) so `fileCount` hexes, each
- *  of area (3√3/2)u², cover roughly the annulus Rings uses for files (with
- *  a little slack so the outermost ring isn't razor-tight against
- *  neighbours) — plus the ring-spiral index `kStart` to start generating
- *  cells from. The mosaic starts further out than Rings' dots do
- *  (`HEX_FILES_INNER`, not `RING.filesInner`) — otherwise the innermost
- *  cells crowd right up against the skill/routine/area icons and make them
- *  hard to pick out. */
+ *  of area (3√3/2)u², cover roughly the band from `HEX_FILES_INNER` to
+ *  `RING.filesOuter` (with a little slack so the outermost ring isn't
+ *  razor-tight against neighbours) — plus the ring-spiral index `kStart` to
+ *  start generating cells from. */
 function solveHexUnit(fileCount: number): { u: number; kStart: number } {
   const innerR = HEX_FILES_INNER;
   const outerR = RING.filesOuter;
@@ -368,8 +313,7 @@ function generateHexCells(unit: number, kStart: number, targetCount: number): He
  *  whatever cells are still free, nearest first. Mutates each file node's
  *  `x`/`y` in place. */
 function assignFilesToCells(files: GraphNode[], areas: AreaSegment[], cells: HexCell[]): void {
-  // Loose (no-area) files don't get a proper wedge in Rings either — give
-  // them a narrow slice pointing at the same spot Rings parks their ring.
+  // Loose (no-area) files have no wedge of their own: a narrow slice at 6 o'clock.
   const wedges = [
     ...areas.map((s) => ({ area: s.name, start: s.start, end: s.end })),
     { area: null, start: Math.PI / 2 - 0.15, end: Math.PI / 2 + 0.15 },
@@ -419,20 +363,19 @@ function assignFilesToCells(files: GraphNode[], areas: AreaSegment[], cells: Hex
   }
 }
 
-/** Honeycomb layout: hub / skills / area markers exactly as in
- *  Rings (so the centre still reads the same way); every file gets its own
- *  hex cell instead of a dot, tiled as a true flat-top hex grid (a spiral
- *  of rings out from the origin, per `hexRing`) so neighbouring notes touch
- *  edge-to-edge like a honeycomb. Cells are handed out per area, in the
- *  same angular wedge each area already owns in Rings, so the
- *  overall shape still reads as "areas around a hub" — just made of hex
- *  tiles instead of arcs of dots. One shared cell size (`model.hexUnit`,
- *  graph units) is solved from the file count so the mosaic fills roughly
- *  the same band Rings uses for files, then everything is rescaled to
- *  land exactly on that band's outer edge; the renderer reads `hexUnit`
- *  back to draw each cell at the matching pixel size. */
+/** Honeycomb layout: hub, skills and area markers in the middle
+ *  (`layoutHexFrame`); every file gets its own hex cell, tiled as a true
+ *  flat-top hex grid (a spiral of rings out from the origin, per `hexRing`)
+ *  so neighbouring notes touch edge-to-edge like a honeycomb. Cells are
+ *  handed out per area, in the angular wedge each area owns
+ *  (`model.areas`), so the overall shape still reads as "areas around a
+ *  hub" — just made of hex tiles. One shared cell size (`model.hexUnit`,
+ *  graph units) is solved from the file count so the mosaic fills the band,
+ *  then everything is rescaled to land exactly on that band's outer edge;
+ *  the renderer reads `hexUnit` back to draw each cell at the matching pixel
+ *  size. */
 export function layoutHex(model: GraphModel): void {
-  layoutRings(model);
+  layoutHexFrame(model);
   const files = model.nodes.filter((n) => n.kind === "file");
   if (files.length === 0) {
     model.hexUnit = undefined;
@@ -516,4 +459,146 @@ export function layoutMap(model: GraphModel): void {
     area.x = mine.reduce((s, n) => s + n.x, 0) / Math.max(1, mine.length);
     area.y = mine.reduce((s, n) => s + n.y, 0) / Math.max(1, mine.length);
   }
+}
+
+/** The Bundle layout's radii (graph units): the notes' ring, the areas' coloured band just outside it, their icons and
+ *  names further out, and the skills' ring outside all of them — inside the lens's faded rim (0.9). */
+export const BUNDLE = {
+  notes: 0.6,
+  band: 0.625,
+  areas: 0.665,
+  names: 0.715,
+  skills: 0.82,
+} as const;
+
+/** The most angle between two arcs (radians); fewer is taken when many arcs share the ring (folders). */
+const BUNDLE_GAP = 0.05;
+/** The share of the ring the gaps may take at most, however many arcs there are. */
+const BUNDLE_GAP_SHARE = 0.2;
+
+/** A folder path's segments, so that siblings sort together ("Foo/Bar" right after "Foo", not after "Foo Baz"). */
+function compareFolders(a: string, b: string): number {
+  const as = a.split("/");
+  const bs = b.split("/");
+  for (let i = 0; i < Math.min(as.length, bs.length); i++) {
+    const c = as[i]!.localeCompare(bs[i]!);
+    if (c !== 0) return c;
+  }
+  return as.length - bs.length;
+}
+
+/** Newest first; a note without a time last; ties by name, so the ring is stable. */
+function newestFirst(a: GraphNode, b: GraphNode): number {
+  return (bornOf(b) ?? -Infinity) - (bornOf(a) ?? -Infinity) || a.label.localeCompare(b.label);
+}
+
+/**
+ * The Bundle layout (`docs/plans/brain-views.md`, BV1): every note on one ring, an arc per area — per deepest folder
+ * when grouped by folders, which makes the ring finer (Q8) — with a gap between arcs; on each arc the newest note
+ * first, the older ones clockwise after it (Q4). Area icons sit outside the ring, the skills on a second ring further
+ * out (Q5); nothing in the middle, where the links run. `model.bundle` keeps the tree the links bundle along: each
+ * note's parent is its area (or folder, then that folder's parents), the area's the root — every inner node at the
+ * middle of its notes' angles, the further from the ring the more levels it has below it (the radii of d3's cluster
+ * layout).
+ */
+export function layoutBundle(model: GraphModel): void {
+  const hub = model.byId.get("hub");
+  if (hub) {
+    hub.x = 0;
+    hub.y = 0;
+  }
+  placeRing(
+    model.nodes.filter((n) => n.kind === "skill"),
+    BUNDLE.skills,
+  );
+
+  const files = model.nodes.filter((n) => n.kind === "file");
+  const byArea = new Map<string | null, GraphNode[]>();
+  for (const n of files) byArea.set(n.area, [...(byArea.get(n.area) ?? []), n]);
+  const named = [...byArea.keys()].filter((a): a is string => a !== null).sort(compareFolders);
+  const order: (string | null)[] = byArea.has(null) ? [...named, null] : named;
+
+  const gap = order.length > 1 ? Math.min(BUNDLE_GAP, (Math.PI * 2 * BUNDLE_GAP_SHARE) / order.length) : 0;
+  const usable = Math.PI * 2 - gap * order.length;
+  const total = Math.max(1, files.length);
+  let angle = -Math.PI / 2 + gap / 2;
+  const arcs: BundleArc[] = [];
+  const angleOf = new Map<string, number>();
+  for (const area of order) {
+    const mine = (byArea.get(area) ?? []).slice().sort(newestFirst);
+    const span = (mine.length / total) * usable;
+    arcs.push({ area, start: angle, end: angle + span, count: mine.length });
+    mine.forEach((n, i) => {
+      const a = angle + ((i + 0.5) / mine.length) * span;
+      angleOf.set(n.id, a);
+      n.x = Math.cos(a) * BUNDLE.notes;
+      n.y = Math.sin(a) * BUNDLE.notes;
+    });
+    if (area !== null) {
+      const node = model.byId.get(`area:${area}`);
+      if (node) {
+        const mid = angle + span / 2;
+        node.x = Math.cos(mid) * BUNDLE.areas;
+        node.y = Math.sin(mid) * BUNDLE.areas;
+      }
+    }
+    angle += span + gap;
+  }
+
+  // The tree: root → each folder level of the area's name → the notes.
+  const parent = new Map<string, string>();
+  const children = new Map<string, string[]>();
+  const link = (child: string, up: string) => {
+    if (parent.has(child)) return;
+    parent.set(child, up);
+    children.set(up, [...(children.get(up) ?? []), child]);
+  };
+  for (const arc of arcs) {
+    let up = BUNDLE_ROOT;
+    if (arc.area !== null) {
+      const parts = arc.area.split("/");
+      for (let i = 1; i <= parts.length; i++) {
+        const key = dirKey(parts.slice(0, i).join("/"));
+        link(key, up);
+        up = key;
+      }
+    }
+    for (const n of byArea.get(arc.area) ?? []) link(n.id, up);
+  }
+  // A child's order follows the ring: its own notes and folders in the order they were linked, which is the arcs'.
+  for (const list of children.values()) list.sort((a, b) => (firstAngle(a) ?? 0) - (firstAngle(b) ?? 0));
+  function firstAngle(key: string): number | undefined {
+    const own = angleOf.get(key);
+    if (own !== undefined) return own;
+    const kids = children.get(key) ?? [];
+    return kids.length > 0 ? firstAngle(kids[0]!) : undefined;
+  }
+
+  const height = new Map<string, number>();
+  const heightOf = (key: string): number => {
+    const known = height.get(key);
+    if (known !== undefined) return known;
+    const kids = children.get(key) ?? [];
+    const h = kids.length === 0 ? 0 : 1 + Math.max(...kids.map(heightOf));
+    height.set(key, h);
+    return h;
+  };
+  const rootHeight = Math.max(1, heightOf(BUNDLE_ROOT));
+  const points = new Map<string, BundlePoint>();
+  const angles = new Map<string, number>();
+  const place = (key: string): number => {
+    const done = angles.get(key);
+    if (done !== undefined) return done;
+    const kids = children.get(key) ?? [];
+    const kidAngles = kids.map(place);
+    // d3's cluster: an inner node lies midway between its first and its last child.
+    const a = angleOf.get(key) ?? (kids.length > 0 ? (kidAngles[0]! + kidAngles[kids.length - 1]!) / 2 : -Math.PI / 2);
+    angles.set(key, a);
+    const r = key === BUNDLE_ROOT ? 0 : BUNDLE.notes * (1 - heightOf(key) / rootHeight);
+    points.set(key, { x: Math.cos(a) * r, y: Math.sin(a) * r });
+    return a;
+  };
+  place(BUNDLE_ROOT);
+  model.bundle = { arcs, points, parent } satisfies BundleLayout;
+  model.hexUnit = undefined;
 }

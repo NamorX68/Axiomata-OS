@@ -9,7 +9,7 @@
   import { drawGlyph } from "./render";
 
   /** `app` nodes only exist in orbit mode (the dashboard background's App
-   *  Ring) — this legend covers the Second Brain's own rings/map/hex
+   *  Ring) — this legend covers the Second Brain's own bundle/map/hex
    *  views, which never show one. Excluding it from the type (rather than
    *  giving `NodeKind`'s full `Record` a phantom, never-read `app` entry)
    *  keeps the exhaustiveness check meaningful: a kind this legend actually
@@ -17,25 +17,37 @@
   type LegendKind = Exclude<NodeKind, "app">;
 
   /** The "file" swatch is what a note is drawn as in the shown layout: the
-   *  map's pointy-top field, the honeycomb's flat-top cell, or the rings' dot. */
-  let { layout = "rings" }: { layout?: BrainLayout } = $props();
+   *  map's pointy-top field, the honeycomb's flat-top cell, or the bundle's dot. */
+  let { layout = "bundle" }: { layout?: BrainLayout } = $props();
 
-  const KINDS: { kind: LegendKind; label: string }[] = [
+  /** A legend row: a node kind, or (Bundle) a link — calm in its note's area colour, or new in the glow. */
+  type Entry = { kind: LegendKind; label: string } | { kind: "link" | "fresh-link"; label: string };
+
+  const ALL_KINDS: Entry[] = [
     { kind: "hub", label: "AGENTS.md (hub)" },
     { kind: "area", label: "Area (folder)" },
     { kind: "file", label: "Note / page" },
     { kind: "skill", label: "Skill" },
   ];
+  /** The bundle draws no hub (its middle is where the links run) but its links say something of their own. */
+  const BUNDLE_KINDS: Entry[] = [
+    ...ALL_KINDS.filter((k) => k.kind !== "hub"),
+    { kind: "link", label: "Link, in its note's area colour" },
+    { kind: "fresh-link", label: "Link of the last 21 days" },
+  ];
+  const KINDS = $derived(layout === "bundle" ? BUNDLE_KINDS : ALL_KINDS);
 
   let canvases: HTMLCanvasElement[] = $state([]);
 
   function paint() {
     const p = readPalette();
-    const colors: Record<LegendKind, string> = {
+    const colors: Record<Entry["kind"], string> = {
       hub: p.text,
       area: p.accent,
       file: p.muted,
       skill: p.accent,
+      link: p.muted,
+      "fresh-link": p.glow,
     };
     KINDS.forEach(({ kind }, i) => {
       const c = canvases[i];
@@ -48,10 +60,20 @@
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, 22, 22);
+      if (kind === "link" || kind === "fresh-link") {
+        // A bowed stroke, as a bundled link runs through the ring's middle.
+        ctx.strokeStyle = colors[kind];
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(3, 17);
+        ctx.quadraticCurveTo(11, 1, 19, 17);
+        ctx.stroke();
+        return;
+      }
       const r = kind === "file" ? 3 : 7;
       ctx.fillStyle = colors[kind];
       ctx.beginPath();
-      if (kind === "file" && layout !== "rings") {
+      if (kind === "file" && layout !== "bundle") {
         const hr = 6;
         // Pointy-top on the map, flat-top in the honeycomb, as each draws its cells.
         const turn = layout === "map" ? -Math.PI / 2 : 0;
@@ -88,7 +110,7 @@
 
   // Repaint whenever the canvases mount, the layout switches or the UI scale changes.
   $effect(() => {
-    void layout;
+    void KINDS;
     void $uiScale;
     paint();
   });
