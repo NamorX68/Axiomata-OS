@@ -829,6 +829,43 @@ export interface GraphFile {
   /** The earliest of frontmatter `created:`, birth and modification time (G17); the Orbit's time travel. */
   created?: string | null;
   is_markdown: boolean;
+  /**
+   * The note's tags (`docs/plans/tags-links.md` Q1): lower case, without `#`, its frontmatter's and its text's united,
+   * nested ones kept as `a/b`. Missing on an older backend.
+   */
+  tags?: string[];
+}
+
+/** One entry of the vault's tag list, `TAGS.md` (`get_tag_list`, `save_tag_list`). */
+export interface TagEntry {
+  /** Lower case, without `#`. */
+  tag: string;
+  description: string;
+}
+
+/** A tag an agent wanted that is not on the list, waiting for the owner (`tag_proposals`). */
+export interface TagProposal {
+  id: number;
+  tag: string;
+  description: string;
+  /** The notes that asked for it; an accepted tag is set there. */
+  notes: string[];
+  proposed_by: string;
+  proposed_at: string;
+}
+
+/** What answering a proposal did (`answer_tag_proposal`). */
+export interface TagAnswer {
+  tag: string;
+  accepted: boolean;
+  notes_tagged: number;
+  notes_failed: string[];
+}
+
+/** What a rename changed or would change (`rename_note_links`, `rename_tag`): notes, and links or uses of the tag. */
+export interface RenameCount {
+  files: number;
+  links: number;
 }
 
 export interface GraphArea {

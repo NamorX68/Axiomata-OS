@@ -49,6 +49,7 @@ import type {
   CardEvent,
   TaskState,
 } from "./backend";
+import { mockGraphTags, mockTagCommand } from "./devmockTags";
 import { hunksFromTexts, parseHunkHeader } from "../editor/diff/hunks";
 import { textLines } from "../editor/diff/model";
 
@@ -887,6 +888,7 @@ function mockGraph(): WorkspaceGraph {
         modified: fresh ?? modified,
         created: fresh ?? created,
         is_markdown: true,
+        tags: mockGraphTags(area, i),
       });
     }
   }
@@ -1424,6 +1426,8 @@ function mockVersion(content: string): string {
 
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   await delay();
+  const tagAnswer = mockTagCommand(cmd, args);
+  if (tagAnswer) return tagAnswer.value as T;
   switch (cmd) {
     case "get_app_info":
       return {

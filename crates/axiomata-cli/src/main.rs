@@ -11,6 +11,7 @@ mod harness_watch;
 mod inbox_cmd;
 mod maintenance_cmd;
 mod models_cmd;
+mod notes_cmd;
 
 use std::path::{Path, PathBuf};
 
@@ -133,6 +134,12 @@ enum Command {
     Inbox {
         #[command(subcommand)]
         action: inbox_cmd::InboxAction,
+    },
+    /// The vault's notes (`docs/plans/tags-links.md`): `tag` sets tags from the list and `## Related` links on one note
+    /// (what `inbox-sort` and `vault-tagging` may do), `tags list` prints the tag list.
+    Notes {
+        #[command(subcommand)]
+        action: notes_cmd::NotesAction,
     },
     /// The `PermissionRequest` hook of a studio session's Claude Code (`docs/plans/permission-asks.md`): stores the
     /// request from stdin, waits for the owner's answer in the app and prints it for Claude Code — or nothing, and
@@ -809,6 +816,7 @@ async fn main() -> Result<()> {
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
         Command::McpServe => return mcp_serve(&core),
         Command::Maintenance { action } => maintenance_cmd::run(&core, action)?,
+        Command::Notes { action } => notes_cmd::run(&core, action)?,
         Command::Inbox { .. } => unreachable!("answered before the core starts"),
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
@@ -2736,8 +2744,9 @@ fn board_add(
 }
 
 /// Whether a skill run of the app may run `command` (glut-round, fourth audit): looking (status, skills, runs, the
-/// board) and adding a plain card — what the bundled skills need. `inbox move` is answered before this, and the rest
-/// (routines, the IDE, files, agents, other runs, imports, the board's other steps) is the owner's.
+/// board, the tag list), adding a plain card and setting a note's tags and links (`notes tag`, which checks every tag
+/// and link itself, `docs/plans/tags-links.md` V2) — what the bundled skills need. `inbox move` is answered before
+/// this, and the rest (routines, the IDE, files, agents, other runs, imports, the board's other steps) is the owner's.
 fn skill_run_may(command: &Command) -> bool {
     match command {
         Command::Status
@@ -2747,6 +2756,13 @@ fn skill_run_may(command: &Command) -> bool {
         Command::Board { action } => {
             matches!(action, BoardAction::List { .. } | BoardAction::Add { .. })
         }
+        Command::Notes { action } => matches!(
+            action,
+            notes_cmd::NotesAction::Tag { .. }
+                | notes_cmd::NotesAction::Tags {
+                    action: notes_cmd::TagsAction::List { .. }
+                }
+        ),
         _ => false,
     }
 }
@@ -3220,6 +3236,8 @@ mod tests {
             &["board", "add", "--column", "1", "t"],
             &["list-skills"],
             &["list-runs"],
+            &["notes", "tag", "A/x.md", "--tag", "rust", "--related", "B"],
+            &["notes", "tags", "list"],
             &[],
         ] {
             assert!(may(allowed), "{allowed:?}");

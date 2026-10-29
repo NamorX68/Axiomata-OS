@@ -27,6 +27,7 @@ mod maintenance;
 mod menu;
 mod model_watch;
 mod plan_watch;
+mod tags;
 mod tasks;
 mod terminal;
 mod vault_watch;
@@ -368,6 +369,12 @@ pub fn run() {
             maintenance::maintenance_clean,
             maintenance::maintenance_save_settings,
             maintenance::maintenance_remove_worktree,
+            tags::get_tag_list,
+            tags::save_tag_list,
+            tags::tag_proposals,
+            tags::answer_tag_proposal,
+            tags::rename_tag,
+            tags::rename_note_links,
             wallpaper::wallpaper_pick,
             wallpaper::wallpaper_read,
             wallpaper::wallpaper_clear,

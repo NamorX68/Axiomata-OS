@@ -68,7 +68,7 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> AxiomataError {
 }
 
 /// The workspace as a strict `axiomata-files` root.
-fn workspace_root(config: &Config) -> Result<Root, AxiomataError> {
+pub(crate) fn workspace_root(config: &Config) -> Result<Root, AxiomataError> {
     let dir = guarded_root(config)?;
     Root::dir(&dir, LinkPolicy::Strict).map_err(from_files)
 }
@@ -77,7 +77,7 @@ fn workspace_root(config: &Config) -> Result<Root, AxiomataError> {
 /// module have always matched on: a guard failure is
 /// [`AxiomataError::InvalidWorkspacePath`], anything the file system itself
 /// reported — a missing file or parent included — is [`AxiomataError::Io`].
-fn from_files(err: FilesError) -> AxiomataError {
+pub(crate) fn from_files(err: FilesError) -> AxiomataError {
     match err {
         FilesError::Io { path, source } => AxiomataError::Io { path, source },
         FilesError::NotFound { path } => AxiomataError::Io {

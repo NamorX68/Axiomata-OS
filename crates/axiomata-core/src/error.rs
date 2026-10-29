@@ -215,4 +215,9 @@ pub enum AxiomataError {
     /// answered, or an unknown decision (`crate::permission_ask`, card #88).
     #[error("permission request: {reason}")]
     PermissionAsk { reason: String },
+
+    /// A tag, the tag list, a note's tags or links, or a tag proposal was refused (`crate::tags`,
+    /// `docs/plans/tags-links.md`): no tag, no note an agent may tag, a link to no note, an answered proposal.
+    #[error("tags: {reason}")]
+    Tags { reason: String },
 }

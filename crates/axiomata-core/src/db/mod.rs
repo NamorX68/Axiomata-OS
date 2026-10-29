@@ -88,6 +88,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
         36,
         include_str!("migrations/0015_opencode_sessions_to_glut.sql"),
     ),
+    // Tags an agent wanted that are not on the tag list: they wait for the owner (tags-links.md, TL1).
+    (37, include_str!("migrations/0016_tag_proposals.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
