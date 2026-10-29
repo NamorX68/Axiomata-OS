@@ -34,7 +34,7 @@
   import PanelHead from "../ui/PanelHead.svelte";
   import ResizeEdges from "../ui/ResizeEdges.svelte";
   import { fromOrigin } from "../ui/fromOrigin";
-  import { clampRect, clampSize, moved, resizedWithin, type MinSize, type Rect } from "./floatingRect";
+  import { clampRect, clampSize, moved, resizedWithin, windowStyle, type MinSize, type Rect } from "./floatingRect";
 
   /** The smallest a resizable window gets by default — a staged panel's minimum (`StagingPanel.svelte`). */
   const DEFAULT_MIN_SIZE: MinSize = { w: 480, h: 240 };
@@ -165,6 +165,10 @@
     },
   });
 
+  /** The caller's `style` with the gesture's geometry after it — one attribute, never `style:` directives beside it
+   *  (`windowStyle` says why). */
+  const inlineStyle = $derived(windowStyle(style, pos, size, $uiScale));
+
   /** `use:draggable` only on a movable window; an action cannot be switched on and off by itself. */
   function maybeDraggable(node: HTMLElement, options: typeof dragOptions) {
     return movable ? draggable(node, options) : undefined;
@@ -211,11 +215,7 @@
       class:resizable
       class:positioned={pos !== null}
       class:gesture={gesture !== null}
-      {style}
-      style:left={pos ? `${pos.x * $uiScale}px` : undefined}
-      style:top={pos ? `${pos.y * $uiScale}px` : undefined}
-      style:width={size ? `${size.w * $uiScale}px` : undefined}
-      style:height={size ? `${size.h * $uiScale}px` : undefined}
+      style={inlineStyle}
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -235,11 +235,7 @@
     class:resizable
     class:positioned={pos !== null}
     class:gesture={gesture !== null}
-    {style}
-    style:left={pos ? `${pos.x * $uiScale}px` : undefined}
-    style:top={pos ? `${pos.y * $uiScale}px` : undefined}
-    style:width={size ? `${size.w * $uiScale}px` : undefined}
-    style:height={size ? `${size.h * $uiScale}px` : undefined}
+    style={inlineStyle}
     role="dialog"
     aria-label={title}
     bind:this={windowEl}

@@ -117,3 +117,27 @@ export function readRect(raw: unknown): Rect | null {
     ? { x: x as number, y: y as number, w: w as number, h: h as number }
     : null;
 }
+
+/**
+ * A window's inline style: the caller's own `style` with the geometry a gesture gave it (`pos`, `size`, unscaled)
+ * after it, drawn times `scale` — a later declaration wins, so a pulled size replaces the caller's.
+ *
+ * One string on purpose, never the `style` attribute beside `style:` directives: Svelte drops *every* property of the
+ * attribute that a directive on the same element names, even while the directive's value is `undefined` (its
+ * `to_style`), which took every window's own `width`/`height` away — the docked chat lost its height and hung from
+ * the middle of the screen. Without a gesture the caller's style comes back unchanged.
+ */
+export function windowStyle(
+  style: string,
+  pos: { x: number; y: number } | null,
+  size: { w: number; h: number } | null,
+  scale: number,
+): string {
+  const geometry = [
+    pos ? `left: ${pos.x * scale}px; top: ${pos.y * scale}px;` : "",
+    size ? `width: ${size.w * scale}px; height: ${size.h * scale}px;` : "",
+  ].filter(Boolean);
+  if (geometry.length === 0) return style;
+  const base = style.trim();
+  return [base && !base.endsWith(";") ? `${base};` : base, ...geometry].filter(Boolean).join(" ");
+}

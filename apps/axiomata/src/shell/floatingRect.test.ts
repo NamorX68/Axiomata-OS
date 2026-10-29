@@ -10,6 +10,7 @@ import {
   resizedBy,
   resizedEdge,
   resizedWithin,
+  windowStyle,
 } from "./floatingRect";
 
 const view = { w: 1600, h: 900 };
@@ -110,5 +111,19 @@ describe("readRect", () => {
     expect(readRect({ x: 1, y: 2, w: 3, h: 4 })).toEqual({ x: 1, y: 2, w: 3, h: 4 });
     expect(readRect({ x: 1, y: 2, w: "3", h: 4 })).toBeNull();
     expect(readRect(null)).toBeNull();
+  });
+});
+
+describe("windowStyle", () => {
+  it("hands the caller's style back unchanged without a gesture", () => {
+    expect(windowStyle("width: 100%; height: 100%;", null, null, 1.25)).toBe("width: 100%; height: 100%;");
+    expect(windowStyle("", null, null, 1)).toBe("");
+  });
+
+  it("puts the gesture's geometry after the caller's style, drawn times the scale", () => {
+    expect(windowStyle("width: 100%", { x: 10, y: 20 }, { w: 300, h: 200 }, 2)).toBe(
+      "width: 100%; left: 20px; top: 40px; width: 600px; height: 400px;",
+    );
+    expect(windowStyle("", null, { w: 300, h: 200 }, 1)).toBe("width: 300px; height: 200px;");
   });
 });
