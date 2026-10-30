@@ -68,7 +68,12 @@
     }
   }
 
+  /** A click opens the role's menu below the tiles (its default tier set); a second click on it closes the menu. */
   function pickRole(r: Role) {
+    if (roleName === r.name) {
+      roleName = null;
+      return;
+    }
     roleName = r.name;
     tier = r.tier;
     engineId = null;
@@ -84,6 +89,7 @@
     starting = true;
     try {
       onStarted(await startAgentChoice(projectId, role.name, tier, engineId));
+      roleName = null;
     } catch (err) {
       toast(messageOf(err), "warning");
     } finally {
@@ -129,10 +135,7 @@
         onclick={() => pickRole(r)}
       >
         <HexAvatar text={roleBadge(r.name)} ring="var(--tone)" />
-        <span class="role-text">
-          <span class="role-name">{roleTitle(r.name)}</span>
-          <span class="role-tier">{r.tier}</span>
-        </span>
+        <span class="role-name">{roleTitle(r.name)}</span>
       </button>
     {/each}
   </div>
@@ -206,7 +209,7 @@
       />
     </div>
   {:else}
-    <p class="hint">Pick a role; its default tier and that tier's default engine are chosen for you.</p>
+    <p class="hint">Pick a role, then its tier and model below.</p>
   {/if}
 </section>
 
@@ -252,14 +255,6 @@
     background: var(--ax-selected-bg);
   }
 
-  .role-text {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    max-width: 100%;
-    min-width: 0;
-  }
-
   .role-name {
     max-width: 100%;
     overflow: hidden;
@@ -267,11 +262,6 @@
     white-space: nowrap;
     font-size: var(--ax-font-size-sm);
     font-weight: 600;
-  }
-
-  .role-tier {
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
   }
 
   /* The tone of the role's kind of work, as `RoleChip` tints it. */
@@ -317,16 +307,23 @@
     font-weight: 600;
   }
 
+  /* A long model list (an OpenRouter account without its own allow-list) scrolls instead of pushing the page away:
+     about five engines show at once. */
   .engines {
     list-style: none;
     margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
+    max-height: calc(240px * var(--ax-ui-scale));
+    overflow-y: auto;
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-md);
     background: var(--ax-surface-2);
-    overflow: hidden;
+  }
+
+  .engines li {
+    flex: 0 0 auto;
   }
 
   .engines li + li {

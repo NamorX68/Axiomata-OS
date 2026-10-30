@@ -32,10 +32,10 @@ er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
   - **„Master“** — die Master-Kacheln Glut, Claude Code und Opencode.
   - **„Favorites“** — deine gemerkten Agenten als Kacheln; ein Klick startet. Ein Favorit, dessen Engine gerade nicht
     laufen kann, ist abgeblendet und wird nie still auf eine andere Engine gelegt.
-  - **„Start an agent“** — die Rollen als Kacheln (Sechseck, Name, Standard-Stufe); eine wählen, dann Light · Medium ·
-    Heavy (vorgewählt die Standard-Stufe der Rolle),
-    dann die Engine („Default of the tier“ oder eine Engine der Stufe, die Standard-Engine mit „standard“ markiert),
-    „Start“. Kürzester Weg: Rolle → „Start“. Der Stern („Keep this choice as a favorite“) merkt die Wahl.
+  - **„Start an agent“** — die sieben Rollen als Kacheln (Sechseck und Name). Ein Klick öffnet darunter das Menü, ein
+    zweiter Klick auf dieselbe Kachel oder „Start“ schließt es: Light · Medium · Heavy (vorgewählt die Standard-Stufe
+    der Rolle), dann die Engine aus einer Liste, die bei vielen Modellen scrollt („Default of the tier“ oder eine
+    Engine der Stufe, die Standard-Engine mit „standard“ markiert), „Start“. Kürzester Weg: Rolle → „Start“. Der Stern („Keep this choice as a favorite“) merkt die Wahl.
   - **„Sessions“** — nur, was dich angeht: laufende und wartende Sitzungen und unter „Waiting for you: take over or
     discard“ beendete mit Arbeit, die noch nicht übernommen ist. Ist nichts davon da: „No session runs or waits for
     you.“ Jede Sitzung hat einen Stern („Keep this agent as a favorite“).
