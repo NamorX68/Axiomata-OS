@@ -231,6 +231,20 @@
       <p class="hint">Save the rules first: "Clean up now" cleans by the saved ones.</p>
     {/if}
 
+    {#if view.axiomata.endedSessions.length > 0}
+      {@const sessions = view.axiomata.endedSessions}
+      <h3 class="sub">{view.axiomata.dryRun ? "Ended sessions a clean-up removes" : "Ended sessions removed"}</h3>
+      <p class="hint">
+        Sessions whose harness ended days ago with no work of their own — nothing uncommitted, no commit beyond their
+        base, no open card. Their worktree and branch go with them; a session with work always stays.
+      </p>
+      <ul class="orphans">
+        {#each sessions as session (session.id)}
+          <li class="orphan"><span class="path">{session.name}</span></li>
+        {/each}
+      </ul>
+    {/if}
+
     {#if waiting.length > 0}
       <h3 class="sub">Orphaned worktrees waiting for you</h3>
       <p class="hint">Their agent is gone, but they hold work nobody saved, so no clean-up removes them.</p>

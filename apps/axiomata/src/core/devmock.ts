@@ -51,7 +51,7 @@ import type {
   BundledSkill,
 } from "./backend";
 import { mockGraphTags, mockTagCommand } from "./devmockTags";
-import { mockEngineEntries, mockModelCommand } from "./devmockModels";
+import { mockAgentName, mockEngineEntries, mockModelCommand, mockResolveEngine } from "./devmockModels";
 import { hunksFromTexts, parseHunkHeader } from "../editor/diff/hunks";
 import { textLines } from "../editor/diff/model";
 
@@ -532,6 +532,9 @@ function mockStorageView(): StorageView {
               removed: false,
             },
           ],
+      endedSessions: mockStorageCleaned
+        ? []
+        : [{ id: 41, name: "Glut Light Tester (DeepSeek V4.1 Flash)", projectId: 1, removed: false }],
       error: null,
     },
     glut: {
@@ -600,7 +603,60 @@ let ideAgents: IdeAgent[] = [
     agent_role: "allrounder",
     effective_env: "REVIEW_MODE=strict\nAXIOMATA_AGENT_ID=2\nAXIOMATA_AGENT_NAME=Reviewer",
   },
+  // Sessions started from "Start an agent" (agents-model.md, AM4): one at work, one ended with work not taken over
+  // (listed under "Waiting for you"), one ended without work (not listed: the weekly clean-up removes it).
+  ...(
+    [
+      [
+        3,
+        "Glut Medium Allrounder (GLM 5.3)",
+        "glut",
+        "openrouter/z-ai/glm-5.3",
+        "glut-openrouter-z-ai-glm-5-3",
+        "allrounder",
+      ],
+      [
+        4,
+        "Glut Light Tester (DeepSeek V4.1 Flash)",
+        "glut",
+        "openrouter/deepseek/deepseek-v4.1-flash",
+        "glut-openrouter-deepseek-deepseek-v4-1-flash",
+        "tester",
+      ],
+      [
+        5,
+        "Claude Light Documenter (Haiku 5.5)",
+        "claude_code",
+        "claude-haiku-5-5",
+        "claude-code-claude-haiku-5-5",
+        "documenter",
+      ],
+    ] as const
+  ).map(
+    ([id, name, harness, model, engine, role]): IdeAgent => ({
+      id,
+      project_id: 1,
+      name,
+      harness,
+      command: "",
+      model,
+      env: "",
+      created_at: new Date(Date.now() - (id - 2) * 86_400_000).toISOString(),
+      updated_at: new Date(Date.now() - (id - 2) * 86_400_000).toISOString(),
+      effective_command: harness === "glut" ? "axiomata-cli" : `claude --model '${model}'`,
+      worktree_path: `/Users/demo/Worktrees/axiomata-agents/axiomata-os/session-${id}`,
+      branch: `axiomata/session-${id}`,
+      port: null,
+      base_branch: "main",
+      opencode_session: null,
+      engine_id: engine,
+      agent_role: role,
+      effective_env: `AXIOMATA_AGENT_ID=${id}\nAXIOMATA_AGENT_NAME=${name}`,
+    }),
+  ),
 ];
+/** The mock sessions that hold work not taken over (`ide_agents_with_work`). */
+const mockWithWork = new Set([1, 4]);
 
 const HARNESS_DEFAULTS: Record<Harness, string> = {
   opencode: "opencode",
@@ -1177,7 +1233,11 @@ export function mockActionRequest(instance: string, action: string, params: unkn
 }
 
 /** Status overrides by agent id (console: `__ax.mockAgentState(1, "idle")`). */
-const mockStates = new Map<number, AgentState>();
+const mockStates = new Map<number, AgentState>([
+  [3, "working"],
+  [4, "ended"],
+  [5, "ended"],
+]);
 
 export function mockAgentState(id: number, state: AgentState): void {
   mockStates.set(id, state);
@@ -2287,7 +2347,40 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return undefined as T;
     case "ide_agent_has_changes":
     case "ide_agent_unsaved_work":
-      return false as T;
+      return mockWithWork.has(Number(args.id)) as T;
+    case "ide_agents_with_work":
+      return ideAgents
+        .filter((a) => a.project_id === Number(args.projectId) && mockWithWork.has(a.id))
+        .map((a) => a.id) as T;
+    case "start_agent_choice": {
+      const projectId = Number(args.projectId);
+      const role = String(args.role);
+      const tier = args.tier as Role["tier"];
+      const engine = mockResolveEngine(engineEntries(), tier, (args.engineId as string | null) ?? null);
+      if (!engine) throw new Error(`roster: invalid engine: no engine of the tier ${tier} can run now`);
+      if (!mockRoles.some((r) => r.name === role)) {
+        throw new Error(`roster: invalid role: there is no role "${role}" for this project`);
+      }
+      const base = mockAgentName(engine, tier, role).name;
+      const taken = (n: string) =>
+        ideAgents.some((a) => a.project_id === projectId && a.name.toLowerCase() === n.toLowerCase());
+      let name = base;
+      for (let n = 2; taken(name); n++) name = `${base} #${n}`;
+      const created = {
+        ...mockAgent((ideAgents[ideAgents.length - 1]?.id ?? 0) + 1, projectId, {
+          name,
+          harness: engine.harness,
+          command: engine.command,
+          model: engine.model,
+          env: engine.env,
+        }),
+        engine_id: engine.id,
+        agent_role: role,
+      };
+      ideAgents = [...ideAgents, created];
+      mockStates.set(created.id, "starting");
+      return created as T;
+    }
     case "discard_ide_agent_worktree":
       return false as T;
 

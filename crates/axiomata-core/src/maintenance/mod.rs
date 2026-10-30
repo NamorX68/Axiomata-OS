@@ -11,6 +11,7 @@ mod files;
 mod fsops;
 pub mod glut;
 mod rows;
+mod sessions;
 mod worktrees;
 
 use std::collections::HashSet;
@@ -26,6 +27,7 @@ use crate::AxiomataCore;
 use crate::config::MaintenanceSettings;
 use crate::paths;
 
+pub use sessions::EndedSession;
 pub use worktrees::OrphanWorktree;
 
 /// The `app_meta` key under which the moment of the last real clean-up is kept (RFC 3339).
@@ -99,12 +101,14 @@ pub struct Report {
     /// The worktrees whose agent is gone (A3c): a clean one is removed by a clean-up (`removed`), one with changes
     /// waits for the owner.
     pub orphan_worktrees: Vec<OrphanWorktree>,
+    /// The ended sessions without work of their own (agents-model.md, Q17): a clean-up removes them (`removed`).
+    pub ended_sessions: Vec<EndedSession>,
     /// Why nothing was measured or cleaned at all (rules out of range, a folder that is not Axiomata's).
     pub error: Option<String>,
 }
 
 /// The places the maintenance works in, resolved once — tests hand in a scratch folder instead.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Locations {
     /// `~/.axiomata` (or `$AXIOMATA_HOME`).
     pub home: PathBuf,
@@ -112,6 +116,8 @@ pub struct Locations {
     pub db: PathBuf,
     /// Where the studio puts its agents' worktrees (`~/Worktrees/axiomata-agents`).
     pub worktrees: PathBuf,
+    /// The sessions' status channels, which say whether a session's harness ended.
+    pub channels: crate::ide::lifecycle::ChannelRoots,
 }
 
 impl Locations {
@@ -121,6 +127,7 @@ impl Locations {
             home: paths::axiomata_home(),
             db: paths::db_path(),
             worktrees: paths::worktrees_dir(),
+            channels: paths::ide_locations().channels,
         }
     }
 }
@@ -245,6 +252,7 @@ pub(crate) fn run(
             last_run: last_run(&lock(db)),
             items: Vec::new(),
             orphan_worktrees: Vec::new(),
+            ended_sessions: Vec::new(),
             error: Some(error),
         };
     }
@@ -286,6 +294,9 @@ pub(crate) fn run(
     let (worktree_item, orphan_worktrees) =
         worktrees::sweep(&locations.worktrees, &agents, dry_run);
     items.push(worktree_item);
+    // After the orphans: a session removed here leaves no orphan behind for the sweep above to find next time.
+    let (session_item, ended_sessions) = sessions::sweep(db, &locations.channels, now, dry_run);
+    items.push(session_item);
 
     let last_run = if dry_run {
         last_run
@@ -307,6 +318,7 @@ pub(crate) fn run(
         last_run,
         items,
         orphan_worktrees,
+        ended_sessions,
         error: None,
     }
 }

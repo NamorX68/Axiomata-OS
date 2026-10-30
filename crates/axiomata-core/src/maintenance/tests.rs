@@ -39,6 +39,16 @@ impl Scratch {
             home: self.home.clone(),
             db: self.home.join("axiomata.db"),
             worktrees: self.home.join("worktrees"),
+            channels: self.channels(),
+        }
+    }
+
+    /// The sessions' status channels inside the scratch home.
+    fn channels(&self) -> ide::lifecycle::ChannelRoots {
+        ide::lifecycle::ChannelRoots {
+            events: self.home.join("agent-events"),
+            claude_tasks: self.home.join("claude-tasks"),
+            claude_plans: self.home.join("claude-plans"),
         }
     }
 
@@ -432,6 +442,7 @@ fn rules_out_of_range_or_a_foreign_home_refuse_the_whole_pass() {
         home: s.home.join("logs"),
         db: s.home.join("logs").join("axiomata.db"),
         worktrees: s.home.join("worktrees"),
+        channels: s.channels(),
     };
     let refused = run(
         &s.db,
@@ -596,4 +607,147 @@ fn the_weekly_run_waits_a_week_and_obeys_the_switch() {
         "not again within the week"
     );
     assert!(weekly(&s.db, &on, &s.locations(), s.now + day * 8).is_some());
+}
+
+/// A repository with one commit on `main`, in the scratch home.
+fn scratch_repo(s: &Scratch) -> PathBuf {
+    let repo = s.home.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--initial-branch=main"]);
+    git(&repo, &["config", "user.email", "t@example.com"]);
+    git(&repo, &["config", "user.name", "T"]);
+    fs::write(repo.join("README.md"), "hi\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-m", "first"]);
+    repo
+}
+
+/// Writes a session's harness state as `state`, `days` ago — what the hooks would have written then.
+fn set_state(s: &Scratch, agent_id: i64, state: &str, days: i64) {
+    let dir = ide::lifecycle::Channel::for_agent(&s.channels(), agent_id)
+        .dir()
+        .to_path_buf();
+    fs::create_dir_all(&dir).unwrap();
+    let when = (s.now - chrono::Duration::days(days)).timestamp();
+    fs::write(dir.join("state"), format!("{state} {when}\n")).unwrap();
+}
+
+#[test]
+fn an_ended_session_without_work_goes_and_every_reason_to_stay_keeps_one() {
+    let s = Scratch::new("ended-sessions");
+    let repo = scratch_repo(&s);
+    let ide_locations = ide::provision::Locations {
+        worktrees: s.home.join("worktrees"),
+        channels: s.channels(),
+        permission_cli: None,
+    };
+    let names = [
+        "done",
+        "dirty",
+        "committed",
+        "master",
+        "recent",
+        "working",
+        "carded",
+        "held",
+    ];
+    let mut ids = std::collections::HashMap::new();
+    let mut paths = std::collections::HashMap::new();
+    {
+        let mut db = lock(&s.db);
+        let project = add_project(&db, &repo);
+        for name in names {
+            let agent = add_agent(&db, project, name);
+            let ready = ide::provision::prepare(&db, &ide_locations, agent.id).unwrap();
+            ids.insert(name, agent.id);
+            paths.insert(name, ready.cwd);
+        }
+        // Every session ended three days ago and was made then — but the recent one, made now.
+        for name in names.iter().filter(|n| **n != "recent") {
+            db.execute(
+                "UPDATE ide_agents SET created_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![ids[name], s.ago(3)],
+            )
+            .unwrap();
+        }
+        ide::agent_store::set_role(&db, ids["master"], ide::model::MASTER_ROLE).unwrap();
+        let board = board::store::create_board(&mut db, "B").unwrap();
+        let column = board::store::list_columns(&db, board.id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.stage.is_none())
+            .unwrap();
+        let card = board::store::create_card(
+            &db,
+            &board::NewCard {
+                column_id: column.id,
+                fields: board::CardFields {
+                    title: "open".to_owned(),
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+        ide::agent_store::set_card(&db, ids["carded"], Some(card.id), false, None).unwrap();
+    }
+    for name in names {
+        set_state(
+            &s,
+            ids[name],
+            if name == "working" {
+                "working"
+            } else {
+                "ended"
+            },
+            3,
+        );
+    }
+    // Work in a worktree: an uncommitted file, and a commit beyond the base.
+    fs::write(paths["dirty"].join("work.txt"), "unfinished").unwrap();
+    fs::write(paths["committed"].join("done.txt"), "finished").unwrap();
+    git(&paths["committed"], &["add", "."]);
+    git(&paths["committed"], &["commit", "-m", "work"]);
+    // A process still holds the session lock of "held".
+    let _held = ide::presence::hold(&s.channels(), ids["held"])
+        .unwrap()
+        .unwrap();
+
+    let settings = MaintenanceSettings::default();
+    let dry = s.run(&settings, true);
+    let found: Vec<&str> = dry.ended_sessions.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(found, ["done"], "{:?}", item(&dry, "ended_sessions"));
+    assert!(paths["done"].exists(), "a dry run removes nothing");
+
+    let done = s.run(&settings, false);
+    assert!(
+        done.ended_sessions
+            .iter()
+            .all(|e| e.name == "done" && e.removed)
+    );
+    assert!(!paths["done"].exists(), "its worktree goes");
+    let rows = lock(&s.db)
+        .query_row(
+            "SELECT COUNT(*) FROM ide_agents WHERE id = ?1",
+            [ids["done"]],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 0, "and its row");
+    let branches = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["branch", "--list", "axiomata/done-*"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&branches.stdout).trim().is_empty(),
+        "and its branch"
+    );
+    for kept in names.iter().filter(|n| **n != "done") {
+        assert!(paths[kept].exists(), "{kept} stays");
+    }
+    assert!(
+        paths["dirty"].join("work.txt").exists(),
+        "work is never thrown away"
+    );
 }

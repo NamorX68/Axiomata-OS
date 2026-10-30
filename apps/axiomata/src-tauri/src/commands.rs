@@ -3099,6 +3099,126 @@ pub fn list_agent_choices(
     )
 }
 
+// ---- Starting agents and favorites (agents-model.md, AM4) ----
+
+/// The roles of a project an agent may be started as: its roles in force, without the master's.
+fn startable_roles(
+    state: &CoreState,
+    config: &axiomata_core::config::Config,
+    project_id: i64,
+) -> Vec<axiomata_roster::Role> {
+    let db = state.db_lock();
+    axiomata_core::roster::roles_for_project(&db, config, project_id)
+        .into_iter()
+        .filter(|role| role.name != axiomata_core::ide::model::MASTER_ROLE)
+        .collect()
+}
+
+/// The engines of each tier in the order a start tries them (the first is the tier's standard).
+#[tauri::command]
+pub fn list_tier_engines(
+    state: State<'_, CoreState>,
+) -> Vec<axiomata_core::agent_start::TierEngines> {
+    let config = read_config(&state.config);
+    axiomata_core::agent_start::tier_engines(
+        &config,
+        &axiomata_core::model_tiers::ModelSources::load(),
+    )
+}
+
+/// The owner's favorites with what each would start now in project `project_id`.
+#[tauri::command]
+pub fn list_favorites(
+    state: State<'_, CoreState>,
+    project_id: i64,
+) -> Vec<axiomata_core::agent_start::FavoriteView> {
+    let config = read_config(&state.config);
+    let roles = startable_roles(&state, &config, project_id);
+    axiomata_core::agent_start::favorite_views(
+        &config,
+        &axiomata_core::model_tiers::ModelSources::load(),
+        &roles,
+    )
+}
+
+/// Adds a favorite or removes it; answers whether it is one now. Only the live config's favorites change.
+#[tauri::command]
+pub fn toggle_favorite(
+    state: State<'_, CoreState>,
+    favorite: axiomata_core::agent_start::Favorite,
+) -> Result<bool, String> {
+    let mut config = read_config(&state.config);
+    let now = axiomata_core::agent_start::toggle_favorite(&mut config, favorite)
+        .map_err(|err| err.to_string())?;
+    state
+        .config
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .agents
+        .favorites = config.agents.favorites;
+    Ok(now)
+}
+
+/// Starts an agent: `role` at `tier` on `engine_id`, or on the tier's default engine when `None` — a new session made
+/// the one way sessions are made (`roster::create_agent_on_engine`), named by `agent_name`.
+#[tauri::command]
+pub fn start_agent_choice(
+    state: State<'_, CoreState>,
+    project_id: i64,
+    role: String,
+    tier: axiomata_roster::Tier,
+    engine_id: Option<String>,
+) -> Result<ide::Agent, String> {
+    let config = read_config(&state.config);
+    let sources = axiomata_core::model_tiers::ModelSources::load();
+    let roles = startable_roles(&state, &config, project_id);
+    let db = state.db_lock();
+    axiomata_core::agent_start::start(
+        &db,
+        &config,
+        &sources,
+        &roles,
+        project_id,
+        &role,
+        tier,
+        engine_id.as_deref(),
+    )
+    .map_err(|err| err.to_string())
+}
+
+/// The sessions of `project_id` that hold work not taken over (uncommitted changes, or commits beyond their base) —
+/// what the Agents tab lists as "waiting for you". Git runs without the database lock; one that cannot be judged counts
+/// as holding work.
+#[tauri::command]
+pub async fn ide_agents_with_work(
+    state: State<'_, CoreState>,
+    project_id: i64,
+) -> Result<Vec<i64>, String> {
+    let checkouts = {
+        let db = state.db_lock();
+        let agents =
+            ide::agent_store::list_agents(&db, project_id).map_err(|err| err.to_string())?;
+        agents
+            .into_iter()
+            .filter(|agent| !agent.is_master())
+            .filter_map(|agent| {
+                ide::provision::AgentCheckout::read(&db, agent.id)
+                    .ok()
+                    .flatten()
+                    .map(|checkout| (agent.id, checkout))
+            })
+            .collect::<Vec<_>>()
+    };
+    off_main(move || {
+        Ok(checkouts
+            .into_iter()
+            .filter(|(_, checkout)| checkout.has_unsaved_work().unwrap_or(true))
+            .map(|(id, _)| id)
+            .collect())
+    })
+    .await
+}
+
 #[tauri::command]
 pub fn list_roles() -> Result<axiomata_roster::Loaded, String> {
     axiomata_core::roster::list_roles().map_err(|err| err.to_string())

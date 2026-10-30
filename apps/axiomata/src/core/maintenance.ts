@@ -41,6 +41,14 @@ export interface OrphanWorktree {
   removed: boolean;
 }
 
+/** An ended session without work of its own (agents-model.md, Q17): a clean-up removes it with its worktree. */
+export interface EndedSession {
+  id: number;
+  name: string;
+  projectId: number;
+  removed: boolean;
+}
+
 export interface MaintenanceReport {
   dryRun: boolean;
   home: string;
@@ -49,6 +57,8 @@ export interface MaintenanceReport {
   lastRun: string | null;
   items: MaintenanceItem[];
   orphanWorktrees: OrphanWorktree[];
+  /** Ended sessions without work: found (a report) or removed (a clean-up). */
+  endedSessions: EndedSession[];
   error: string | null;
 }
 

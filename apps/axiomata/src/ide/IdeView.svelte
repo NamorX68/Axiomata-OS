@@ -59,7 +59,7 @@
     type Layout,
     type PaneTab,
   } from "./layout";
-  import type { AgentSpec, Harness, IdeAgent } from "../core/backend";
+  import type { Harness, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
   import { masterSession, watchLine } from "./agents";
   import TasksPanel from "./TasksPanel.svelte";
@@ -663,9 +663,10 @@
     }
   }
 
-  async function addAgent(spec: AgentSpec) {
-    const created = await projectSession.addAgent(spec);
-    if (created) openAgent(created);
+  /** A session started from the Agents tab: read the list again (it is new) and put it into a pane. */
+  async function startedAgent(agent: IdeAgent) {
+    await projectSession.refreshAgents();
+    openAgent(projectSession.agentById(agent.id) ?? agent);
   }
 
   /**
@@ -1063,7 +1064,7 @@
           onManage={openRoster}
           onOpen={openAgent}
           onMaster={(harness) => void openMaster(harness)}
-          onCreate={(spec) => addAgent(spec)}
+          onStarted={(agent) => void startedAgent(agent)}
           onEdit={(id, spec) => void projectSession.editAgent(id, spec)}
           onRemove={(id, force) => void projectSession.removeAgent(id, force)}
         />

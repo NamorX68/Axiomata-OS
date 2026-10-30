@@ -6,6 +6,7 @@
 
 import type { ProviderId } from "./backend";
 import type { Engine, EngineEntry, Role, Tier } from "./roster";
+import type { Favorite, FavoriteView, TierEngines as TierEngineList } from "../ide/agentStart";
 import type {
   AgentChoice,
   ModelChoice,
@@ -214,6 +215,13 @@ export function mockEngineEntries(own: Engine[], sessions: (id: string) => numbe
   return [...ownEntries, ...auto];
 }
 
+/** The owner's favorites: one that follows the tier's default, one on a pinned engine, one whose engine is gone. */
+let favorites: Favorite[] = [
+  { role: "allrounder", tier: "medium", engine: null },
+  { role: "reviewer", tier: "heavy", engine: "claude-code-claude-opus-5-5" },
+  { role: "tester", tier: "light", engine: "glut-openrouter-gone-model" },
+];
+
 /** The engines of `tier` in the order a start tries them: the default first, then by output price. */
 function engineFor(tier: Tier, engines: EngineEntry[]): EngineEntry[] {
   const chosen = defaults[tier] ?? null;
@@ -247,6 +255,50 @@ function choicesFor(roles: Role[], engines: EngineEntry[]): AgentChoice[] {
     }
   }
   return out;
+}
+
+/** The engines of every tier, light → heavy, as `agent_start::tier_engines` lists them. */
+export function mockTierEngines(engines: EngineEntry[]): TierEngineList[] {
+  return TIERS.map((tier) => ({ tier, engines: engineFor(tier, engines) }));
+}
+
+/** The engine a start runs on: the one asked for, else the tier's first; `null` when there is none. */
+export function mockResolveEngine(engines: EngineEntry[], tier: Tier, engine: string | null): EngineEntry | null {
+  if (engine) return engines.find((e) => e.id === engine) ?? null;
+  return engineFor(tier, engines)[0] ?? null;
+}
+
+/** "Glut Medium Allrounder (Sonnet 5.5)" and its two lines, as `agent_choice` names an agent. */
+export function mockAgentName(
+  engine: EngineEntry,
+  tier: Tier,
+  role: string,
+): { name: string; title: string; subtitle: string } {
+  const harness = engine.harness === "claude_code" ? "Claude" : "Glut";
+  const model = engine.model_name ?? engine.model ?? "default";
+  const roleName = role.split(/[-_]/).map(label).join(" ");
+  return {
+    name: `${harness} ${label(tier)} ${roleName} (${model})`,
+    title: `${roleName} · ${label(tier)}`,
+    subtitle: `${harness} · ${model}`,
+  };
+}
+
+function favoriteViews(engines: EngineEntry[], roles: Role[]): FavoriteView[] {
+  return favorites.map((f) => {
+    const engine = mockResolveEngine(engines, f.tier, f.engine ?? null);
+    const known = roles.some((r) => r.name === f.role);
+    const plain = `${label(f.role)} · ${label(f.tier)}`;
+    const named = engine
+      ? mockAgentName(engine, f.tier, f.role)
+      : { name: plain, title: plain, subtitle: f.engine ?? "" };
+    const unavailable = !known
+      ? `the role “${f.role}” is gone`
+      : engine
+        ? null
+        : `there is no engine “${f.engine}” any more; pick another one`;
+    return { ...f, engine_id: unavailable ? null : (engine?.id ?? null), unavailable, ...named };
+  });
 }
 
 /** Answers the model commands; `undefined` for any other command. */
@@ -290,6 +342,18 @@ export function mockModelCommand(
     }
     case "list_agent_choices":
       return { value: choicesFor(roles(), engines()) };
+    case "list_tier_engines":
+      return { value: mockTierEngines(engines()) };
+    case "list_favorites":
+      return { value: favoriteViews(engines(), roles()) };
+    case "toggle_favorite": {
+      const asked = args.favorite as Favorite;
+      const same = (f: Favorite) =>
+        f.role === asked.role && f.tier === asked.tier && (f.engine ?? null) === (asked.engine ?? null);
+      const had = favorites.some(same);
+      favorites = had ? favorites.filter((f) => !same(f)) : [...favorites, { ...asked, engine: asked.engine ?? null }];
+      return { value: !had };
+    }
     case "model_research_running":
       return { value: researchRunning };
     case "research_model_tiers": {

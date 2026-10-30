@@ -1,10 +1,11 @@
 <!--
-  The Agents panel of the activity rail: which agents this project has (with their live status), the form to
-  add or edit one, and the click that puts one into a pane. It is a view of the sidebar column, like Files.
-  An agent is *a role on an engine*: the role's "Start" chip opens the agent of that role that has no pane, or makes
-  one on the role's engine (`docs/plans/studio-roster-ui.md`, R-3); the form is for something quite different. The
-  form never describes a harness, a command or a model — engines are made only in the Models & roles pane
-  (`EnginesSection`).
+  The Agents panel of the activity rail (`docs/plans/agents-model.md`, AM4, Q16–Q18), in four parts: the master tiles;
+  the owner's favorites, one click starts one; "Start an agent" (role → light · medium · heavy → engine → Start,
+  `AgentStart`); and the sessions — only those running or waiting, and the ended ones whose work is not taken over yet
+  ("Waiting for you: take over or discard"). An ended session without work of its own is not listed; the weekly
+  clean-up removes it. It is a view of the sidebar column, like Files, and the same in every mode of the Studio.
+  An agent is a role at a tier on an engine; its session is named "Glut Medium Allrounder (Sonnet 5.5)" (Q8). The edit
+  form never describes a harness, a command or a model — engines are made only in the Models & roles pane.
   Deleting a profile does not close the panes showing it — those may have something running, and the pane
   says the profile is gone instead of taking a live shell with it. The wording here says as much.
 -->
@@ -12,23 +13,27 @@
   import { onMount } from "svelte";
 
   import type { AgentSpec, Harness, IdeAgent } from "../core/backend";
+  import { messageOf } from "../core/errors";
   import { projectRoles, type Role } from "../core/roster";
-  import { agentUnsavedWork, blankSpec, specOf, specReady } from "./agents";
+  import { toast } from "../core/toast";
+  import AgentStart from "./AgentStart.svelte";
+  import {
+    agentsWithWork,
+    isFavorite,
+    listFavorites,
+    sessionSections,
+    startAgentChoice,
+    toggleFavorite,
+    type Favorite,
+    type FavoriteView,
+  } from "./agentStart";
+  import { agentUnsavedWork, specOf, specReady } from "./agents";
   import { removalQuestion } from "./agentRemoval";
   import { agentStatus } from "./agentStatus";
   import { cardOf } from "./agentCard";
   import ProjectRolesNotice from "./ProjectRolesNotice.svelte";
   import RoleChip from "./RoleChip.svelte";
-  import {
-    agentNameFor,
-    engineName,
-    groupRoles,
-    harnessBadge,
-    harnessLabel,
-    roleFamilies,
-    startableAgent,
-    variantLabel,
-  } from "./rosterLook";
+  import { engineName, harnessBadge, harnessLabel } from "./rosterLook";
   import { engineCatalog, engineLine, refreshEngines, rosterVersion } from "./rosterStore";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
@@ -47,7 +52,7 @@
     onManage,
     onOpen,
     onMaster,
-    onCreate,
+    onStarted,
     onEdit,
     onRemove,
   }: {
@@ -63,8 +68,8 @@
     onOpen: (agent: IdeAgent) => void;
     /** Opens the project's master pane on an engine: as the owner uses it outside, in the real folder (CP3). */
     onMaster: (harness: Harness) => void;
-    /** May answer when the agent exists, so a second click on a chip waits for the first. */
-    onCreate: (spec: AgentSpec) => void | Promise<unknown>;
+    /** A session was started (from a favorite or "Start an agent"): the agent list is read again and its pane opens. */
+    onStarted: (agent: IdeAgent) => void;
     onEdit: (id: number, spec: AgentSpec) => void;
     /** `force`: the owner agreed to throw unsaved work in the worktree away. */
     onRemove: (id: number, force: boolean) => void;
@@ -77,16 +82,17 @@
     if (confirm(removalQuestion(question, unsaved))) onRemove(id, unsaved);
   }
 
-  /** `null` = the "new agent" form, a number = editing that agent. */
-  let editing = $state<number | null | undefined>(undefined);
-  /** The roles in force for this project — what the role picker offers — and the engine each carries. */
+  /** A number = editing that agent; `undefined` = no form open. */
+  let editing = $state<number | undefined>(undefined);
+  /** The roles in force for this project — what "Start an agent" and the edit form offer. */
   let roleNames = $state<string[]>([]);
-  let roleEngines = $state<Record<string, string | null>>({});
   let roleList = $state<Role[]>([]);
   const roleKinds = $derived(new Map(roleList.map((role) => [role.name, role.kind])));
-  const roleGroups = $derived(groupRoles(roleList));
 
-  let form = $state<AgentSpec>(blankSpec([]));
+  let form = $state<AgentSpec>({ name: "", engine_id: "", role: "" });
+  let favorites = $state<FavoriteView[]>([]);
+  /** The sessions holding work not taken over, read from git when the agents change. */
+  let withWork = $state<Set<number>>(new Set());
 
   const engines = $derived($engineCatalog);
 
@@ -106,30 +112,85 @@
    * The further masters (`master-glut-2`, …, started by a click on an engine's tile while its master is open) head the
    * list of agents, newest first: the owner just opened them and looks for them there.
    */
-  const listed = $derived([
-    ...agents.filter((a) => a.agent_role === "master" && !tiled.has(a.id)).sort((a, b) => b.id - a.id),
-    ...agents.filter((a) => a.agent_role !== "master"),
-  ]);
+  const sections = $derived(
+    sessionSections(
+      agents,
+      agents.filter((a) => a.agent_role === "master" && !tiled.has(a.id)).sort((a, b) => b.id - a.id),
+      (a) => openAgentIds.has(a.id),
+      (a) => $statuses.byAgent.get(a.id)?.state,
+      withWork,
+    ),
+  );
 
   async function loadRoles(id: number | null) {
     if (id === null) {
       roleNames = [];
-      roleEngines = {};
       roleList = [];
+      favorites = [];
       return;
     }
     try {
       const roles = await projectRoles(id);
       if (id === projectId) {
         roleNames = roles.effective.map((role) => role.name);
-        roleEngines = Object.fromEntries(roles.effective.map((role) => [role.name, role.engine]));
         roleList = roles.effective;
       }
     } catch {
       roleNames = [];
-      roleEngines = {};
       roleList = [];
     }
+    await loadFavorites(id);
+  }
+
+  async function loadFavorites(id: number | null = projectId) {
+    if (id === null) return;
+    try {
+      const views = await listFavorites(id);
+      if (id === projectId) favorites = views;
+    } catch {
+      favorites = [];
+    }
+  }
+
+  /** Counts reads of the work, so a slow answer for an older list never overwrites a newer one. */
+  let workRead = 0;
+  $effect(() => {
+    const id = projectId;
+    void agents;
+    const mine = ++workRead;
+    if (id === null) return;
+    void agentsWithWork(id)
+      .then((ids) => {
+        if (mine === workRead) withWork = new Set(ids);
+      })
+      .catch(() => {});
+  });
+
+  /** A favorite's tile: one click starts it — on its engine, or on the tier's default resolved now. */
+  async function startFavorite(view: FavoriteView) {
+    if (projectId === null || view.unavailable) return;
+    try {
+      onStarted(await startAgentChoice(projectId, view.role, view.tier, view.engine ?? null));
+    } catch (err) {
+      toast(messageOf(err), "warning");
+    }
+  }
+
+  async function toggleStar(favorite: Favorite) {
+    try {
+      await toggleFavorite(favorite);
+      await loadFavorites();
+    } catch (err) {
+      toast(messageOf(err), "warning");
+    }
+  }
+
+  /** A session's choice as a favorite: its role, the tier its engine has (else its role's), its engine. */
+  function favoriteOf(agent: IdeAgent): Favorite | null {
+    const engine = engines.find((e) => e.id === agent.engine_id);
+    const tier = engine?.rated_tier ?? roleList.find((r) => r.name === agent.agent_role)?.tier;
+    if (!tier || !agent.engine_id) return null;
+    return { role: agent.agent_role, tier, engine: agent.engine_id };
   }
 
   onMount(() => {
@@ -142,23 +203,6 @@
     void loadRoles(projectId);
   });
 
-  function startNew() {
-    editing = null;
-    form = blankSpec(roleNames);
-    // The role carries its engine: starting from the role, the engine is already there. Without one, and with a single
-    // engine in the catalog, there is exactly one sensible choice: do not make the user pick it.
-    adoptEngineOfRole();
-    if (form.engine_id === "" && engines.length === 1) form.engine_id = engines[0].id;
-    // A catalog edited in the settings since the panel was drawn: look again.
-    void refreshEngines();
-  }
-
-  /** The engine the picked role carries, when the catalog still has it; otherwise the choice stays as it is. */
-  function adoptEngineOfRole() {
-    const own = roleEngines[form.role];
-    if (own && engines.some((engine) => engine.id === own)) form.engine_id = own;
-  }
-
   function startEdit(agent: IdeAgent) {
     editing = agent.id;
     form = specOf(agent);
@@ -166,50 +210,25 @@
   }
 
   function submit() {
-    if (!specReady(form)) return;
-    if (editing === null) onCreate({ ...form, name: form.name.trim() });
-    else if (typeof editing === "number") onEdit(editing, { ...form, name: form.name.trim() });
+    if (!specReady(form) || editing === undefined) return;
+    onEdit(editing, { ...form, name: form.name.trim() });
     editing = undefined;
   }
 
   /**
-   * A role's "Start" chip: the agent of that role with no pane opens again (its session continues in its worktree);
-   * with none, one is made on the role's engine. A role that names no engine (the planner) opens the form with the role
-   * chosen, because the engine is the owner's pick at every start.
+   * "Glut Medium Allrounder (Sonnet 5.5) #2" read in two lines (Q8): "Allrounder · Medium #2" over
+   * "Glut · Sonnet 5.5".
    */
-  /** The family of roles whose models are shown under its group (`kind/base`), `null` = none. */
-  let openFamily = $state<string | null>(null);
+  const SESSION_NAME = /^(Claude|Glut|Opencode) (Light|Medium|Heavy) (.+) \((.+)\)( #\d+)?$/;
 
-  function toggleFamily(key: string) {
-    openFamily = openFamily === key ? null : key;
+  function sessionTitle(agent: IdeAgent): string {
+    const m = SESSION_NAME.exec(agent.name);
+    return m ? `${m[3]} · ${m[2]}${m[5] ?? ""}` : agent.name;
   }
 
-  /** A "Start" click is being served: the agent it makes is not in `agents` yet, so a second click would repeat it. */
-  let starting = false;
-
-  async function startRole(role: Role) {
-    if (starting) return;
-    const again = startableAgent(agents, role, openAgentIds);
-    if (again) {
-      onOpen(again);
-      return;
-    }
-    if (role.engine && engines.some((engine) => engine.id === role.engine)) {
-      starting = true;
-      try {
-        await onCreate({
-          name: agentNameFor(role.name, agents.map((a) => a.name)),
-          engine_id: role.engine,
-          role: role.name,
-        });
-      } finally {
-        starting = false;
-      }
-      return;
-    }
-    startNew();
-    form.role = role.name;
-    form.name = agentNameFor(role.name, agents.map((a) => a.name));
+  function sessionSubtitle(agent: IdeAgent): string | null {
+    const m = SESSION_NAME.exec(agent.name);
+    return m ? `${m[1]} · ${m[4]}` : null;
   }
 
   /** The ring of an agent tile (G11): working or waiting for the owner; anything else has none. */
@@ -270,61 +289,50 @@
       </div>
     {/if}
     <ProjectRolesNotice {projectId} />
-    {#if roleList.length > 0 && !disabled && editing === undefined}
-      <div class="starts" role="group" aria-label="Start an agent in a role">
-        <span class="starts-label">Start an agent</span>
-        {#each roleGroups as group (group.kind)}
-          {@const families = roleFamilies(group.roles)}
-          {@const open = families.find((family) => `${group.kind}/${family.base}` === openFamily)}
-          <span class="group-title">{group.title}</span>
-          <div class="chips">
-            {#each families as family (family.base)}
-              {#if family.roles.length === 1}
+    {#if !disabled && projectId !== null && editing === undefined}
+      {#if favorites.length > 0}
+        <section class="favorites" aria-label="Favorites">
+          <SectionHead label="Favorites" count={favorites.length} />
+          <div class="fav-tiles">
+            {#each favorites as f (`${f.role}/${f.tier}/${f.engine ?? ""}`)}
+              <div class="fav-tile" class:unavailable={f.unavailable !== null}>
                 <button
                   type="button"
-                  class="start"
-                  title={family.roles[0].description || `Start ${family.roles[0].name}`}
-                  onclick={() => startRole(family.roles[0])}
+                  class="fav"
+                  disabled={f.unavailable !== null}
+                  title={f.unavailable ?? `Start ${f.name}`}
+                  onclick={() => void startFavorite(f)}
                 >
-                  <RoleChip label={family.roles[0].name} kind={family.roles[0].kind} />
+                  <span class="fav-title">{f.title}</span>
+                  <span class="fav-sub">
+                    {f.unavailable ? "unavailable" : f.subtitle}{f.engine ? "" : " · tier default"}
+                  </span>
                 </button>
-              {:else}
-                <!-- One job on several models: the chip opens the models under the group, the click there starts. -->
-                <button
-                  type="button"
-                  class="start family"
-                  class:expanded={open === family}
-                  aria-expanded={open === family}
-                  title="{family.base} on {family.roles.length} models"
-                  onclick={() => toggleFamily(`${group.kind}/${family.base}`)}
-                >
-                  <RoleChip label={family.base} kind={group.kind} />
-                  <span class="caret"><Icon name="chevron-down" size="sm" /></span>
-                </button>
-              {/if}
-            {/each}
-            {#if open}
-              <div class="variants" role="group" aria-label="{open.base} on a model">
-                {#each open.roles as role (role.name)}
-                  <button
-                    type="button"
-                    class="variant"
-                    title={role.description || `Start ${role.name}`}
-                    onclick={() => {
-                      openFamily = null;
-                      void startRole(role);
-                    }}>{variantLabel(role, open.base, engines)}</button
-                  >
-                {/each}
+                <div class="row-actions">
+                  <IconButton
+                    icon="star"
+                    size="sm"
+                    pressed
+                    label="Remove {f.name} from the favorites"
+                    onclick={() => void toggleStar(f)}
+                  />
+                </div>
               </div>
-            {/if}
+            {/each}
           </div>
-        {/each}
-      </div>
+        </section>
+      {/if}
+      {#if roleList.length > 0}
+        <AgentStart
+          roles={roleList}
+          {projectId}
+          {favorites}
+          {onStarted}
+          onFavorites={() => void loadFavorites()}
+        />
+      {/if}
     {/if}
-    {#if listed.length > 0}
-      <ul class="cards">
-        {#each listed as agent (agent.id)}
+    {#snippet sessionCard(agent: IdeAgent)}
           {@const card = cardOf(agent, $statuses.byAgent.get(agent.id), openAgentIds.has(agent.id), $statuses.checkedAt)}
           <li
             class="card {card.status.tone}"
@@ -341,10 +349,11 @@
                   title={engineName(agent, engines)}
                 />
                 <span class="who">
-                  <span class="name">{agent.name}</span>
+                  <span class="name" title={agent.name}>{sessionTitle(agent)}</span>
+                  {#if sessionSubtitle(agent)}<span class="subname">{sessionSubtitle(agent)}</span>{/if}
                   <span class="meta">
                     <RoleChip label={agent.agent_role} kind={roleKinds.get(agent.agent_role)} />
-                    <span class="engine">{engineName(agent, engines)}</span>
+                    {#if !sessionSubtitle(agent)}<span class="engine">{engineName(agent, engines)}</span>{/if}
                   </span>
                 </span>
                 <span class="state">
@@ -369,6 +378,20 @@
             </button>
             <!-- Quiet until the card is hovered or focused (editor-look I4). -->
             <div class="row-actions">
+              {#if favoriteOf(agent)}
+                {@const fav = favoriteOf(agent)}
+                {#if fav}
+                  <IconButton
+                    icon="star"
+                    size="sm"
+                    pressed={isFavorite(favorites, fav)}
+                    label={isFavorite(favorites, fav)
+                      ? "Remove this agent from the favorites"
+                      : "Keep this agent as a favorite"}
+                    onclick={() => void toggleStar(fav)}
+                  />
+                {/if}
+              {/if}
               {#if agent.agent_role !== "master"}
                 <!-- A master keeps its engine and role (`roster::update_agent_on_engine` refuses). -->
                 <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
@@ -385,18 +408,23 @@
               />
             </div>
           </li>
-        {/each}
+    {/snippet}
+    {#if sections.active.length > 0}
+      <SectionHead label="Sessions" count={sections.active.length} />
+      <ul class="cards">
+        {#each sections.active as agent (agent.id)}{@render sessionCard(agent)}{/each}
       </ul>
-    {:else}
-      <p class="empty">{disabled ? "Open a project to work with agents." : "No agents in this project yet."}</p>
+    {/if}
+    {#if sections.waiting.length > 0}
+      <SectionHead label="Waiting for you: take over or discard" count={sections.waiting.length} tone="warn" />
+      <ul class="cards">
+        {#each sections.waiting as agent (agent.id)}{@render sessionCard(agent)}{/each}
+      </ul>
+    {/if}
+    {#if sections.active.length === 0 && sections.waiting.length === 0}
+      <p class="empty">{disabled ? "Open a project to work with agents." : "No session runs or waits for you."}</p>
     {/if}
     {#if editing === undefined}
-      <button class="add" type="button" disabled={disabled || engines.length === 0} onclick={startNew}>
-        <Icon name="plus" size="sm" /> New agent…
-      </button>
-      {#if engines.length === 0 && !disabled}
-        <p class="hint">No engines yet — an agent runs on an engine. Add one under Models &amp; roles.</p>
-      {/if}
       <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Models &amp; roles…</button>
     {:else}
       <form
@@ -405,9 +433,9 @@
           submit();
         }}
       >
-        <p class="label">{editing === null ? "New agent" : "Edit agent"}</p>
+        <p class="label">Edit agent</p>
         <input type="text" bind:value={form.name} placeholder="Name" spellcheck="false" />
-        <select bind:value={form.role} aria-label="Role" onchange={adoptEngineOfRole}>
+        <select bind:value={form.role} aria-label="Role">
           {#each roleNames as name (name)}
             <option value={name}>{name}</option>
           {/each}
@@ -419,8 +447,8 @@
           {/each}
         </select>
         <p class="hint">
-          The role brings its engine; pick another one here only for this agent. Roles and engines are made and
-          changed under <button type="button" class="link" onclick={onManage}>Models &amp; roles</button>.
+          Another role or engine for this session only. Models, engines and roles are made and changed under
+          <button type="button" class="link" onclick={onManage}>Models &amp; roles</button>.
         </p>
         <div class="form-actions">
           <button type="submit" class="ax-btn primary" disabled={!specReady(form)}>Save</button>
@@ -623,96 +651,77 @@
     font-size: var(--ax-font-size-xs);
   }
 
-  /* The roles of the project as chips: one click starts an agent in that role. */
-  /* One line per kind of work: its title in a column of its own, its jobs beside it. */
-  .starts {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    align-items: baseline;
-    gap: var(--ax-space-2) var(--ax-space-3);
+  /* The owner's favorites (Q18): a small tile each, one click starts it; an unavailable one is dimmed, not hidden. */
+  .favorites {
     margin-bottom: var(--ax-space-3);
   }
 
-  .starts-label {
-    grid-column: 1 / -1;
+  .fav-tiles {
+    display: grid;
+    /* As many as the column takes without cutting the names: one in a narrow sidebar. */
+    grid-template-columns: repeat(auto-fill, minmax(calc(170px * var(--ax-ui-scale)), 1fr));
+    gap: var(--ax-space-2);
   }
 
-  .family {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ax-space-1);
-    color: var(--ax-text-muted);
-  }
-
-  .family.expanded {
-    border-color: var(--ax-border-strong);
-  }
-
-  .caret {
-    display: inline-flex;
-    transition: transform var(--ax-dur-fast) var(--ax-ease);
-  }
-
-  .family.expanded .caret {
-    transform: rotate(180deg);
-  }
-
-  /* The models of the open job, on a line of their own under its chips. */
-  .variants {
-    flex-basis: 100%;
+  .fav-tile {
+    position: relative;
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--ax-space-1);
-    padding: var(--ax-space-1);
+    min-width: 0;
+  }
+
+  .fav-tile:hover .row-actions,
+  .fav-tile:focus-within .row-actions {
+    opacity: 1;
+  }
+
+  .fav {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: calc(2px * var(--ax-ui-scale));
+    padding: var(--ax-space-2);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-md);
-    background: var(--ax-elev-2);
-  }
-
-  .variant {
-    padding: var(--ax-space-1) var(--ax-space-2);
-    border: 1px solid transparent;
-    border-radius: var(--ax-radius-pill);
-    background: none;
+    background: var(--ax-surface-2);
     color: var(--ax-text);
     font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-xs);
+    text-align: left;
     cursor: pointer;
   }
 
-  .variant:hover,
-  .variant:focus-visible {
+  .fav:hover:not(:disabled) {
     border-color: var(--ax-border-strong);
-    background: var(--ax-elev-3);
+    background: var(--ax-surface-3);
   }
 
-  .group-title {
+  .fav-tile.unavailable .fav {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .fav-title,
+  .fav-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fav-title {
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
+  }
+
+  .fav-sub,
+  .subname {
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
   }
 
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ax-space-1) var(--ax-space-2);
-  }
-
-  .starts-label {
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .start {
-    padding: 0;
-    background: none;
-    border: 1px solid transparent;
-    border-radius: var(--ax-radius-pill);
-    cursor: pointer;
-  }
-
-  .start:hover,
-  .start:focus-visible {
-    border-color: var(--ax-border-strong);
+  .subname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .state {

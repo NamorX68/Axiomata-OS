@@ -35,6 +35,7 @@ function report(over: Partial<MaintenanceReport> = {}): MaintenanceReport {
     lastRun: null,
     items: [],
     orphanWorktrees: [],
+    endedSessions: [],
     error: null,
     ...over,
   };

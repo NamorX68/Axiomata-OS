@@ -531,6 +531,11 @@ pub struct AgentDefaults {
     #[serde(default)]
     pub models: crate::model_tiers::ModelSettings,
 
+    /// The owner's favorite agents (`[[agents.favorites]]`, `docs/plans/agents-model.md` Q18): a role at a tier, on an
+    /// engine or on the tier's default. None at first; changed through `crate::agent_start::toggle_favorite`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub favorites: Vec<crate::agent_start::Favorite>,
+
     /// The most card sessions that run at the same time across all plans that run by themselves (a worker or a reviewer
     /// each count). A plan starts as many cards at once as its dependencies allow; this only keeps a wide plan from
     /// starting more agents than the machine and the account can carry. Read as at least 1.
@@ -690,6 +695,7 @@ impl Default for AgentDefaults {
             auto_approve_tools: default_auto_approve_tools(),
             engines: BTreeMap::new(),
             models: crate::model_tiers::ModelSettings::default(),
+            favorites: Vec::new(),
             max_parallel_sessions: default_max_parallel_sessions(),
             plan_max_cost_usd: default_plan_max_cost_usd(),
             plan_max_tokens: default_plan_max_tokens(),
@@ -857,6 +863,7 @@ impl Config {
                 .map_err(|err| format!("engine {key:?}: {err}"))?;
         }
         self.agents.models.validate()?;
+        crate::agent_start::validate_favorites(&self.agents.favorites)?;
 
         // Providers, one per role (chat, skills). Each role's provider must
         // exist in the map. Anthropic may leave everything blank — billed via

@@ -96,6 +96,7 @@ ICONS=(
   square
   square-kanban
   square-pen
+  star
   step-forward
   terminal
   text-search
