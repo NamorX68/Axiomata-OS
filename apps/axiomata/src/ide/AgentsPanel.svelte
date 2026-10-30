@@ -3,7 +3,7 @@
   add or edit one, and the click that puts one into a pane. It is a view of the sidebar column, like Files.
   An agent is *a role on an engine*: the role's "Start" chip opens the agent of that role that has no pane, or makes
   one on the role's engine (`docs/plans/studio-roster-ui.md`, R-3); the form is for something quite different. The
-  form never describes a harness, a command or a model — engines are made only in the Engines & roles pane
+  form never describes a harness, a command or a model — engines are made only in the Models & roles pane
   (`EnginesSection`).
   Deleting a profile does not close the panes showing it — those may have something running, and the pane
   says the profile is gone instead of taking a live shell with it. The wording here says as much.
@@ -58,7 +58,7 @@
     disabled?: boolean;
     /** The open project, for the roles it brings (`ProjectRolesNotice`). */
     projectId?: number | null;
-    /** Opens the Engines & roles pane: where engines and roles are made. */
+    /** Opens the Models & roles pane: where engines and roles are made. */
     onManage: () => void;
     onOpen: (agent: IdeAgent) => void;
     /** Opens the project's master pane on an engine: as the owner uses it outside, in the real folder (CP3). */
@@ -395,9 +395,9 @@
         <Icon name="plus" size="sm" /> New agent…
       </button>
       {#if engines.length === 0 && !disabled}
-        <p class="hint">No engines yet — an agent runs on an engine. Add one under Engines &amp; roles.</p>
+        <p class="hint">No engines yet — an agent runs on an engine. Add one under Models &amp; roles.</p>
       {/if}
-      <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Engines &amp; roles…</button>
+      <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Models &amp; roles…</button>
     {:else}
       <form
         onsubmit={(event) => {
@@ -420,7 +420,7 @@
         </select>
         <p class="hint">
           The role brings its engine; pick another one here only for this agent. Roles and engines are made and
-          changed under <button type="button" class="link" onclick={onManage}>Engines &amp; roles</button>.
+          changed under <button type="button" class="link" onclick={onManage}>Models &amp; roles</button>.
         </p>
         <div class="form-actions">
           <button type="submit" class="ax-btn primary" disabled={!specReady(form)}>Save</button>
@@ -836,7 +836,7 @@
     outline: var(--ax-focus-ring);
   }
 
-  /* "New agent…" and "Engines & roles…": rows of their own, like the agents above them. */
+  /* "New agent…" and "Models & roles…": rows of their own, like the agents above them. */
   .add {
     display: flex;
     align-items: center;

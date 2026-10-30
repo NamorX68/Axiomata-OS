@@ -556,12 +556,12 @@ pub fn list_roles() -> Result<Loaded> {
     )?)
 }
 
-/// Saves a role of the owner's. Checks that the engines it names exist.
+/// Saves a role of the owner's.
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] for a bad role or an unknown engine.
-pub fn save_role(config: &Config, role: Role) -> Result<()> {
+/// [`RosterError::Invalid`] for a bad role.
+pub fn save_role(role: Role) -> Result<()> {
     // Reserved (see `known_role`): a role file of that name is refused where it is made, not only where it is used.
     if role.name == crate::ide::model::MASTER_ROLE {
         return Err(RosterError::Invalid {
@@ -574,8 +574,9 @@ pub fn save_role(config: &Config, role: Role) -> Result<()> {
         .into());
     }
     role.validate()?;
-    let engines = crate::engines::Lookup::new(config);
-    role.check_engines(|id| engines.exists(id))?;
+    // A role no longer chooses its engine (agents-model.md, Q6): an `engine` or `fallback_engines` it still names is
+    // kept as the file has it — for the card start until AM5, for AM6's migration — and not checked, so a role whose
+    // old engine is gone can still be saved from the Roles tab.
     axiomata_roster::save_role(&paths::agent_roles_dir(), &role)?;
     Ok(())
 }
@@ -1132,21 +1133,17 @@ mod tests {
     }
 
     #[test]
-    fn a_role_is_saved_only_with_engines_that_exist_and_deleted_only_when_nobody_plays_it() {
+    fn a_role_keeps_an_engine_it_names_and_is_deleted_only_when_nobody_plays_it() {
         with_temp_home(|_| {
             let (conn, project, _dir) = fixture();
-            let mut config = Config::default();
             let mut role = axiomata_roster::default_role();
             role.name = "reviewer".into();
+            // No engine is chosen by a role any more: one it names that does not exist is kept, not refused.
             role.engine = Some("missing".into());
-            assert!(matches!(
-                save_role(&config, role.clone()),
-                Err(AxiomataError::Roster(_))
-            ));
-
-            save_engine(&mut config, engine("missing")).unwrap();
-            save_role(&config, role).unwrap();
-            assert_eq!(list_roles().unwrap().roles.len(), 1);
+            save_role(role).unwrap();
+            let saved = list_roles().unwrap().roles;
+            assert_eq!(saved.len(), 1);
+            assert_eq!(saved[0].engine.as_deref(), Some("missing"));
 
             let agent = add(&conn, project, "a", Harness::Glut, None, "");
             agent_store::set_role(&conn, agent.id, "reviewer").unwrap();
@@ -1346,7 +1343,7 @@ mod tests {
             let mut role = axiomata_roster::default_role();
             role.name = "reviewer".into();
             role.engine = Some("named".into());
-            save_role(&config, role).unwrap();
+            save_role(role).unwrap();
 
             assert!(matches!(
                 delete_engine(&conn, &mut config, "named"),

@@ -2150,7 +2150,7 @@ fn role_cmd(core: &AxiomataCore, action: RoleAction) -> Result<()> {
                 .with_context(|| format!("could not read {}", file.display()))?;
             let role = axiomata_roster::Role::parse(&text)?;
             let name = role.name.clone();
-            roster::save_role(&config_snapshot(core), role)?;
+            roster::save_role(role)?;
             println!("saved role {name}");
             Ok(())
         }

@@ -1406,6 +1406,30 @@ let mockRoles: Role[] = [
     instructions: "Check the diff against the acceptance criteria.",
     source: "user",
   },
+  // The rest of the seven fixed roles (agents-model.md, Q5), without engines as AM6 leaves them.
+  ...(
+    [
+      ["implementer", "Implements a well-specified card", "implement", "medium", ["Bash(cargo test:*)"]],
+      ["documenter", "Writes and updates the documentation", "doc", "light", []],
+      ["planner", "Breaks a goal into cards", "plan", "heavy", []],
+      ["tester", "Adds the tests a change is missing", "test", "medium", ["Bash(cargo test:*)", "Bash(npx vitest:*)"]],
+      ["grill", "Interviews the owner before planning", "grill", "heavy", []],
+    ] as const
+  ).map(
+    ([name, description, kind, tier, permissions]): Role => ({
+      name,
+      description,
+      kind,
+      tier,
+      engine: null,
+      fallback_engines: [],
+      permissions: [...permissions],
+      limits: name === "planner" ? { max_cost_usd: 3 } : {},
+      creates: [],
+      instructions: `${description}. Work in your own worktree and report when done.`,
+      source: "user",
+    }),
+  ),
 ];
 let mockRolesConfirmed = false;
 

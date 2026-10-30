@@ -58,20 +58,12 @@ pub fn todo(config: &Config, sources: &ModelSources) -> ResearchTodo {
                 && (sources.proposals.wanted.contains(&model.key)
                     || (model.proposal.is_none() && model.owner_tier.is_none()))
         })
-        .map(|model| {
-            let context_length = sources
-                .catalog
-                .providers
-                .get(&model.provider)
-                .and_then(|listed| listed.models.iter().find(|m| m.id == model.id))
-                .and_then(|listed| listed.context_length);
-            ResearchItem {
-                output_per_m: model.price.as_ref().map(|price| price.output_per_m),
-                price_tier: model.price_tier,
-                context_length,
-                name: model.short_name,
-                key: model.key,
-            }
+        .map(|model| ResearchItem {
+            output_per_m: model.price.as_ref().map(|price| price.output_per_m),
+            price_tier: model.price_tier,
+            context_length: model.context_length,
+            name: model.short_name,
+            key: model.key,
         })
         .collect();
     ResearchTodo {

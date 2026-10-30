@@ -609,8 +609,16 @@ function sanitizeNode(raw: unknown, seen: SeenIds): LayoutNode | null {
   return null;
 }
 
-/** The German titles the Flow tabs were saved with before the interface became English; a stored layout keeps them otherwise. */
-const LEGACY_TAB_TITLES: Record<string, string> = { Planung: "Planning", Flowansicht: "Flow view" };
+/**
+ * Titles tabs were saved with before they were renamed — the Flow tabs' German ones before the interface became
+ * English, and the roster pane's before it became Models & roles (agents-model.md, AM3); a stored layout keeps them
+ * otherwise.
+ */
+const LEGACY_TAB_TITLES: Record<string, string> = {
+  Planung: "Planning",
+  Flowansicht: "Flow view",
+  "Engines & roles": "Models & roles",
+};
 
 /** One tab from stored JSON, or `null` if it lacks an id or kind, or reuses an id. */
 function sanitizeTab(raw: unknown, seen: SeenIds): PaneTab | null {

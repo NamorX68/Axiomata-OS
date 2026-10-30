@@ -1,7 +1,7 @@
 <!--
   "Verbrauch": what the sessions started for a card have used, against what their role allows (A2A CP-A6c, A9). Read
   fresh when the card is opened and whenever it changes — a stop shows up as a line in the history, and this says by how
-  much. A session stopped at a limit keeps the card; to go on, the role's limit is raised (Studio, Engines & roles).
+  much. A session stopped at a limit keeps the card; to go on, the role's limit is raised (Studio, Models & roles).
 -->
 <script lang="ts">
   import { invokeBackend as invoke, type BoardCard, type SessionUsage } from "../core/backend";

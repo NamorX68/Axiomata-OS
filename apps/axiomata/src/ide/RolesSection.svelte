@@ -1,12 +1,14 @@
 <!--
-  Roles (a2a.md CP-A1): what an agent is for. One `AGENT.md` per role under `~/.axiomata/agents/`; this is the
-  form for it. A role names engines by id and never carries a command line. The form keeps lists and numbers as
-  text (`RoleForm`); `checkRoleForm` builds the role or points at the first bad field, and Rust has the last word.
+  Roles (a2a.md CP-A1; `docs/plans/agents-model.md` AM3, Q6): what an agent is for — instruction, rights, limits, kind
+  of work and a default tier. No engine any more: the tier's engine runs (Models tab). An `engine` or
+  `fallback_engines` a file still carries is kept as it is on save but not shown (AM6 migrates it). One `AGENT.md` per
+  role under `~/.axiomata/agents/`; this is the form for it. The form keeps lists and numbers as text (`RoleForm`);
+  `checkRoleForm` builds the role or points at the first bad field, and Rust has the last word.
   Laid out as a list with its form beside it (`docs/plans/studio-roster-ui.md`, R-1). The name typed becomes the id
   (R-5): the form shows the id a new role gets, and the rarely used fields sit under "Advanced".
 -->
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount } from "svelte";
 
   import { messageOf } from "../core/errors";
   import {
@@ -14,11 +16,9 @@
     blankRoleForm,
     checkRoleForm,
     deleteRole,
-    listEngines,
     listRoles,
     roleToForm,
     saveRole,
-    type EngineEntry,
     type Role,
     type RoleForm,
     type SkippedRole,
@@ -30,12 +30,8 @@
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
 
-  /** Bumped by the parent when the engine catalog changed, so the picker reloads. */
-  let { enginesVersion = 0 }: { enginesVersion?: number } = $props();
-
   let roles = $state<Role[]>([]);
   let skipped = $state<SkippedRole[]>([]);
-  let engines = $state<EngineEntry[]>([]);
   let loading = $state(true);
   let form = $state<RoleForm | null>(null);
   let isNew = $state(false);
@@ -44,10 +40,9 @@
 
   async function reload() {
     try {
-      const [loaded, catalog] = await Promise.all([listRoles(), listEngines()]);
+      const loaded = await listRoles();
       roles = loaded.roles;
       skipped = loaded.skipped;
-      engines = catalog;
     } catch (err) {
       toast(`Could not load the roles: ${messageOf(err)}`, "warning");
     } finally {
@@ -75,16 +70,12 @@
   );
 
   /** The fields under "Advanced": a problem in one of them opens the section, so it is never hidden from the owner. */
-  const advancedProblem = $derived(
-    problem !== null && ["fallback", "creates", "maxCost", "maxTokens", "maxSteps"].includes(problem.field),
-  );
+  const advancedProblem = $derived(problem !== null && ["creates"].includes(problem.field));
 
   async function save() {
     if (!form) return;
-    const checked = checkRoleForm(
-      { ...form, name: derivedId },
-      engines.map((e) => e.id),
-    );
+    // The engine fields go back as the file had them; they are no longer checked here (Q6).
+    const checked = checkRoleForm({ ...form, name: derivedId }, null);
     if (!checked.ok) {
       problem = { field: checked.field, message: checked.message };
       return;
@@ -121,17 +112,6 @@
   const tierLabel = (id: Role["tier"]) => TIERS.find((t) => t.id === id)?.label ?? id;
 
   onMount(reload);
-
-  // A change of the catalog elsewhere must reach the picker; the first run is `onMount`'s.
-  let firstRun = true;
-  $effect(() => {
-    void enginesVersion;
-    if (firstRun) {
-      firstRun = false;
-      return;
-    }
-    untrack(() => void reload());
-  });
 </script>
 
 <section class="split" class:has-form={form !== null}>
@@ -148,20 +128,15 @@
       {:else}
         <ul class="cards">
           {#each roles as r (r.name)}
-            {@const engine = engines.find((e) => e.id === r.engine)}
-            <li
-              class="card"
-              class:editing={form?.name === r.name && !isNew}
-              style:--harness={engine ? `var(--ax-harness-${engine.harness})` : undefined}
-            >
+            <li class="card" class:editing={form?.name === r.name && !isNew}>
               <button type="button" class="open" onclick={() => startEdit(r)}>
                 <span class="top">
                   <span class="avatar" aria-hidden="true">{r.name.trim().charAt(0).toUpperCase() || "?"}</span>
                   <span class="who">
-                    <span class="name">{r.name} <span class="tier">{tierLabel(r.tier)}</span></span>
+                    <span class="name">{r.name}</span>
                     <span class="meta">
                       <RoleChip label={r.kind} kind={r.kind} />
-                      {r.engine ? (engine?.label ?? r.engine) : "engine chosen at start"}
+                      default tier {tierLabel(r.tier).toLowerCase()}
                     </span>
                   </span>
                 </span>
@@ -206,45 +181,32 @@
           </datalist>
           {#if problem?.field === "kind"}<em class="problem">{problem.message}</em>{/if}
         </label>
-        <label class="field">
-          <span>Tier</span>
-          <select bind:value={form.tier}>
+        <div class="field">
+          <span id="role-tier">Default tier</span>
+          <div class="segments" role="radiogroup" aria-labelledby="role-tier">
             {#each TIERS as t (t.id)}
-              <option value={t.id}>{t.label} — {t.hint}</option>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={form.tier === t.id}
+                class:mine={form.tier === t.id}
+                title={t.hint}
+                onclick={() => form && (form.tier = t.id)}>{t.label}</button
+              >
             {/each}
-          </select>
-        </label>
+          </div>
+        </div>
       </div>
-      <label class="field">
-        <span>Default engine</span>
-        <select bind:value={form.engine}>
-          <option value="">— chosen at every start (e.g. the planner)</option>
-          {#each engines as e (e.id)}
-            <option value={e.id}>{e.label} ({e.id})</option>
-          {/each}
-        </select>
-        {#if problem?.field === "engine"}<em class="problem">{problem.message}</em>{/if}
-      </label>
       <label class="field">
         <span>Working instructions (Markdown)</span>
         <textarea rows="12" spellcheck="false" bind:value={form.instructions}></textarea>
       </label>
-      <details class="advanced" open={advancedProblem}>
-        <summary>Advanced: fallback engines, rights, limits</summary>
-        <label class="field">
-          <span>Fallback engines (ids, comma-separated, in this order)</span>
-          <input type="text" spellcheck="false" bind:value={form.fallback} placeholder={engines.map((e) => e.id).join(", ")} />
-          {#if problem?.field === "fallback"}<em class="problem">{problem.message}</em>{/if}
-        </label>
-        <label class="field">
-          <span>Creates cards without asking (kinds, comma-separated)</span>
-          <input type="text" spellcheck="false" bind:value={form.creates} placeholder="e.g. test, doc" />
-          {#if problem?.field === "creates"}<em class="problem">{problem.message}</em>{/if}
-        </label>
-        <label class="field">
-          <span>Rights (harness rules, one per line)</span>
-          <textarea rows="2" spellcheck="false" bind:value={form.permissions}></textarea>
-        </label>
+      <label class="field">
+        <span>Rights (harness rules, one per line)</span>
+        <textarea rows="2" spellcheck="false" bind:value={form.permissions}></textarea>
+      </label>
+      <div class="field">
+        <span>Limits of a session (empty = the tier's default)</span>
         <div class="triple">
           <label class="field">
             <span>Cost limit (USD)</span>
@@ -262,6 +224,14 @@
             {#if problem?.field === "maxSteps"}<em class="problem">{problem.message}</em>{/if}
           </label>
         </div>
+      </div>
+      <details class="advanced" open={advancedProblem}>
+        <summary>Advanced</summary>
+        <label class="field">
+          <span>Creates cards without asking (kinds, comma-separated)</span>
+          <input type="text" spellcheck="false" bind:value={form.creates} placeholder="e.g. test, doc" />
+          {#if problem?.field === "creates"}<em class="problem">{problem.message}</em>{/if}
+        </label>
       </details>
       {#if problem && !problem.field}<p class="problem">{problem.message}</p>{/if}
       <div class="actions">
@@ -270,9 +240,10 @@
       </div>
     {:else if !loading}
       <p class="hint">
-        A role says what an agent is for: kind of work, tier, engine, limits and the working instructions. It lives
-        as a file at <code>~/.axiomata/agents/&lt;id&gt;/AGENT.md</code>. A role names engines only by id — it can
-        never start a program itself. Pick one on the left to change it, or add a new one.
+        A role says what an agent is for: kind of work, default tier, rights, limits and the working instructions —
+        no engine: the tier's engine runs (Models tab). It lives as a file at
+        <code>~/.axiomata/agents/&lt;id&gt;/AGENT.md</code> and can never start a program itself. Pick one on the left
+        to change it, or add a new one.
       </p>
     {/if}
   </div>
@@ -361,14 +332,13 @@
   .card {
     position: relative;
     border: 1px solid var(--ax-border);
-    border-left: calc(3px * var(--ax-ui-scale)) solid var(--harness, var(--ax-border-strong));
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--ax-border-strong);
     border-radius: var(--ax-radius-md);
     background: var(--ax-surface-2);
   }
   .card:hover,
   .card:focus-within {
     border-color: var(--ax-border-strong);
-    border-left-color: var(--harness, var(--ax-border-strong));
     background: var(--ax-surface-3);
   }
   .card.editing {
@@ -418,15 +388,6 @@
   }
   .name {
     font-weight: 600;
-  }
-  .tier {
-    margin-left: var(--ax-space-1);
-    padding: 0 var(--ax-space-1);
-    font-size: var(--ax-font-size-xs);
-    font-weight: 400;
-    color: var(--ax-accent);
-    background: var(--ax-accent-muted);
-    border-radius: var(--ax-radius-sm);
   }
   .meta,
   .since {
@@ -488,6 +449,33 @@
     align-items: center;
     gap: var(--ax-space-2);
   }
+  /* The default tier as one choice of three, like a model's tier in the Models tab. */
+  .segments {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: calc(2px * var(--ax-ui-scale));
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-1);
+  }
+  .segments button {
+    padding: calc(2px * var(--ax-ui-scale)) var(--ax-space-3);
+    border: 0;
+    border-radius: var(--ax-radius-pill);
+    background: none;
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+  .segments button:hover {
+    color: var(--ax-text);
+  }
+  .segments button.mine {
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
+    font-weight: 600;
+  }
   .pair {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -509,7 +497,6 @@
     color: var(--ax-text-muted);
   }
   .field input,
-  .field select,
   .field textarea {
     width: 100%;
     padding: var(--ax-space-1) var(--ax-space-2);
@@ -520,14 +507,10 @@
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-sm);
   }
-  .field select {
-    font-family: inherit;
-  }
   .field textarea {
     resize: vertical;
   }
   .field input:focus,
-  .field select:focus,
   .field textarea:focus {
     outline: none;
     border-color: var(--ax-accent);

@@ -2,7 +2,7 @@
   The choice at the start of a planner or a grilling session (the plan's panel): a **role**, not an engine. One role is
   suggested (`suggestedRole`), the owner may pick another. The role carries its engine, shown beside its name; only a
   role that names none (a freshly seeded one) asks for an engine — once: the start saves the pick into the role, and the
-  next start is one click. Engines and roles are changed under "Engines & roles".
+  next start is one click. Engines and roles are changed under "Models & roles".
 -->
 <script lang="ts">
   import type { EngineEntry, Role } from "../../core/roster";
@@ -55,7 +55,7 @@
     </select>
   </label>
 {:else if engineLabel}
-  <span class="muted on" title="The engine belongs to the role; change it under Engines &amp; roles">runs on {engineLabel.label}</span>
+  <span class="muted on" title="The engine belongs to the role; change it under Models &amp; roles">runs on {engineLabel.label}</span>
 {/if}
 
 <style>

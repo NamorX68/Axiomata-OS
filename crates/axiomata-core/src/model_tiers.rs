@@ -734,6 +734,8 @@ pub struct ModelEntry {
     pub proposal: Option<TierProposal>,
     pub price_tier: Option<Tier>,
     pub price: Option<ModelCost>,
+    /// The context window in tokens, when the catalog says.
+    pub context_length: Option<u64>,
 }
 
 /// Every model the providers offer, provider by provider (Anthropic, OpenRouter, Ollama), in the catalog's order.
@@ -759,6 +761,7 @@ pub fn models(config: &Config, sources: &ModelSources) -> Vec<ModelEntry> {
                 proposal: rating.proposal,
                 price_tier: rating.price_tier,
                 price: rating.price,
+                context_length: model.context_length,
                 key,
             });
         }

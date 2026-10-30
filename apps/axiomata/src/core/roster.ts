@@ -250,8 +250,11 @@ function parseLimit(text: string, integer: boolean): number | null | undefined {
   return n;
 }
 
-/** Builds the role a form describes, or the first problem. `engines` are the known ids. */
-export function checkRoleForm(form: RoleForm, engines: string[]): FormResult<Role> {
+/**
+ * Builds the role a form describes, or the first problem. `engines` are the known ids; `null` leaves the engine fields
+ * unchecked — the Roles tab keeps what a file names without showing it (agents-model.md, Q6).
+ */
+export function checkRoleForm(form: RoleForm, engines: string[] | null): FormResult<Role> {
   const name = form.name.trim();
   if (!isSlug(name)) return fail("name", "Name: lower-case letters and digits, with - or _ between them (up to 48 characters).");
   const kind = form.kind.trim();
@@ -262,10 +265,10 @@ export function checkRoleForm(form: RoleForm, engines: string[]): FormResult<Rol
   }
   const engine = form.engine.trim();
   const fallback = splitList(form.fallback);
-  const known = new Set(engines);
-  if (engine && !known.has(engine)) return fail("engine", `There is no engine “${engine}”.`);
+  const known = engines === null ? null : new Set(engines);
+  if (known && engine && !known.has(engine)) return fail("engine", `There is no engine “${engine}”.`);
   for (const id of fallback) {
-    if (!known.has(id)) return fail("fallback", `There is no engine “${id}”.`);
+    if (known && !known.has(id)) return fail("fallback", `There is no engine “${id}”.`);
     if (id === engine) return fail("fallback", `“${id}” is already the default engine.`);
   }
   const creates = splitList(form.creates);

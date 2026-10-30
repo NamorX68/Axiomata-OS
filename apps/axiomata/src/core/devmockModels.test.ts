@@ -31,8 +31,10 @@ describe("the mock's engines and agents", () => {
     const answer = mockModelCommand("list_agent_choices", {}, engines, () => [role]);
     const choices = answer?.value as { name: string; tier: string; standard: boolean }[];
     const light = choices.filter((c) => c.tier === "light");
-    expect(light[0]).toMatchObject({ name: "Glut Light Allrounder (DeepSeek V4.1 Flash)", standard: true });
-    expect(light[1].name).toBe("Claude Light Allrounder (Haiku 5.5)");
+    // The local model rated light by research is free, so it comes first; then the cheapest priced ones.
+    expect(light[0]).toMatchObject({ name: "Glut Light Allrounder (gemma4:12b-mlx)", standard: true });
+    expect(light[1].name).toBe("Glut Light Allrounder (DeepSeek V4.1 Flash)");
+    expect(light[2].name).toBe("Claude Light Allrounder (Haiku 5.5)");
     expect(mockModelCommand("get_app_info", {}, engines, () => [])).toBeUndefined();
   });
 

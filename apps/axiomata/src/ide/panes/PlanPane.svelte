@@ -278,7 +278,7 @@
   /* ----------------------------------------------------------- planner --- */
 
   // A session starts from a ROLE, which carries its engine; only a role that names none asks for one — once, and the
-  // pick is saved into the role (`SessionPicker.svelte`). Engines and roles are changed under "Engines & roles".
+  // pick is saved into the role (`SessionPicker.svelte`). Engines and roles are changed under "Models & roles".
   let plannerRole = $state("");
   let plannerEngine = $state("");
   let grillRole = $state("");

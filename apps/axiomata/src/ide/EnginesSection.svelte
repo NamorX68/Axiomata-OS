@@ -10,6 +10,7 @@
   import { messageOf } from "../core/errors";
   import {
     BILLINGS,
+    TIERS,
     blankEngine,
     checkEngine,
     deleteEngine,
@@ -132,7 +133,7 @@
     {#if loading}
       <p class="hint">Loading…</p>
     {:else if engines.length === 0}
-      <p class="hint">No engines yet. An agent runs on an engine, so add one first.</p>
+      <p class="hint">No own engines. The models that are on already make one engine each.</p>
     {:else}
       <ul class="cards">
         {#each engines as e (e.id)}
@@ -146,7 +147,8 @@
                 </span>
               </span>
               <span class="since">
-                <code>{e.id}</code> · {e.billing === "subscription" ? "subscription" : "metered"} · {agentCount(e.sessions)}
+                <code>{e.id}</code> · {e.tier ? e.tier : e.rated_tier ? `${e.rated_tier} (its model's)` : "unrated"} ·
+                {e.billing === "subscription" ? "subscription" : "metered"} · {agentCount(e.sessions)}
               </span>
             </button>
             <div class="row-actions">
@@ -185,6 +187,15 @@
           </select>
         </label>
       </div>
+      <label class="field">
+        <span>Tier</span>
+        <select value={form.tier ?? ""} onchange={(e) => form && (form.tier = (e.currentTarget.value || null) as Engine["tier"])}>
+          <option value="">The tier of its model</option>
+          {#each TIERS as t (t.id)}
+            <option value={t.id}>{t.label} — {t.hint}</option>
+          {/each}
+        </select>
+      </label>
       <div class="field">
         <span>Model</span>
         <ModelPicker
@@ -226,8 +237,8 @@
       </div>
     {:else}
       <p class="hint">
-        An engine is harness + model + environment — the part that costs money and can be unreachable. Pick one on
-        the left to change it, or add a new one.
+        An own engine is harness + model + environment of your choosing — the part that costs money and can be
+        unreachable — with a tier of its own if you give it one. Pick one on the left to change it, or add a new one.
       </p>
     {/if}
   </div>

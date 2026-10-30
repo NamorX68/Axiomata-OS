@@ -1,42 +1,41 @@
 <!--
-  The Studio's engines and roles (`docs/plans/studio-roster-ui.md`, R-1): one large pane in the dock, a list on the
-  left and its form beside it. They live with the Studio, not in the app's general settings, so they move along when
+  The Studio's models and roles (`docs/plans/agents-model.md`, AM3, Q20; before it, engines and roles —
+  `docs/plans/studio-roster-ui.md`, R-1): one large pane in the dock with two tabs. Models: which models are on, their
+  tiers, the default engine per tier, the price limits and the owner's own engines. Roles: what an agent is for. They live with the Studio, not in the app's general settings, so they move along when
   the Studio becomes a program of its own (A11); the data behind them (`axiomata-roster`) already takes its paths from
   outside.
   Both sections stay mounted while the other is shown, so a half-filled form survives a look at the other list.
 -->
 <script lang="ts">
-  import EnginesSection from "../EnginesSection.svelte";
+  import ModelsSection from "../ModelsSection.svelte";
   import RolesSection from "../RolesSection.svelte";
 
-  type Part = "engines" | "roles";
+  type Part = "models" | "roles";
 
-  let part = $state<Part>("engines");
-  /** Bumped when the engine catalog changed, so the roles' engine picker reloads. */
-  let enginesVersion = $state(0);
+  let part = $state<Part>("models");
 </script>
 
 <div class="roster">
   <header>
-    <div class="switch" role="group" aria-label="Engines or roles">
-      <button type="button" class:active={part === "engines"} aria-pressed={part === "engines"} onclick={() => (part = "engines")}>
-        Engines
+    <div class="switch" role="tablist" aria-label="Models or roles">
+      <button type="button" role="tab" class:active={part === "models"} aria-selected={part === "models"} onclick={() => (part = "models")}>
+        Models
       </button>
-      <button type="button" class:active={part === "roles"} aria-pressed={part === "roles"} onclick={() => (part = "roles")}>
+      <button type="button" role="tab" class:active={part === "roles"} aria-selected={part === "roles"} onclick={() => (part = "roles")}>
         Roles
       </button>
     </div>
     <p class="chain">
-      <strong>Engine</strong> = what thinks (harness + model) · <strong>Role</strong> = what it is for (kind of
-      work, instructions, limits) · <strong>Agent</strong> = a session in the project: a role on an engine, with
-      its own branch.
+      <strong>Model</strong> = what thinks, at a tier (light · medium · heavy), on the harness that runs it ·
+      <strong>Role</strong> = what it is for (instructions, rights, limits, a default tier) · <strong>Agent</strong> =
+      a role at a tier on an engine, started as a session with its own branch.
     </p>
   </header>
-  <div class="part" class:off={part !== "engines"}>
-    <EnginesSection onChange={() => (enginesVersion += 1)} />
+  <div class="part" class:off={part !== "models"}>
+    <ModelsSection />
   </div>
   <div class="part" class:off={part !== "roles"}>
-    <RolesSection {enginesVersion} />
+    <RolesSection />
   </div>
 </div>
 
@@ -86,9 +85,10 @@
     color: var(--ax-text);
   }
 
+  /* Selected ≠ alive (accent rule): the open tab is a selection, not orange. */
   .switch button.active {
-    background: var(--ax-accent);
-    color: var(--ax-text-invert);
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
   }
 
   .chain {

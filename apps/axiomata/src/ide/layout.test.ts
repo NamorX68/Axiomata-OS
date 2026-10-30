@@ -129,12 +129,18 @@ describe("stored titles", () => {
           { id: "a", kind: "plan", title: "Planung" },
           { id: "b", kind: "graph", title: "Flowansicht" },
           { id: "c", kind: "terminal", title: "Terminal 1" },
+          { id: "d", kind: "roster", title: "Engines & roles" },
         ],
         active: "a",
       },
     };
     const parsed = parseLayout(stored);
-    expect(parsed && allTabs(parsed).map((tab) => tab.title)).toEqual(["Planning", "Flow view", "Terminal 1"]);
+    expect(parsed && allTabs(parsed).map((tab) => tab.title)).toEqual([
+      "Planning",
+      "Flow view",
+      "Terminal 1",
+      "Models & roles",
+    ]);
   });
 });
 

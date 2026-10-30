@@ -3104,11 +3104,10 @@ pub fn list_roles() -> Result<axiomata_roster::Loaded, String> {
     axiomata_core::roster::list_roles().map_err(|err| err.to_string())
 }
 
-/// Saves one of the owner's roles; the engines it names must exist.
+/// Saves one of the owner's roles; an engine it still names is kept, not checked (agents-model.md, Q6).
 #[tauri::command]
-pub fn save_role(state: State<'_, CoreState>, role: axiomata_roster::Role) -> Result<(), String> {
-    axiomata_core::roster::save_role(&read_config(&state.config), role)
-        .map_err(|err| err.to_string())
+pub fn save_role(role: axiomata_roster::Role) -> Result<(), String> {
+    axiomata_core::roster::save_role(role).map_err(|err| err.to_string())
 }
 
 /// Deletes one of the owner's roles unless an agent session plays it.

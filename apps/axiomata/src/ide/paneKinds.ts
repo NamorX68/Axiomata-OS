@@ -63,7 +63,7 @@ export function isAreaTab(tab: Pick<PaneTab, "kind">): boolean {
 }
 
 export function rosterTab(): PaneTab {
-  return { id: crypto.randomUUID(), kind: ROSTER_PANE, title: "Engines & roles", config: {} };
+  return { id: crypto.randomUUID(), kind: ROSTER_PANE, title: "Models & roles", config: {} };
 }
 
 export function graphTab(): PaneTab {

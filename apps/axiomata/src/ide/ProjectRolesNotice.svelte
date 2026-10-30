@@ -63,13 +63,16 @@
       .filter(Boolean)
       .join(", ");
 
+  /** Whether a project's role still names an engine: a role chooses none any more (agents-model.md, Q19). */
+  const namesEngine = (role: Role): boolean => role.engine !== null || role.fallback_engines.length > 0;
+  const engineNames = (role: Role): string => [role.engine, ...role.fallback_engines].filter(Boolean).join(", ");
+
   /** One line per field that takes effect, so nothing the hash covers is hidden from the review. */
   const facts = (role: Role): string[] =>
     [
       role.description ? `description: ${role.description}` : "",
       `kind: ${role.kind}, tier: ${role.tier}`,
-      role.engine ? `engine: ${role.engine}` : "engine: chosen at start",
-      role.fallback_engines.length > 0 ? `falls back to: ${role.fallback_engines.join(", ")}` : "",
+      namesEngine(role) ? `names an engine (${engineNames(role)}) — ignored: the engine of the tier runs` : "",
       role.creates.length > 0 ? `creates cards without asking: ${role.creates.join(", ")}` : "",
       role.permissions.length > 0
         ? `rights, granted without asking in sessions started for a card: ${role.permissions.join("; ")}`
@@ -128,8 +131,11 @@
       {#if found.replaces.length > 0}
         <p class="problem">Replaces your own role{found.replaces.length === 1 ? "" : "s"}: {found.replaces.join(", ")}.</p>
       {/if}
-      {#if found.unknown_engines.length > 0}
-        <p class="problem">Names engines you do not have: {found.unknown_engines.join(", ")}.</p>
+      {#if found.overrides.roles.some(namesEngine)}
+        <p class="hint">
+          {found.overrides.roles.filter(namesEngine).map((r) => r.name).join(", ")} name{found.overrides.roles.filter(namesEngine).length === 1 ? "s" : ""}
+          an engine. A role chooses no engine any more, so it is ignored: the engine of the role's tier runs.
+        </p>
       {/if}
     </div>
   {/if}
@@ -148,6 +154,12 @@
     margin: var(--ax-space-1) 0 0;
     padding-left: var(--ax-space-3);
     color: var(--ax-warning);
+    font: var(--ax-type-caption);
+  }
+  .hint {
+    margin: var(--ax-space-1) 0 0;
+    padding-left: var(--ax-space-3);
+    color: var(--ax-text-muted);
     font: var(--ax-type-caption);
   }
   .muted {

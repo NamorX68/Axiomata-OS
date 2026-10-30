@@ -44,6 +44,8 @@ export interface ModelEntry {
   proposal: TierProposal | null;
   price_tier: Tier | null;
   price: ModelPrice | null;
+  /** The context window in tokens, when the catalog says. */
+  context_length: number | null;
 }
 
 /** The price limits of the price proposal, USD per million output tokens. */
@@ -130,4 +132,113 @@ export function toggledChoice(model: Pick<ModelEntry, "enabled" | "enabled_by_de
     enabled: enabled === model.enabled_by_default ? null : enabled,
     tier: model.owner_tier,
   };
+}
+
+// ---- Pure helpers for the Models tab (AM3) ----
+
+/** A provider list longer than this starts switched off and gets a filter field (`model_tiers::SMALL_LIST_MAX`). */
+export const SMALL_LIST_MAX = 20;
+
+/** The provider and the harness that runs its models, as the Models tab heads a group. */
+export function providerHeading(provider: ProviderId): string {
+  switch (provider) {
+    case "anthropic":
+      return "Anthropic · Claude Code";
+    case "open_router":
+      return "OpenRouter · Glut";
+    case "ollama":
+      return "Ollama · Glut";
+  }
+}
+
+/** The models whose key or name holds `query` (any case); all of them for an empty query. */
+export function filterModels(models: readonly ModelEntry[], query: string): ModelEntry[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [...models];
+  return models.filter((m) => m.key.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+}
+
+/** The owner's word for `model` with tier `tier` (`null` = none of the owner's), keeping its switch as it is. */
+export function choiceWithTier(model: Pick<ModelEntry, "enabled" | "enabled_by_default">, tier: Tier | null): ModelChoice {
+  return { enabled: model.enabled === model.enabled_by_default ? null : model.enabled, tier };
+}
+
+/** Where a model's tier comes from, in the words the Models tab shows. */
+export function tierOrigin(model: Pick<ModelEntry, "tier_source" | "owner_tier" | "proposal">): string {
+  switch (model.tier_source) {
+    case "owner":
+      return model.proposal && model.proposal.tier !== model.owner_tier
+        ? `Yours · the proposal says ${model.proposal.tier}`
+        : "Yours";
+    case "research":
+      return "Proposal · not reviewed";
+    case "price":
+      return "From the price";
+    case "unrated":
+      return "Unrated · no agent until it has a tier";
+  }
+}
+
+/** Whether a proposal waits for the owner's one click: research spoke and the owner has not. */
+export function proposalWaits(model: Pick<ModelEntry, "tier_source" | "proposal">): boolean {
+  return model.tier_source === "research" && model.proposal !== null;
+}
+
+/** "$0.40 / M out", or "local" / "no price". */
+export function priceLabel(model: Pick<ModelEntry, "provider" | "price">): string {
+  if (model.provider === "ollama") return "local";
+  if (!model.price) return "no price";
+  const out = model.price.output_per_m;
+  return `$${out < 1 ? out.toFixed(2) : String(Math.round(out * 100) / 100)} / M out`;
+}
+
+/** A context window as "128K" or "1M" tokens; empty when unknown. */
+export function contextLabel(tokens: number | null | undefined): string {
+  if (!tokens) return "";
+  if (tokens >= 1_000_000) return `${Math.round((tokens / 1_000_000) * 10) / 10}M context`;
+  return `${Math.round(tokens / 1000)}K context`;
+}
+
+/** The host a source link points at ("lmarena.ai"), for its text; the text itself when it is no URL. */
+export function sourceHost(source: string): string {
+  try {
+    return new URL(source).host.replace(/^www\./, "");
+  } catch {
+    return source;
+  }
+}
+
+/** Whether `source` may be opened in the system browser: an http(s) address and nothing else. */
+export function isWebAddress(source: string): boolean {
+  try {
+    const url = new URL(source);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/** What is wrong with price limits typed into the form, or `null` (looser or equal to Rust's check). */
+export function limitsProblem(lightBelow: number, heavyAbove: number): string | null {
+  if (!Number.isFinite(lightBelow) || !Number.isFinite(heavyAbove) || lightBelow < 0 || heavyAbove < 0) {
+    return "Both limits are prices in USD per million output tokens.";
+  }
+  if (lightBelow > heavyAbove) return "“Light below” must not be above “heavy above”.";
+  return null;
+}
+
+/** An engine as the default-engine select needs it. */
+export interface TierEngineOption {
+  id: string;
+  label: string;
+  rated_tier: Tier | null;
+  output_per_m: number | null;
+  unusable: string | null;
+}
+
+/** The engines a tier's default may be: the usable ones of that tier, the cheapest first (like `engines::engine_for`). */
+export function engineOptionsFor<T extends TierEngineOption>(engines: readonly T[], tier: Tier): T[] {
+  return engines
+    .filter((e) => e.rated_tier === tier && e.unusable === null)
+    .sort((a, b) => (a.output_per_m ?? Infinity) - (b.output_per_m ?? Infinity) || a.id.localeCompare(b.id));
 }

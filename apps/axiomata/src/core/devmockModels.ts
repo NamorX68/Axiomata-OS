@@ -24,21 +24,60 @@ interface MockModel {
   id: string;
   name: string;
   price: ModelPrice | null;
+  context: number | null;
   proposal: TierProposal | null;
 }
 
 const price = (input: number, output: number): ModelPrice => ({ input_per_m: input, output_per_m: output });
+const MILLION = 1_000_000;
+
+/** OpenRouter's long tail: more than SMALL_LIST_MAX models, so the list starts switched off and gets a filter. */
+const TAIL: [string, string, number, number][] = [
+  ["google/gemini-3-pro", "Google: Gemini 3 Pro", 12, 1_048_576],
+  ["google/gemini-3-flash", "Google: Gemini 3 Flash", 1.2, 1_048_576],
+  ["openai/gpt-6", "OpenAI: GPT-6", 15, 400_000],
+  ["openai/gpt-6-mini", "OpenAI: GPT-6 mini", 0.8, 400_000],
+  ["mistralai/mistral-large-3", "Mistral: Mistral Large 3", 6, 262_144],
+  ["mistralai/devstral-3", "Mistral: Devstral 3", 0.9, 262_144],
+  ["meta-llama/llama-5-405b", "Meta: Llama 5 405B", 3, 131_072],
+  ["meta-llama/llama-5-70b", "Meta: Llama 5 70B", 0.6, 131_072],
+  ["qwen/qwen3.5-coder", "Qwen: Qwen3.5 Coder", 1.6, 262_144],
+  ["qwen/qwen3.5-max", "Qwen: Qwen3.5 Max", 6.4, 262_144],
+  ["x-ai/grok-5", "xAI: Grok 5", 15, 256_000],
+  ["x-ai/grok-5-fast", "xAI: Grok 5 Fast", 0.5, 2_000_000],
+  ["moonshotai/kimi-k3", "MoonshotAI: Kimi K3", 2.5, 262_144],
+  ["minimax/minimax-m3", "MiniMax: MiniMax M3", 1.1, 1_000_000],
+  ["cohere/command-a-2", "Cohere: Command A 2", 10, 256_000],
+  ["amazon/nova-2-pro", "Amazon: Nova 2 Pro", 3.2, 300_000],
+  ["microsoft/phi-5", "Microsoft: Phi-5", 0.3, 131_072],
+  ["nvidia/nemotron-ultra-2", "NVIDIA: Nemotron Ultra 2", 1.8, 131_072],
+  ["ai21/jamba-2-large", "AI21: Jamba 2 Large", 8, 256_000],
+  ["anthropic/claude-sonnet-5.5", "Anthropic: Claude Sonnet 5.5", 10, MILLION],
+];
 
 const catalog: MockModel[] = [
-  { provider: "anthropic", id: "claude-fable-5-1", name: "Claude Fable 5.1", price: price(10, 50), proposal: null },
-  { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", price: price(4, 20), proposal: null },
-  { provider: "anthropic", id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", price: price(2, 10), proposal: null },
-  { provider: "anthropic", id: "claude-haiku-5-5", name: "Claude Haiku 5.5", price: price(0.1, 0.5), proposal: null },
+  { provider: "anthropic", id: "claude-fable-5-1", name: "Claude Fable 5.1", price: price(10, 50), context: MILLION, proposal: null },
+  { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", price: price(4, 20), context: MILLION, proposal: null },
+  {
+    provider: "anthropic",
+    id: "claude-sonnet-5-5",
+    name: "Claude Sonnet 5.5",
+    price: price(2, 10),
+    context: MILLION,
+    proposal: {
+      tier: "medium",
+      reason: "Ranks just below Opus 5.5 on the LMArena coding board, at half its price.",
+      source: "https://lmarena.ai/leaderboard",
+      at: "2026-10-29T18:00:00Z",
+    },
+  },
+  { provider: "anthropic", id: "claude-haiku-5-5", name: "Claude Haiku 5.5", price: price(0.1, 0.5), context: MILLION, proposal: null },
   {
     provider: "open_router",
     id: "deepseek/deepseek-v4.1-flash",
     name: "DeepSeek: DeepSeek V4.1 Flash",
     price: price(0.1, 0.4),
+    context: 163_840,
     proposal: null,
   },
   {
@@ -46,17 +85,46 @@ const catalog: MockModel[] = [
     id: "z-ai/glm-5.3",
     name: "Z.ai: GLM 5.3",
     price: price(0.6, 2.2),
+    context: 202_752,
     proposal: {
       tier: "heavy",
-      reason: "Scores beside the frontier models on the coding boards at a fraction of their price.",
-      source: "Artificial Analysis",
+      reason: "Scores 64 on the Artificial Analysis index, beside Opus 5.5, at a tenth of its price.",
+      source: "https://artificialanalysis.ai/models/glm-5-3",
       at: "2026-10-29T18:00:00Z",
     },
   },
-  { provider: "ollama", id: "qwen3:32b", name: "qwen3:32b", price: null, proposal: null },
+  ...TAIL.map(([id, name, out, context]) => ({
+    provider: "open_router" as const,
+    id,
+    name,
+    price: price(out / 4, out),
+    context,
+    proposal: null,
+  })),
+  { provider: "ollama", id: "qwen3:32b", name: "qwen3:32b", price: null, context: 40_960, proposal: null },
+  {
+    provider: "ollama",
+    id: "gemma4:12b-mlx",
+    name: "gemma4:12b-mlx",
+    price: null,
+    context: 131_072,
+    proposal: {
+      tier: "light",
+      reason: "A 12B model; the Gemma 4 family ranks with the small hosted ones.",
+      source: "https://lmarena.ai/leaderboard",
+      at: "2026-10-28T09:00:00Z",
+    },
+  },
 ];
 
-let choices: Record<string, ModelChoice> = {};
+/** The owner's word: Opus rated by hand; of OpenRouter's long list a few switched on. */
+let choices: Record<string, ModelChoice> = {
+  "anthropic/claude-opus-5-5": { tier: "heavy" },
+  "openrouter/deepseek/deepseek-v4.1-flash": { enabled: true },
+  "openrouter/z-ai/glm-5.3": { enabled: true },
+  "openrouter/google/gemini-3-flash": { enabled: true },
+  "openrouter/openai/gpt-6": { enabled: true, tier: "heavy" },
+};
 /** The mock's research run: under way at first, so the Models tab's note can be seen. */
 let researchRunning = true;
 /** How long the mock's research run "takes". */
@@ -99,6 +167,7 @@ function entry(m: MockModel): ModelEntry {
     proposal: m.proposal,
     price_tier: priceTier,
     price: m.price,
+    context_length: m.context,
   };
 }
 
