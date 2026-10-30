@@ -93,7 +93,8 @@ describe("the lists", () => {
     expect(list.rows[0]?.current).toBe(true);
     expect(costPanel(2, 0.5, 0).rows.map((r) => r.cells)).toEqual([
       ["Schritte", "2"],
-      ["Kosten", "$0,5"],
+      // German puts the sign after the amount, joined by a no-break space.
+      ["Kosten", "0,50\u00a0$"],
     ]);
     expect(skillsPanel([{ name: "news-web", description: "x", harness: "glut" }]).rows[0]?.confirm).toBe(
       "news-web starten? ⏎ ja · Esc nein",

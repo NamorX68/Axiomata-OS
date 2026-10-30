@@ -12,6 +12,7 @@
   import { relativeTime } from "../core/format";
   import { normaliseTag, refreshTagProposals, tagProblem, tagProposals, waitingLabel } from "../core/tagProposals";
   import { toast } from "../core/toast";
+  import { tTags } from "../i18n/tags";
   import HexCount from "../ui/HexCount.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import VaultTagging from "./VaultTagging.svelte";
@@ -33,6 +34,9 @@
   /** The rename under way: which tag, to what, and what a dry run counted. */
   let renaming = $state<{ from: string; to: string; count: RenameCount | null } | null>(null);
   const renameProblem = $derived(renaming ? tagProblem(renaming.to, list, renaming.from) : null);
+
+  /** The lead around the file name, which is shown as code. */
+  const lead = $derived(tTags("lead").split("{file}"));
 
   const fetchProposals = () => invokeBackend<TagProposal[]>("tag_proposals");
 
@@ -58,7 +62,7 @@
       toast(done, "info");
       return true;
     } catch (err) {
-      toast(`Could not save the tag list: ${String(err)}`, "danger");
+      toast(tTags("saveFailed", { error: String(err) }), "danger");
       return false;
     } finally {
       busy = false;
@@ -68,7 +72,7 @@
   async function addTag() {
     if (newTag.trim() === "" || newProblem) return;
     const tag = normaliseTag(newTag);
-    if (await save([...list, { tag, description: newDescription.trim() }], `#${tag} added`)) {
+    if (await save([...list, { tag, description: newDescription.trim() }], tTags("added", { tag }))) {
       newTag = "";
       newDescription = "";
     }
@@ -80,15 +84,15 @@
     if (!entry || entry.description === text) return;
     await save(
       list.map((e) => (e.tag === tag ? { ...e, description: text } : e)),
-      `#${tag}: description saved`,
+      tTags("descriptionSaved", { tag }),
     );
   }
 
   async function removeTag(tag: string) {
-    if (!confirm(`Take #${tag} off the list? Notes that carry it keep it; agents no longer choose it.`)) return;
+    if (!confirm(tTags("confirmRemove", { tag }))) return;
     await save(
       list.filter((e) => e.tag !== tag),
-      `#${tag} is off the list`,
+      tTags("removed", { tag }),
     );
   }
 
@@ -103,7 +107,7 @@
       });
       renaming = { ...renaming, count };
     } catch (err) {
-      toast(`Could not count the uses: ${String(err)}`, "danger");
+      toast(tTags("countFailed", { error: String(err) }), "danger");
     } finally {
       busy = false;
     }
@@ -115,11 +119,11 @@
     busy = true;
     try {
       const done = await invokeBackend<RenameCount>("rename_tag", { old: from, new: normaliseTag(to), dryRun: false });
-      toast(`#${from} is #${normaliseTag(to)} now — ${done.links} uses in ${done.files} notes rewritten`, "info");
+      toast(tTags("renamed", { from, to: normaliseTag(to), links: done.links, n: done.files }), "info");
       renaming = null;
       await load();
     } catch (err) {
-      toast(`Renaming failed: ${String(err)}`, "danger");
+      toast(tTags("renameFailed", { error: String(err) }), "danger");
     } finally {
       busy = false;
     }
@@ -134,15 +138,14 @@
         description: accept ? (proposalDescriptions[proposal.id] ?? proposal.description) : null,
       });
       if (accept) {
-        const notes = result.notes_tagged === 1 ? "1 note" : `${result.notes_tagged} notes`;
-        toast(`#${result.tag} is on the list and set on ${notes}`, "info");
-        for (const failure of result.notes_failed) toast(`#${result.tag} not set: ${failure}`, "warning");
+        toast(tTags("acceptedOn", { tag: result.tag, n: result.notes_tagged }), "info");
+        for (const failure of result.notes_failed) toast(tTags("notSet", { tag: result.tag, failure }), "warning");
       } else {
-        toast(`#${result.tag} turned down`, "info");
+        toast(tTags("turnedDown", { tag: result.tag }), "info");
       }
       await load();
     } catch (err) {
-      toast(`Could not answer the proposal: ${String(err)}`, "danger");
+      toast(tTags("answerFailed", { error: String(err) }), "danger");
     } finally {
       busy = false;
     }
@@ -152,15 +155,12 @@
 </script>
 
 <section>
-  <h3>Tags</h3>
-  <p class="lead">
-    The vault's tag list, kept in <code>TAGS.md</code>. Agents tag notes only from it; a tag they want that is not on it
-    waits here for you. Aim for some 30–60 tags, 1–4 per note.
-  </p>
+  <h3>{tTags("title")}</h3>
+  <p class="lead">{lead[0]}<code>TAGS.md</code>{lead[1]}</p>
 
   {#if $tagProposals.length > 0}
     <div class="sub-head">
-      <h3 class="sub">Proposed by agents</h3>
+      <h3 class="sub">{tTags("proposedByAgents")}</h3>
       <HexCount count={$tagProposals.length} label={waitingLabel($tagProposals.length)} />
     </div>
     <ul class="rows">
@@ -170,18 +170,20 @@
           <input
             type="text"
             class="description"
-            placeholder="A line of description"
-            aria-label="Description of #{proposal.tag}"
+            placeholder={tTags("descriptionPlaceholder")}
+            aria-label={tTags("descriptionOf", { tag: proposal.tag })}
             value={proposalDescriptions[proposal.id] ?? proposal.description}
             oninput={(e) => (proposalDescriptions[proposal.id] = e.currentTarget.value)}
           />
           <span class="meta" title={proposal.notes.join("\n")}>
-            {proposal.notes.length === 1 ? "1 note" : `${proposal.notes.length} notes`} · {proposal.proposed_by} ·
+            {tTags("notes", { n: proposal.notes.length })} · {proposal.proposed_by} ·
             {relativeTime(proposal.proposed_at)}
           </span>
           <span class="buttons">
-            <button type="button" disabled={busy} onclick={() => void answer(proposal, true)}>Accept</button>
-            <button type="button" disabled={busy} onclick={() => void answer(proposal, false)}>Turn down</button>
+            <button type="button" disabled={busy} onclick={() => void answer(proposal, true)}>{tTags("accept")}</button>
+            <button type="button" disabled={busy} onclick={() => void answer(proposal, false)}>
+              {tTags("turnDown")}
+            </button>
           </span>
         </li>
       {/each}
@@ -189,13 +191,13 @@
   {/if}
 
   {#if loadError}
-    <p class="status error">Could not read the tag list: {loadError}</p>
+    <p class="status error">{tTags("readError", { error: loadError })}</p>
   {:else if loading && list.length === 0}
-    <p class="status">Reading…</p>
+    <p class="status">{tTags("reading")}</p>
   {:else}
-    <h3 class="sub">On the list ({list.length})</h3>
+    <h3 class="sub">{tTags("onTheList", { n: list.length })}</h3>
     {#if list.length === 0}
-      <p class="hint">No tags yet.</p>
+      <p class="hint">{tTags("noTags")}</p>
     {/if}
     <ul class="rows">
       {#each list as entry (entry.tag)}
@@ -205,7 +207,7 @@
             <input
               type="text"
               class="rename"
-              aria-label="New name of #{entry.tag}"
+              aria-label={tTags("newNameOf", { tag: entry.tag })}
               spellcheck="false"
               value={renaming.to}
               oninput={(e) => renaming && (renaming = { ...renaming, to: e.currentTarget.value, count: null })}
@@ -213,14 +215,21 @@
             />
             <span class="buttons">
               {#if renaming.count}
-                <span class="meta">{renaming.count.links} uses in {renaming.count.files} notes</span>
-                <button type="button" class="primary" disabled={busy || !!renameProblem} onclick={() => void applyRename()}>
-                  Rename
+                <span class="meta">{tTags("usesIn", { uses: renaming.count.links, n: renaming.count.files })}</span>
+                <button
+                  type="button"
+                  class="primary"
+                  disabled={busy || !!renameProblem}
+                  onclick={() => void applyRename()}
+                >
+                  {tTags("rename")}
                 </button>
               {:else}
-                <button type="button" disabled={busy || !!renameProblem} onclick={() => void countRename()}>Count uses</button>
+                <button type="button" disabled={busy || !!renameProblem} onclick={() => void countRename()}>
+                  {tTags("countUses")}
+                </button>
               {/if}
-              <button type="button" disabled={busy} onclick={() => (renaming = null)}>Cancel</button>
+              <button type="button" disabled={busy} onclick={() => (renaming = null)}>{tTags("cancel")}</button>
             </span>
             {#if renameProblem}<p class="status invalid wide">{renameProblem}</p>{/if}
           {:else}
@@ -228,8 +237,8 @@
             <input
               type="text"
               class="description"
-              placeholder="A line of description"
-              aria-label="Description of #{entry.tag}"
+              placeholder={tTags("descriptionPlaceholder")}
+              aria-label={tTags("descriptionOf", { tag: entry.tag })}
               bind:value={descriptions[entry.tag]}
               onblur={() => void saveDescription(entry.tag)}
               onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
@@ -237,28 +246,43 @@
             <span class="buttons">
               <IconButton
                 icon="pencil"
-                label="Rename #{entry.tag}"
+                label={tTags("renameTag", { tag: entry.tag })}
                 size="sm"
                 disabled={busy}
                 onclick={() => (renaming = { from: entry.tag, to: entry.tag, count: null })}
               />
-              <IconButton icon="trash-2" label="Take #{entry.tag} off the list" size="sm" disabled={busy} onclick={() => void removeTag(entry.tag)} />
+              <IconButton
+                icon="trash-2"
+                label={tTags("takeOff", { tag: entry.tag })}
+                size="sm"
+                disabled={busy}
+                onclick={() => void removeTag(entry.tag)}
+              />
             </span>
           {/if}
         </li>
       {/each}
     </ul>
     <div class="add">
-      <input type="text" class="new-tag" placeholder="#new-tag" aria-label="New tag" spellcheck="false" bind:value={newTag} />
+      <input
+        type="text"
+        class="new-tag"
+        placeholder={tTags("newTagPlaceholder")}
+        aria-label={tTags("newTag")}
+        spellcheck="false"
+        bind:value={newTag}
+      />
       <input
         type="text"
         class="description"
-        placeholder="A line of description"
-        aria-label="Description of the new tag"
+        placeholder={tTags("descriptionPlaceholder")}
+        aria-label={tTags("descriptionOfNew")}
         bind:value={newDescription}
         onkeydown={(e) => e.key === "Enter" && void addTag()}
       />
-      <button type="button" disabled={busy || newTag.trim() === "" || !!newProblem} onclick={() => void addTag()}>Add</button>
+      <button type="button" disabled={busy || newTag.trim() === "" || !!newProblem} onclick={() => void addTag()}>
+        {tTags("add")}
+      </button>
     </div>
     {#if newProblem}<p class="status invalid">{newProblem}</p>{/if}
     <VaultTagging onChanged={() => void load()} />

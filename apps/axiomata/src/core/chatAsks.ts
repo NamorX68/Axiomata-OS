@@ -13,6 +13,7 @@
 import { get, writable, type Writable } from "svelte/store";
 
 import { toast } from "./toast";
+import { tShell } from "../i18n/shell";
 
 /** One question waiting for the owner. Every text is plain text, never markup. */
 export interface ChatAsk {
@@ -68,9 +69,9 @@ function oneLine(text: string): string {
 
 /** Who asks, as the owner reads it. */
 export function askerLabel(origin: string | null): string {
-  if (origin === "chat") return "The chat asks";
-  if (origin?.startsWith("agent:")) return `Agent ${oneLine(origin.slice("agent:".length))} asks`;
-  return "A command asks";
+  if (origin === "chat") return tShell("askerChat");
+  if (origin?.startsWith("agent:")) return tShell("askerAgent", { name: oneLine(origin.slice("agent:".length)) });
+  return tShell("askerCommand");
 }
 
 /** Drops the questions older than {@link ASK_TTL_MS}; returns how many went. */

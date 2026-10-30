@@ -43,10 +43,16 @@
   } from "../core/chat";
   import HexAvatar from "../ui/HexAvatar.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
+  import { formatUsd } from "../core/format";
   import { renderMarkdown } from "../core/markdown";
+  import { tShell } from "../i18n/shell";
   import Window from "./Window.svelte";
 
   let list = $state<HTMLDivElement | null>(null);
+
+  /** A turn's cost to the hundredth of a cent, in the app's number format. */
+  const usd = (amount: number): string =>
+    formatUsd(amount, 4);
 
   $effect(() => {
     void $turns.length;
@@ -57,7 +63,7 @@
 
 <!-- The app actions the agent called for a reply (UX3): small hex chips instead of a wall of text. -->
 {#snippet chips(list: ToolCall[])}
-  <ul class="tools" aria-label="Actions the agent used">
+  <ul class="tools" aria-label={tShell("toolsUsed")}>
     {#each list as call, i (i)}
       <li class="tool"><StatusMark tone={call.ok ? "ok" : "bad"} />{call.label}</li>
     {/each}
@@ -67,8 +73,8 @@
 {#if $panelOpen}
   <div class="chat-wrap" transition:slide>
     <Window
-      title="Agent"
-      subtitle={$sessionId ? `session ${$sessionId.slice(0, 8)}…` : "new session"}
+      title={tShell("agent")}
+      subtitle={$sessionId ? tShell("session", { id: $sessionId.slice(0, 8) }) : tShell("newSession")}
       modal={false}
       onClose={() => panelOpen.set(false)}
       style="width: 100%; height: 100%;"
@@ -76,9 +82,13 @@
       <div class="turns" bind:this={list}>
         {#each $interruptedTurns as lost (lost.run)}
           <p class="interrupted">
-            A turn stopped when the app did: <strong>{lost.title || "(no text)"}</strong>
-            <button type="button" class="ax-btn" disabled={$busy} onclick={() => void resumeTurn(lost)}>Resume</button>
-            <button type="button" class="ax-btn" disabled={$busy} onclick={() => void dropTurn(lost)}>Drop</button>
+            {tShell("turnStopped")} <strong>{lost.title || tShell("noText")}</strong>
+            <button type="button" class="ax-btn" disabled={$busy} onclick={() => void resumeTurn(lost)}>
+              {tShell("resume")}
+            </button>
+            <button type="button" class="ax-btn" disabled={$busy} onclick={() => void dropTurn(lost)}>
+              {tShell("drop")}
+            </button>
           </p>
         {/each}
         {#each $turns as t (t.id)}
@@ -90,14 +100,14 @@
               <article class="turn {t.role}">
                 {#if t.tools}{@render chips(t.tools)}{/if}
                 <div class="md">{@html renderMarkdown(t.text)}</div>
-                {#if t.costUsd != null}<span class="cost">${t.costUsd.toFixed(4)}</span>{/if}
+                {#if t.costUsd != null}<span class="cost">{usd(t.costUsd)}</span>{/if}
               </article>
             </div>
           {/if}
         {/each}
         {#if $busy}
           <div class="from-agent">
-            <HexAvatar text="AX" live size="sm" label="Axiomata is thinking" />
+            <HexAvatar text="AX" live size="sm" label={tShell("thinking")} />
             <article class="turn assistant thinking">
               {#if $toolCalls.length > 0}{@render chips($toolCalls)}{/if}
               <span class="hexes" aria-hidden="true"><i class="ax-hex"></i><i class="ax-hex"></i><i class="ax-hex"></i></span>

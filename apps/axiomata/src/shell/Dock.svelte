@@ -27,21 +27,23 @@
   import type { IconName } from "../ui/icons/lucide";
   import StatusMark from "../ui/StatusMark.svelte";
   import WaitingBadge from "../ui/WaitingBadge.svelte";
+  import { tShell } from "../i18n/shell";
   import Heartbeat from "./Heartbeat.svelte";
   import ThemePicker from "./ThemePicker.svelte";
 
   interface Target {
     id: string;
-    label: string;
+    /** Read when drawn, so a language switch shows at once; the places' names stay English (Q13). */
+    label: () => string;
     icon: IconName;
     go: () => void;
   }
 
   const TARGETS: readonly Target[] = [
-    { id: "studio", label: "Studio", icon: "code", go: () => emit("shell:studio") },
-    { id: "kanban", label: "Kanban", icon: "square-kanban", go: () => emit("shell:kanban") },
-    { id: "brain", label: "Brain", icon: "brain", go: () => emit("open-second-brain", {}) },
-    { id: "note", label: "Note", icon: "square-pen", go: () => emit("shell:new-note") },
+    { id: "studio", label: () => "Studio", icon: "code", go: () => emit("shell:studio") },
+    { id: "kanban", label: () => "Kanban", icon: "square-kanban", go: () => emit("shell:kanban") },
+    { id: "brain", label: () => "Brain", icon: "brain", go: () => emit("open-second-brain", {}) },
+    { id: "note", label: () => tShell("targetNote"), icon: "square-pen", go: () => emit("shell:new-note") },
   ];
 
   let info = $state<AppInfo | null>(null);
@@ -51,6 +53,8 @@
   const focusKey = $derived(keyHints("⌘⇧.", $platform));
   const settingsKey = $derived(keyHints("⌘,", $platform));
   const working = $derived($studioActivity > 0);
+  /** Who, which workspace, which build: data only, the same in every language. */
+  const brandTitle = $derived(info ? `${info.owner} · ${info.workspace_root} · v${info.version}` : "");
 
   onMount(async () => {
     try {
@@ -68,24 +72,24 @@
 </script>
 
 <header class="dock-row">
-  <nav class="dock" aria-label="Dashboard actions">
-    <div class="brand" title={info ? `${info.owner} · ${info.workspace_root} · v${info.version}` : ""}>
+  <nav class="dock" aria-label={tShell("dockLabel")}>
+    <div class="brand" title={brandTitle}>
       <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z" fill="currentColor" />
         <path d="M12 7.5l4.3 2.5v5L12 17.5l-4.3-2.5v-5z" class="core" />
       </svg>
-      <h1 class="name">Axiomata</h1>
+      <h1 class="name">{tShell("appName")}</h1>
       {#if info?.workspace_name}<span class="workspace">{info.workspace_name}</span>{/if}
     </div>
 
     <span class="sep" aria-hidden="true"></span>
 
     {#each TARGETS as t (t.id)}
-      <button type="button" class="target" title={t.label} aria-label={t.label} onclick={t.go}>
+      <button type="button" class="target" title={t.label()} aria-label={t.label()} onclick={t.go}>
         <Icon name={t.icon} />
-        <span class="label">{t.label}</span>
+        <span class="label">{t.label()}</span>
         {#if t.id === "studio" && working}
-          <span class="live"><StatusMark tone="live" label="{$studioActivity} at work" /></span>
+          <span class="live"><StatusMark tone="live" label={tShell("atWork", { n: $studioActivity })} /></span>
         {/if}
       </button>
       {#if t.id === "studio"}<WaitingBadge agents={$waitingAgents} size="sm" />{/if}
@@ -97,28 +101,32 @@
 
     {#if $focusMode}
       <!-- The focus mode is on (G13): said here, where it can be left with a click as well as with its key. -->
-      <button type="button" class="focus-chip" title="Leave the focus mode ({focusKey})" onclick={toggleFocus}>
-        <Icon name="eye-off" size="sm" />Focus
+      <button type="button" class="focus-chip" title={tShell("leaveFocus", { keys: focusKey })} onclick={toggleFocus}>
+        <Icon name="eye-off" size="sm" />{tShell("focus")}
       </button>
     {/if}
     <button
       type="button"
       class="search"
-      title="Search or run ({spotlightKey})"
-      aria-label="Search or run"
+      title={tShell("searchOrRunKeys", { keys: spotlightKey })}
+      aria-label={tShell("searchOrRun")}
       onclick={() => emit("shell:spotlight")}
     >
       <Icon name="search" />
       <kbd>{spotlightKey}</kbd>
     </button>
 
-    <IconButton icon="layout-grid" label="Add module" onclick={() => emit("shell:add-module")} />
+    <IconButton icon="layout-grid" label={tShell("addModule")} onclick={() => emit("shell:add-module")} />
     <span class="theme-slot" data-theme-toggle>
-      <IconButton icon="palette" label="Theme" pressed={themeOpen} onclick={() => (themeOpen = !themeOpen)} />
+      <IconButton icon="palette" label={tShell("theme")} pressed={themeOpen} onclick={() => (themeOpen = !themeOpen)} />
       {#if themeOpen}<ThemePicker onClose={() => (themeOpen = false)} />{/if}
     </span>
-    <IconButton icon="circle-question-mark" label="Handbook" onclick={() => openHandbook()} />
-    <IconButton icon="settings" label="Settings ({settingsKey})" onclick={() => emit("shell:settings")} />
+    <IconButton icon="circle-question-mark" label={tShell("handbook")} onclick={() => openHandbook()} />
+    <IconButton
+      icon="settings"
+      label={tShell("settingsKeys", { keys: settingsKey })}
+      onclick={() => emit("shell:settings")}
+    />
     <HexCount
       count={$tagProposals.length}
       label={waitingLabel($tagProposals.length)}

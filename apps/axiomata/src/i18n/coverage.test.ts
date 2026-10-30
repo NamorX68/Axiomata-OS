@@ -15,11 +15,30 @@ const CONVERTED = [
   "shell/AssistantBar.svelte",
   "shell/SlashPanel.svelte",
   "shell/EffortSwitch.svelte",
+  "shell/Settings.svelte",
+  "shell/TagsSettings.svelte",
+  "shell/VaultTagging.svelte",
+  "shell/StorageSettings.svelte",
+  "shell/Dock.svelte",
+  "shell/Spotlight.svelte",
+  "shell/Heartbeat.svelte",
+  "shell/ChatPanel.svelte",
+  "shell/ModulePicker.svelte",
+  "shell/Sounds.svelte",
+  "shell/HandbookPanel.svelte",
+  "shell/ChatAsks.svelte",
+  "shell/Toasts.svelte",
+  "shell/ThemePicker.svelte",
+  "shell/Ignition.svelte",
+  "shell/Window.svelte",
+  "shell/StagingPanel.svelte",
+  "shell/StagingLayer.svelte",
+  "shell/Ambient.svelte",
 ];
 
 /** Marks and names that may stand as they are: names stay English in both languages (Q13). */
-const NAMES = "Studio|Canvas|Flow|Kanban|Orbit|Skills?|Routines?|Master";
-const ALLOWED = new RegExp(`^(?:[\\s\\d·•…—–\\-+×/:,.()[\\]{}<>|?!%#@&*'"›‹]|${NAMES})*$`);
+const NAMES = "Studio|Canvas|Flow|Kanban|Orbit|Skills?|Routines?|Master|Axiomata|Glut|[A-Z_]+\\.md|~/[\\w./-]*";
+const ALLOWED = new RegExp(`^(?:[\\s\\d·•…—–\\-+×/:,.()[\\]{}<>|?!%#@&*'"›‹→←↑↓]|${NAMES})*$`);
 
 /** The markup of a component without its script, its style and its comments. */
 function markup(source: string): string {
@@ -87,7 +106,13 @@ export function literalTexts(source: string): string[] {
     if (trimmed && !ALLOWED.test(trimmed)) found.push(trimmed);
   };
   const exprs = expressions(html);
-  for (const e of exprs) for (const text of strings(e.inner)) if (READS_AS_WORDS.test(text.trim())) keep(text);
+  for (const e of exprs) {
+    for (const raw of strings(e.inner)) {
+      // A template literal's `${…}` parts are code, not words.
+      const text = raw.replace(/\$\{[^}]*\}/g, " ");
+      if (READS_AS_WORDS.test(text.trim())) keep(text);
+    }
+  }
   // The markup with every expression blanked, so `=>` or `>` inside one does not read as a tag's end.
   let plain = "";
   let at = 0;

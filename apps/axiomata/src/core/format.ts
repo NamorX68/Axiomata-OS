@@ -52,6 +52,20 @@ export function formatBytes(n: number): string {
   return `${one(n / (1024 * 1024 * 1024))} GB`;
 }
 
+/**
+ * US dollars in the app's language: "$0.36" / "0,36 $" — every amount the app shows is in dollars (the providers bill
+ * in them). `decimals` is the most places (a cost of a turn wants four, a day's spend two), `atLeast` the fewest.
+ */
+export function formatUsd(amount: number, decimals = 2, atLeast = decimals): string {
+  return amount.toLocaleString(locale(), {
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: atLeast,
+    maximumFractionDigits: decimals,
+  });
+}
+
 /** A number in the app's language: "1,234.5" / "1.234,5". */
 export function formatNumber(n: number, options?: Intl.NumberFormatOptions): string {
   return n.toLocaleString(locale(), options);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  GROUP_LABEL,
+  groupLabel,
   KIND_ORDER,
   MAX_PER_KIND,
   MAX_ROWS,
@@ -154,7 +154,7 @@ describe("rankItems", () => {
   });
 
   it("labels every group the list can show", () => {
-    for (const kind of KIND_ORDER) expect(GROUP_LABEL[kind]).toBeTruthy();
-    expect(GROUP_LABEL.suggestion).toBeTruthy();
+    for (const kind of KIND_ORDER) expect(groupLabel(kind)).toBeTruthy();
+    expect(groupLabel("suggestion")).toBeTruthy();
   });
 });

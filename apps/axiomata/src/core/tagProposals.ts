@@ -10,6 +10,7 @@
 
 import { writable, type Writable } from "svelte/store";
 
+import { tTags } from "../i18n/tags";
 import type { TagEntry, TagProposal } from "./backend";
 
 /** How often the count is asked for again: one small query, often enough that a finished run shows soon after. */
@@ -20,7 +21,7 @@ export const tagProposals: Writable<TagProposal[]> = writable([]);
 
 /** What the badge says. */
 export function waitingLabel(count: number): string {
-  return count === 1 ? "A tag proposal waits for you" : `${count} tag proposals wait for you`;
+  return tTags("waiting", { n: count });
 }
 
 /** Reads the proposals once into {@link tagProposals}; a failed read leaves the last list. */
@@ -49,13 +50,13 @@ export function watchTagProposals(
 /** What is wrong with a tag the owner typed, or `null` when it is one (the rules of `tags::detect::normalise`). */
 export function tagProblem(raw: string, list: readonly TagEntry[], except?: string): string | null {
   const tag = normaliseTag(raw);
-  if (tag === "") return "Type a tag.";
-  if (tag.length > 64) return "At most 64 characters.";
-  if (!/^[\p{L}\p{N}_\-/]+$/u.test(tag)) return "Letters, digits, _ - and / only.";
-  if (/^[\d/]+$/.test(tag)) return "Not only digits.";
-  if (!/^[\p{L}\p{N}]/u.test(tag)) return "Start with a letter or digit.";
-  if (tag.startsWith("/") || tag.endsWith("/") || tag.includes("//")) return "A / only between two parts.";
-  if (tag !== except && list.some((entry) => entry.tag === tag)) return `#${tag} is on the list already.`;
+  if (tag === "") return tTags("problemEmpty");
+  if (tag.length > 64) return tTags("problemLength");
+  if (!/^[\p{L}\p{N}_\-/]+$/u.test(tag)) return tTags("problemChars");
+  if (/^[\d/]+$/.test(tag)) return tTags("problemDigits");
+  if (!/^[\p{L}\p{N}]/u.test(tag)) return tTags("problemStart");
+  if (tag.startsWith("/") || tag.endsWith("/") || tag.includes("//")) return tTags("problemSlash");
+  if (tag !== except && list.some((entry) => entry.tag === tag)) return tTags("problemTaken", { tag });
   return null;
 }
 

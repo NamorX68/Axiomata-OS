@@ -45,10 +45,10 @@ describe("maintenance rules", () => {
   it("accepts the plan's defaults and refuses an age of zero or a fraction", () => {
     expect(ruleProblem(defaults)).toBeNull();
     expect(ruleProblem({ ...defaults, chat_turns_days: 0 })).toContain(
-      "chat turns days",
+      "Chat turns (days)",
     );
     expect(ruleProblem({ ...defaults, backups_keep: 0 })).toContain(
-      "backups keep",
+      "Backups (kept)",
     );
     expect(ruleProblem({ ...defaults, runs_days: 1.5 })).not.toBeNull();
     expect(ruleProblem({ ...defaults, runs_keep: 0 })).toBeNull();

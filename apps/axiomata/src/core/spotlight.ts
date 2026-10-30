@@ -1,9 +1,11 @@
 /**
  * The model behind the ⌘K spotlight (`docs/plans/spotlight-search.md`, CP1): which items match a query, in which order,
  * and where a group header goes. Pure — it takes plain lists the caller already fetched and imports nothing from the
- * app, so the ranking is tested without a backend, a bus or a DOM. What a chosen item *does* is the caller's business
- * (CP2): an item carries its `kind` and an opaque `payload` to act on, never a closure.
+ * app but its texts, so the ranking is tested without a backend, a bus or a DOM. What a chosen item *does* is the
+ * caller's business (CP2): an item carries its `kind` and an opaque `payload` to act on, never a closure.
  */
+
+import { tShell } from "../i18n/shell";
 
 /** What a spotlight item is; the order of [`KIND_ORDER`] is the order of the groups in the list. */
 export type SpotlightKind =
@@ -66,19 +68,25 @@ export const KIND_ORDER: readonly SpotlightKind[] = [
   "file",
 ];
 
-export const GROUP_LABEL: Record<SpotlightGroup, string> = {
-  suggestion: "Jump to",
-  command: "Commands",
-  module: "Modules",
-  skill: "Skills",
-  routine: "Routines",
-  card: "Cards",
-  plan: "Plans",
-  project: "Projects",
-  handbook: "Handbook",
-  tag: "Tags",
-  file: "Files",
-};
+/** The key of each group's header in the shell's catalog. */
+const GROUP_KEY = {
+  suggestion: "groupSuggestion",
+  command: "groupCommand",
+  module: "groupModule",
+  skill: "groupSkill",
+  routine: "groupRoutine",
+  card: "groupCard",
+  plan: "groupPlan",
+  project: "groupProject",
+  handbook: "groupHandbook",
+  tag: "groupTag",
+  file: "groupFile",
+} as const satisfies Record<SpotlightGroup, string>;
+
+/** A group's header in the current language — read when drawn, so a language switch shows at once. */
+export function groupLabel(group: SpotlightGroup): string {
+  return tShell(GROUP_KEY[group]);
+}
 
 /** Rows in the list in all. */
 export const MAX_ROWS = 20;

@@ -4,6 +4,8 @@
  * (snake_case, as `config.toml` spells it).
  */
 
+import { tStorage } from "../i18n/storage";
+
 /** The retention rules of `[maintenance]`. */
 export interface MaintenanceSettings {
   enabled: boolean;
@@ -98,20 +100,94 @@ export interface CleanOutcome {
 }
 
 /** Glut names its items by fixed keys; the labels are Axiomata's. A name added later is shown as Glut spells it. */
-const GLUT_LABELS: Readonly<Record<string, string>> = {
-  snapshots: "Snapshots",
-  journals: "Run journals",
-  sessions: "Sessions",
-  results: "Tool results",
-  images: "Images",
-  exports: "Exports",
-  lean: "Lean savings log",
-  other: "Other",
+const GLUT_LABELS: Readonly<Record<string, Parameters<typeof tStorage>[0]>> = {
+  snapshots: "glutSnapshots",
+  journals: "glutJournals",
+  sessions: "glutSessions",
+  results: "glutResults",
+  images: "glutImages",
+  exports: "glutExports",
+  lean: "glutLean",
+  other: "glutOther",
 };
 
 /** The label of one of Glut's items. */
 export function glutLabel(name: string): string {
-  return GLUT_LABELS[name] ?? name;
+  const key = GLUT_LABELS[name];
+  return key ? tStorage(key) : name;
+}
+
+/** The report's rows by their fixed keys; the backend's English label stands for a key added later. */
+const ITEM_LABELS: Readonly<Record<string, Parameters<typeof tStorage>[0]>> = {
+  runs: "itemRuns",
+  routine_runs: "itemRoutineRuns",
+  chat_turns: "itemChatTurns",
+  web_searches: "itemWebSearches",
+  card_events: "itemCardEvents",
+  session_spend: "itemSessionSpend",
+  database: "itemDatabase",
+  ended_sessions: "itemEndedSessions",
+  app_log: "itemAppLog",
+  runs_log: "itemRunsLog",
+  backups: "itemBackups",
+  agent_events: "itemAgentEvents",
+  claude_sessions: "itemClaudeSessions",
+  worktrees: "itemWorktrees",
+};
+
+/** The label of a report row, in the app's language. */
+export function itemLabel(key: string, fallback: string): string {
+  const label = ITEM_LABELS[key];
+  return label ? tStorage(label) : fallback;
+}
+
+const UNITS: Readonly<Record<string, Parameters<typeof tStorage>[0]>> = {
+  rows: "unitRows",
+  files: "unitFiles",
+  sessions: "unitSessions",
+  folders: "unitFolders",
+  entries: "unitEntries",
+  worktrees: "unitWorktrees",
+};
+
+/** `count` of a row's unit ("12 rows"); a unit added later is shown as the backend spells it. */
+export function unitCount(count: number, unit: string): string {
+  const key = UNITS[unit];
+  return key ? tStorage(key, { n: count }) : `${count} ${unit}`;
+}
+
+/**
+ * How long a row without an editable rule keeps its data. The backend words it in English from its own constants;
+ * the numbers are read back out of that line, so a changed constant still shows right. A line of another shape is
+ * shown as the backend wrote it.
+ */
+export function keepText(item: Pick<MaintenanceItem, "key" | "keep">): string {
+  const number = (pattern: RegExp): number[] | null => {
+    const match = pattern.exec(item.keep);
+    return match ? match.slice(1).map(Number) : null;
+  };
+  switch (item.key) {
+    case "database": {
+      const found = number(/^compacted when over (\d+) % is free$/);
+      return found ? tStorage("keepDatabase", { percent: found[0] }) : item.keep;
+    }
+    case "runs_log": {
+      const found = number(/^rotated at (\d+) MB, the last (\d+) kept$/);
+      return found ? tStorage("keepRunsLog", { mb: found[0], n: found[1] }) : item.keep;
+    }
+    case "ended_sessions": {
+      const found = number(/quiet for (\d+) day\(s\)/);
+      return found ? tStorage("keepEndedSessions", { n: found[0] }) : item.keep;
+    }
+    case "agent_events":
+      return item.keep === "while their agent exists" ? tStorage("keepAgentEvents") : item.keep;
+    case "worktrees":
+      return item.keep === "removed with their agent; one with changes waits for you"
+        ? tStorage("keepWorktrees")
+        : item.keep;
+    default:
+      return item.keep;
+  }
 }
 
 /** What the Storage section shows. */
@@ -158,6 +234,18 @@ export const RULE_BOUNDS: Readonly<
   claude_sessions_days: { min: 1, max: 3650 },
 };
 
+/** A rule as the section shows it: its row's label and what the number counts ("Chat turns (days)"). */
+function ruleName(field: RuleField): string {
+  for (const [key, rules] of Object.entries(ITEM_RULES)) {
+    const rule = rules.find((r) => r.field === field);
+    if (rule) {
+      const label = itemLabel(key, key);
+      return rule.unit === "days" ? tStorage("ruleDays", { label }) : tStorage("ruleKept", { label });
+    }
+  }
+  return field;
+}
+
 /** The first rule out of its bounds, in words, or `null` when all are fine. */
 export function ruleProblem(settings: MaintenanceSettings): string | null {
   for (const [field, { min, max }] of Object.entries(RULE_BOUNDS) as [
@@ -166,7 +254,7 @@ export function ruleProblem(settings: MaintenanceSettings): string | null {
   ][]) {
     const value = settings[field];
     if (!Number.isInteger(value) || value < min || value > max) {
-      return `${field.split("_").join(" ")} must be a whole number from ${min} to ${max}`;
+      return tStorage("ruleRange", { rule: ruleName(field), min, max });
     }
   }
   return null;

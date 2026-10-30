@@ -16,6 +16,7 @@
   import { effects } from "../core/effects";
   import { animates, motion } from "../core/motion";
   import { dashboardLoaded } from "../core/persist";
+  import { tShell } from "../i18n/shell";
 
   /** When the mark starts to open onto the app, from the start of the ignition (ms). */
   const OPEN_AT = 3500;
@@ -100,7 +101,7 @@
           <path class="core" d="M50 31 L68.2 41.5 L68.2 62.5 L50 73 L31.8 62.5 L31.8 41.5 Z" />
         </svg>
       </div>
-      <p class="word">Axiomata</p>
+      <p class="word">{tShell("appName")}</p>
     {/if}
   </div>
 {/if}

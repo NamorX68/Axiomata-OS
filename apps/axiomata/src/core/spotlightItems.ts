@@ -6,6 +6,7 @@
 
 import type { BoardCard, BoardPlan, GraphFile, IdeProject, Routine, SearchHit, Skill } from "./backend";
 import { HANDBOOK_EVENT, type HandbookEntry } from "./handbook";
+import { tShell } from "../i18n/shell";
 import type { SpotlightItem } from "./spotlight";
 
 /** What choosing an item does. A data description, not a closure: the model stays free of the bus and the stores. */
@@ -35,18 +36,27 @@ const item = (
   rest: Partial<SpotlightItem> = {},
 ): SpotlightItem => ({ kind, id, title, payload: action, ...rest });
 
-/** The shell's own actions: what the icon bar and the ring offer, reachable from the keyboard. */
+/**
+ * The shell's own actions: what the icon bar and the ring offer, reachable from the keyboard. Titled in the current
+ * language each time the list is built; the keywords hold both languages' words, so either finds an action.
+ */
 export function commandItems(): SpotlightItem[] {
   return [
-    item("command", "new-note", "New note", { type: "event", event: "shell:new-note" }, { keywords: "new note" }),
-    item("command", "settings", "Settings", { type: "event", event: "shell:settings" }, { keywords: "settings" }),
-    item("command", "kanban", "Open Kanban", { type: "kanban" }, { keywords: "board cards karten" }),
-    item("command", "studio", "Open Studio", { type: "studio" }, { keywords: "ide editor flow canvas" }),
-    item("command", "add-module", "Add module", { type: "event", event: "shell:add-module" }, { keywords: "add" }),
+    item("command", "new-note", tShell("cmdNewNote"), { type: "event", event: "shell:new-note" }, {
+      keywords: "new note neue notiz",
+    }),
+    item("command", "settings", tShell("cmdSettings"), { type: "event", event: "shell:settings" }, {
+      keywords: "settings einstellungen",
+    }),
+    item("command", "kanban", tShell("cmdKanban"), { type: "kanban" }, { keywords: "board cards karten" }),
+    item("command", "studio", tShell("cmdStudio"), { type: "studio" }, { keywords: "ide editor flow canvas" }),
+    item("command", "add-module", tShell("addModule"), { type: "event", event: "shell:add-module" }, {
+      keywords: "add module modul hinzufügen",
+    }),
     item(
       "command",
       "brain",
-      "Open Second Brain",
+      tShell("cmdBrain"),
       { type: "event", event: "open-second-brain" },
       { keywords: "graph orbit notizen" },
     ),
@@ -65,7 +75,9 @@ export function moduleItems(modules: ModuleLike[], isPlaced: (type: string) => b
   return modules
     .filter((module) => !module.stageOnly && !(module.singleton && isPlaced(module.type)))
     .map((module) =>
-      item("module", module.type, module.title, { type: "module", moduleType: module.type }, { subtitle: "Modul platzieren" }),
+      item("module", module.type, module.title, { type: "module", moduleType: module.type }, {
+        subtitle: tShell("placeModule"),
+      }),
     );
 }
 
@@ -78,7 +90,7 @@ export function skillItems(skills: Skill[]): SpotlightItem[] {
 export function routineItems(routines: Routine[]): SpotlightItem[] {
   return routines.map((routine) =>
     item("routine", String(routine.id), routine.name, { type: "routines" }, {
-      subtitle: `${routine.enabled ? "an" : "aus"} · ${routine.cron_expr}`,
+      subtitle: `${tShell(routine.enabled ? "routineOn" : "routineOff")} · ${routine.cron_expr}`,
     }),
   );
 }
@@ -143,7 +155,7 @@ export function tagItems(files: GraphFile[]): SpotlightItem[] {
     for (const tag of file.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   }
   return [...counts.entries()].map(([tag, count]) =>
-    item("tag", tag, `#${tag}`, { type: "tag", tag }, { subtitle: count === 1 ? "1 note" : `${count} notes` }),
+    item("tag", tag, `#${tag}`, { type: "tag", tag }, { subtitle: tShell("notes", { n: count }) }),
   );
 }
 

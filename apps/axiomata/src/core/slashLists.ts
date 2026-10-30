@@ -7,7 +7,7 @@
  */
 
 import { tChat } from "../i18n/chat";
-import { formatDateTime, formatNumber } from "./format";
+import { formatDateTime, formatNumber, formatUsd } from "./format";
 
 /** One row of a panel. */
 export interface PanelRow {
@@ -99,8 +99,7 @@ export interface ModelRowInput {
 /** "$0.19 / $0.75" — what a million tokens in and out cost. */
 function price(p: ModelRowInput["price"]): string {
   if (!p) return "—";
-  const usd = (n: number) => `$${formatNumber(n, { maximumFractionDigits: 2 })}`;
-  return `${usd(p.input_per_m)} / ${usd(p.output_per_m)}`;
+  return `${formatUsd(p.input_per_m)} / ${formatUsd(p.output_per_m)}`;
 }
 
 /** "128k", "1M". */
@@ -275,7 +274,7 @@ export function effortPanel(
 export function costPanel(turns: number, totalUsd: number, unpriced: number): Panel {
   const rows: PanelRow[] = [
     { id: "turns", cells: [tChat("costTurns"), formatNumber(turns)] },
-    { id: "total", cells: [tChat("costTotal"), `$${formatNumber(totalUsd, { maximumFractionDigits: 4 })}`] },
+    { id: "total", cells: [tChat("costTotal"), formatUsd(totalUsd, 4, 2)] },
   ];
   if (unpriced > 0) rows.push({ id: "unpriced", cells: [tChat("costUnpriced"), formatNumber(unpriced)] });
   return { kind: "info", title: tChat("panelCost"), columns: [tChat("colWhat"), tChat("colValue")], rows };

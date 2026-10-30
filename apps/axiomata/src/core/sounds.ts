@@ -6,6 +6,7 @@
  */
 
 import type { AgentState } from "./backend";
+import { tSettings } from "../i18n/settings";
 
 /** What a sound tells. */
 export type Cue = "waiting" | "done" | "routine";
@@ -91,9 +92,9 @@ export function sceneOf(
   return { agents, routines: new Map(routines.map((r) => [r.id, r.last_fired_at])) };
 }
 
-/** The names the settings show. */
-export const CUE_LABELS: Readonly<Record<Cue, string>> = {
-  waiting: "An agent waits for you",
-  done: "An agent finished its turn",
-  routine: "A routine fired",
+/** The names the settings show, read in the current language. */
+export const CUE_LABELS: Readonly<Record<Cue, () => string>> = {
+  waiting: () => tSettings("cueWaiting"),
+  done: () => tSettings("cueDone"),
+  routine: () => tSettings("cueRoutine"),
 };

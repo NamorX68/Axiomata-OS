@@ -1,6 +1,7 @@
 <!-- Bottom-right stack of transient notifications from `core/toast.ts`. -->
 <script lang="ts">
   import { dismissToast, toasts } from "../core/toast";
+  import { tShell } from "../i18n/shell";
 </script>
 
 {#if $toasts.length > 0}
@@ -8,7 +9,7 @@
     {#each $toasts as t (t.id)}
       <div class="toast {t.kind}">
         <span>{t.message}</span>
-        <button type="button" aria-label="Dismiss" onclick={() => dismissToast(t.id)}>×</button>
+        <button type="button" aria-label={tShell("dismiss")} onclick={() => dismissToast(t.id)}>×</button>
       </div>
     {/each}
   </div>

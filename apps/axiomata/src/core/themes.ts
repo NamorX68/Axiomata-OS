@@ -8,27 +8,28 @@
 
 import { activeTheme } from "./stores";
 
+import { tSettings } from "../i18n/settings";
 export interface ThemeInfo {
   id: string;
   label: string;
-  /** One line for the picker / tooltip. */
-  blurb: string;
+  /** One line for the picker / tooltip, in the current language. */
+  blurb: () => string;
 }
 
 export const THEMES: readonly ThemeInfo[] = [
-  { id: "graphite", label: "Graphite", blurb: "Near-black, orange accent, hex mesh" },
-  { id: "paper", label: "Paper", blurb: "Warm cream, ink text, clay accent" },
-  { id: "steampunk", label: "Steampunk", blurb: "Bronze and leather, brass accent" },
-  { id: "forest", label: "Forest", blurb: "Pine and moss, autumn-amber accent" },
-  { id: "ocean", label: "Ocean", blurb: "Deep-sea navy, coral accent" },
-  { id: "catppuccin-mocha", label: "Catppuccin Mocha", blurb: "Soft dark, mauve accent" },
-  { id: "catppuccin-macchiato", label: "Catppuccin Macchiato", blurb: "Soft dark, a touch lighter" },
-  { id: "catppuccin-frappe", label: "Catppuccin Frappé", blurb: "Soft dim, mauve accent" },
-  { id: "catppuccin-latte", label: "Catppuccin Latte", blurb: "Soft light, mauve accent" },
-  { id: "catppuccin-espresso", label: "Catppuccin Espresso", blurb: "Macchiato on near-black" },
-  { id: "tokyo-night", label: "Tokyo Night", blurb: "Deep indigo, blue accent" },
-  { id: "github-dark", label: "GitHub Dark", blurb: "Familiar dark, blue accent" },
-  { id: "github-light", label: "GitHub Light", blurb: "Familiar light, blue accent" },
+  { id: "graphite", label: "Graphite", blurb: () => tSettings("blurbGraphite") },
+  { id: "paper", label: "Paper", blurb: () => tSettings("blurbPaper") },
+  { id: "steampunk", label: "Steampunk", blurb: () => tSettings("blurbSteampunk") },
+  { id: "forest", label: "Forest", blurb: () => tSettings("blurbForest") },
+  { id: "ocean", label: "Ocean", blurb: () => tSettings("blurbOcean") },
+  { id: "catppuccin-mocha", label: "Catppuccin Mocha", blurb: () => tSettings("blurbCatppuccinMocha") },
+  { id: "catppuccin-macchiato", label: "Catppuccin Macchiato", blurb: () => tSettings("blurbCatppuccinMacchiato") },
+  { id: "catppuccin-frappe", label: "Catppuccin Frappé", blurb: () => tSettings("blurbCatppuccinFrappe") },
+  { id: "catppuccin-latte", label: "Catppuccin Latte", blurb: () => tSettings("blurbCatppuccinLatte") },
+  { id: "catppuccin-espresso", label: "Catppuccin Espresso", blurb: () => tSettings("blurbCatppuccinEspresso") },
+  { id: "tokyo-night", label: "Tokyo Night", blurb: () => tSettings("blurbTokyoNight") },
+  { id: "github-dark", label: "GitHub Dark", blurb: () => tSettings("blurbGithubDark") },
+  { id: "github-light", label: "GitHub Light", blurb: () => tSettings("blurbGithubLight") },
 ];
 
 export const DEFAULT_THEME = THEMES[0].id;

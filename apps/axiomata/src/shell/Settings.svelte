@@ -1,9 +1,9 @@
 <!--
-  Settings dialog, in four tabs (chrome is the shared `Window.svelte`):
-  Darstellung (theme, canvas options, window-transparency slider, custom
-  CSS), Workspace (vault path), KI-Provider (provider config + role
-  assignment + spend), Über (read-only app facts). Was one long scrolling
-  body before this — split into tabs once it grew past ~9 sections.
+  Settings dialog, in tabs (chrome is the shared `Window.svelte`):
+  Appearance (theme, canvas options, window-transparency slider, custom
+  CSS), Workspace (vault path), AI providers (provider config + role
+  assignment + spend), Storage, About (read-only app facts). Was one long scrolling
+  body before this — split into tabs once it grew past ~9 sections. Every text comes from `i18n/settings.ts`.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -21,7 +21,9 @@
     invokeBackend,
     isEffortLevel,
   } from "../core/backend";
-  import { formatDateTime } from "../core/format";
+  import { formatDateTime, formatNumber, formatUsd } from "../core/format";
+  import { tFormat } from "../i18n/format";
+  import { tSettings } from "../i18n/settings";
   import LanguageSetting from "./LanguageSetting.svelte";
   import { emit } from "../core/bus";
   import { registerShellView } from "../core/openViews";
@@ -118,11 +120,25 @@
    *  `key`: none = billed via the CLI's own subscription login (Anthropic);
    *  required = OpenRouter; optional = local Ollama (a placeholder token,
    *  never a real credential). */
-  const PROVIDERS: { id: ProviderId; label: string; blurb: string; key: "none" | "required" | "optional" }[] = [
-    { id: "anthropic", label: "Anthropic", blurb: "Billed through the subscription — no key", key: "none" },
-    { id: "open_router", label: "OpenRouter", blurb: "Anthropic-kompatibler Endpoint", key: "required" },
-    { id: "ollama", label: "Ollama", blurb: "Local model on this machine", key: "optional" },
+  const PROVIDERS: { id: ProviderId; label: string; blurb: () => string; key: "none" | "required" | "optional" }[] = [
+    { id: "anthropic", label: "Anthropic", blurb: () => tSettings("blurbAnthropic"), key: "none" },
+    { id: "open_router", label: "OpenRouter", blurb: () => tSettings("blurbOpenRouter"), key: "required" },
+    { id: "ollama", label: "Ollama", blurb: () => tSettings("blurbOllama"), key: "optional" },
   ];
+
+  /** A dollar amount with a fixed number of decimals, in the app's language. */
+  function usd(amount: number, decimals: number): string {
+    return formatUsd(amount, decimals);
+  }
+
+  /** The two roles of the harness/provider assignment; a label is read when drawn, so it follows the language. */
+  const ROLE_PICKS: readonly { role: "chat" | "skill"; label: () => string }[] = [
+    { role: "chat", label: () => tSettings("forChat") },
+    { role: "skill", label: () => tSettings("forSkills") },
+  ];
+
+  /** The text of a caught error, for a toast. */
+  const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
   /** Which provider's settings the form below edits. The provider list is now
    *  an edit selector, not the role picker — the two `<select>`s above it map
@@ -135,18 +151,21 @@
     reloading = true;
     const state = await loadCustomTheme();
     reloading = false;
-    toast(state.message, state.status === "applied" || state.status === "absent" ? "info" : "warning");
+    toast(state.message(), state.status === "applied" || state.status === "absent" ? "info" : "warning");
   }
 
   let wallpaperBusy = $state(false);
 
   /** Runs a background-image step (docs/plans/glass.md, G15); a refusal says why. */
-  async function wallpaperStep(work: () => Promise<unknown>, failed: string): Promise<void> {
+  async function wallpaperStep(
+    work: () => Promise<unknown>,
+    failed: "imageNotTaken" | "imageNotRemoved",
+  ): Promise<void> {
     wallpaperBusy = true;
     try {
       await work();
     } catch (err) {
-      toast(`${failed}: ${err instanceof Error ? err.message : String(err)}`, "warning");
+      toast(tSettings(failed, { error: errorText(err) }), "warning");
     } finally {
       wallpaperBusy = false;
     }
@@ -155,7 +174,7 @@
   async function copyTemplate() {
     try {
       await navigator.clipboard.writeText(TEMPLATE);
-      toast("Template copied — save it as ~/.axiomata/theme.css.");
+      toast(tSettings("templateCopied"));
     } catch {
       showTemplate = true;
     }
@@ -251,9 +270,9 @@
     try {
       claudeLogin = await invokeBackend<ClaudeLoginStatus>("claude_sign_in");
       claudeLoginError = null;
-      toast(claudeLogin.logged_in ? "Claude Code is signed in." : "The sign-in did not complete.", "info");
+      toast(claudeLogin.logged_in ? tSettings("signedIn") : tSettings("signInIncomplete"), "info");
     } catch (e) {
-      toast(`Sign-in failed: ${e}`, "warning");
+      toast(tSettings("signInFailed", { error: String(e) }), "warning");
     } finally {
       signingIn = false;
     }
@@ -266,16 +285,16 @@
       await invokeBackend<void>("claude_sign_in_code", { code });
       signInCode = "";
     } catch (e) {
-      toast(`The code was not taken: ${e}`, "warning");
+      toast(tSettings("codeNotTaken", { error: String(e) }), "warning");
     }
   }
 
   async function signOut() {
     try {
       claudeLogin = await invokeBackend<ClaudeLoginStatus>("claude_sign_out");
-      toast("Claude Code is signed out.", "info");
+      toast(tSettings("signedOut"), "info");
     } catch (e) {
-      toast(`Sign-out failed: ${e}`, "warning");
+      toast(tSettings("signOutFailed", { error: String(e) }), "warning");
     }
   }
 
@@ -290,20 +309,15 @@
 
   async function saveVault() {
     if (!config?.workspace_root.trim()) {
-      toast("The vault path must not be empty.", "warning");
+      toast(tSettings("vaultEmpty"), "warning");
       return;
     }
     savingVault = true;
     try {
       const restartNeeded = await persist();
-      toast(
-        restartNeeded
-          ? "Vault path saved — restart Axiomata-OS to switch."
-          : "Vault path saved.",
-        "info",
-      );
+      toast(restartNeeded ? tSettings("vaultSavedRestart") : tSettings("vaultSaved"), "info");
     } catch (e) {
-      toast(`Saving failed: ${e}`, "warning");
+      toast(tSettings("savingFailed", { error: String(e) }), "warning");
     } finally {
       savingVault = false;
     }
@@ -312,28 +326,33 @@
   /** One role's provider: its role-relevant model field must be set + sane,
    *  its base URL https (or loopback), and its key present when required.
    *  Mirrors the per-role loop in Rust's `Config::validate_for_save`. */
-  function roleProviderLooksSane(roleLabel: string, id: ProviderId, modelLabel: "chat_model" | "skill_model"): string | null {
+  function roleProviderLooksSane(
+    roleLabel: string,
+    id: ProviderId,
+    modelLabel: "chat_model" | "skill_model",
+  ): string | null {
     if (!config) return null;
     const meta = metaFor(id);
     if (id === "anthropic") return null; // blank models = free CLI default
     const s = config.agents.providers[id];
-    if (!s) return `${roleLabel}: provider “${id}” has no settings.`;
+    if (!s) return tSettings("noProviderSettings", { role: roleLabel, id });
     const hasKey = s.has_key || keyUpdateFor(id).kind === "set";
-    if (meta.key === "required" && !hasKey) return `${roleLabel} (${meta.label}) needs an API key.`;
+    const named = { role: roleLabel, provider: meta.label };
+    if (meta.key === "required" && !hasKey) return tSettings("needsKey", named);
 
     const v = (modelLabel === "chat_model" ? s.chat_model : s.skill_model).trim();
-    const human = modelLabel === "chat_model" ? "Chat-Modell" : "Skills-Modell";
-    if (!v) return `${roleLabel} (${meta.label}): ${human} must not be empty.`;
-    if (/\s/.test(v)) return `${roleLabel} (${meta.label}): ${human} contains spaces.`;
+    const field = modelLabel === "chat_model" ? tSettings("fieldChatModel") : tSettings("fieldSkillsModel");
+    if (!v) return tSettings("modelEmpty", { ...named, field });
+    if (/\s/.test(v)) return tSettings("modelSpaces", { ...named, field });
     const opens = (v.match(/\[/g) ?? []).length;
     const closes = (v.match(/\]/g) ?? []).length;
     if (opens !== closes || /[()]/.test(v)) {
-      return `${roleLabel} (${meta.label}): ${human} has unbalanced brackets — “${v}”.`;
+      return tSettings("modelBrackets", { ...named, field, value: v });
     }
     const url = s.base_url?.trim();
     if (!url || !/^https:\/\/.+/.test(url)) {
       const loopback = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(url ?? "");
-      if (!loopback) return `${roleLabel} (${meta.label}): Base URL must start with https://.`;
+      if (!loopback) return tSettings("baseUrlHttps", named);
     }
     return null;
   }
@@ -344,8 +363,8 @@
   function providerLooksSane(): string | null {
     if (!config) return null;
     return (
-      roleProviderLooksSane("Chat", config.agents.chat_provider, "chat_model") ??
-      roleProviderLooksSane("Skills", config.agents.skill_provider, "skill_model")
+      roleProviderLooksSane(tSettings("roleChat"), config.agents.chat_provider, "chat_model") ??
+      roleProviderLooksSane(tSettings("roleSkills"), config.agents.skill_provider, "skill_model")
     );
   }
 
@@ -359,13 +378,13 @@
     savingProvider = true;
     try {
       await persist();
-      toast("Provider settings saved — they apply from the next agent call.", "info");
+      toast(tSettings("providersSaved"), "info");
       keyEdits = {};
       webKeyEdits = {};
       await loadConfig();
       await refreshSpend();
     } catch (e) {
-      toast(`Saving failed: ${e}`, "warning");
+      toast(tSettings("savingFailed", { error: String(e) }), "warning");
     } finally {
       savingProvider = false;
     }
@@ -376,22 +395,24 @@
 
   /** The line under a provider's model fields: where its list comes from and how fresh it is. */
   function catalogStatus(id: ProviderId): string {
-    if (id === "anthropic") return "Built-in list — Anthropic has no model list to ask without an API key.";
+    if (id === "anthropic") return tSettings("catalogBuiltIn");
     const entry = $modelCatalog?.providers[id];
-    if (!entry) return "No model list yet.";
-    if (entry.error) return `The last fetch failed: ${entry.error}`;
-    const when = entry.fetched_at ? formatDateTime(entry.fetched_at) : "never";
-    return `${entry.models.length} models, fetched ${when}; refreshed at start and once a day.`;
+    if (!entry) return tSettings("catalogNone");
+    if (entry.error) return tSettings("catalogFailed", { error: entry.error });
+    const when = entry.fetched_at ? formatDateTime(entry.fetched_at) : tFormat("never");
+    return tSettings("catalogFetched", { n: entry.models.length, when });
   }
 
   async function refreshModels(id: ProviderId) {
     refreshingModels = id;
     try {
       const outcome = await refreshModelCatalog(id);
-      if (outcome.price_error) toast(`The prices could not be saved: ${outcome.price_error}`, "danger");
-      else if (outcome.repriced.length > 0) toast(`Prices updated: ${outcome.repriced.join(", ")}`, "info");
+      if (outcome.price_error) toast(tSettings("pricesNotSaved", { error: outcome.price_error }), "danger");
+      else if (outcome.repriced.length > 0) {
+        toast(tSettings("pricesUpdated", { models: outcome.repriced.join(", ") }), "info");
+      }
     } catch (err) {
-      toast(`Could not fetch the model list: ${String(err)}`, "danger");
+      toast(tSettings("modelListFailed", { error: String(err) }), "danger");
     } finally {
       refreshingModels = null;
     }
@@ -427,15 +448,18 @@
 
 {#if open}
   <Window
-    title="Settings"
+    title={tSettings("title")}
     onClose={() => (open = false)}
-    style="width: min(calc(620px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); max-height: calc(100vh - 2 * var(--ax-space-5));"
+    style="width: min(calc(620px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5)));
+      max-height: calc(100vh - 2 * var(--ax-space-5));"
   >
     <nav class="tabs">
       {#each TABS as t (t.id)}
         <button type="button" class="tab" class:active={tab === t.id} onclick={() => (tab = t.id)}>
-          {t.label}
-          {#if t.id === "workspace"}<HexCount count={$tagProposals.length} label={waitingLabel($tagProposals.length)} />{/if}
+          {t.label()}
+          {#if t.id === "workspace"}
+            <HexCount count={$tagProposals.length} label={waitingLabel($tagProposals.length)} />
+          {/if}
         </button>
       {/each}
     </nav>
@@ -443,7 +467,7 @@
     <div class="body">
       {#if tab === "appearance"}
         <section>
-          <h3>Theme</h3>
+          <h3>{tSettings("theme")}</h3>
           <ul class="themes">
             {#each THEMES as t (t.id)}
               <li>
@@ -457,7 +481,7 @@
                   <ThemePreview theme={t.id} />
                   <span class="text">
                     <span class="title">{t.label}</span>
-                    <span class="meta">{t.blurb}</span>
+                    <span class="meta">{t.blurb()}</span>
                   </span>
                 </button>
               </li>
@@ -466,8 +490,8 @@
         </section>
 
         <section>
-          <h3>Typeface</h3>
-          <div class="fonts" role="radiogroup" aria-label="Typeface">
+          <h3>{tSettings("typeface")}</h3>
+          <div class="fonts" role="radiogroup" aria-label={tSettings("typeface")}>
             {#each UI_FONTS as f (f.id)}
               <button
                 type="button"
@@ -478,20 +502,20 @@
                 style:font-family="var(--ax-font-{f.id})"
                 onclick={() => uiFont.set(f.id)}
               >
-                <span class="sample">Aa</span>
+                <span class="sample">{tSettings("fontSample")}</span>
                 <span class="name">{f.label}</span>
               </button>
             {/each}
           </div>
-          <p class="hint">For the whole interface. Code in the editor and the terminal keep their own fonts.</p>
+          <p class="hint">{tSettings("typefaceHint")}</p>
         </section>
 
         <LanguageSetting />
 
         <section>
-          <h3>Motion</h3>
+          <h3>{tSettings("motion")}</h3>
           <label class="row">
-            <span class="label">Movement</span>
+            <span class="label">{tSettings("movement")}</span>
             <select
               value={$motionSetting}
               onchange={(e) => {
@@ -500,35 +524,34 @@
               }}
             >
               {#each MOTION_LEVELS as level (level.id)}
-                <option value={level.id}>{level.label}</option>
+                <option value={level.id}>{level.label()}</option>
               {/each}
             </select>
           </label>
           <p class="hint">
-            Full: the glow breathes, sparks fly, the Orbit turns. Calm: the glow holds still, nothing flies, the Orbit
-            still turns. Off: nothing moves by itself.
-            {#if $systemReducesMotion}<strong>macOS “Reduce motion” is on, so motion is off.</strong>{/if}
+            {tSettings("motionHint")}
+            {#if $systemReducesMotion}<strong>{tSettings("reduceMotionOn")}</strong>{/if}
           </p>
         </section>
 
         <section>
-          <h3>Light</h3>
+          <h3>{tSettings("light")}</h3>
           <label class="opt">
-            <input type="checkbox" bind:checked={$effects.pointerLight} /> Light under the pointer
-            <span class="hint">(the hex lines glow where the mouse is)</span>
+            <input type="checkbox" bind:checked={$effects.pointerLight} /> {tSettings("pointerLight")}
+            <span class="hint">{tSettings("pointerLightHint")}</span>
           </label>
           <label class="opt">
-            <input type="checkbox" bind:checked={$effects.dayLight} /> Time-of-day light
-            <span class="hint">(a faint light that moves with the sun)</span>
+            <input type="checkbox" bind:checked={$effects.dayLight} /> {tSettings("dayLight")}
+            <span class="hint">{tSettings("dayLightHint")}</span>
           </label>
           <label class="opt">
-            <input type="checkbox" bind:checked={$effects.ignition} /> Start ignition
-            <span class="hint">(the logo lights up when the app starts; motion Full only)</span>
+            <input type="checkbox" bind:checked={$effects.ignition} /> {tSettings("ignition")}
+            <span class="hint">{tSettings("ignitionHint")}</span>
           </label>
         </section>
 
         <section>
-          <h3>Sound</h3>
+          <h3>{tSettings("sound")}</h3>
           <label class="opt">
             <input
               type="checkbox"
@@ -537,64 +560,84 @@
                 if ($effects.sounds) void unlockAudio();
               }}
             />
-            Sounds
-            <span class="hint">(only while Axiomata is in the background)</span>
+            {tSettings("sounds")}
+            <span class="hint">{tSettings("soundsHint")}</span>
           </label>
           <div class="cues">
             {#each CUE_ORDER as cue (cue)}
               <button type="button" class="cue" onclick={() => void unlockAudio().then(() => playCue(cue))}>
-                <Icon name="play" size="sm" />{CUE_LABELS[cue]}
+                <Icon name="play" size="sm" />{CUE_LABELS[cue]()}
               </button>
             {/each}
           </div>
         </section>
 
         <section>
-          <h3>Canvas</h3>
-          <label class="opt"><input type="checkbox" bind:checked={$showGrid} /> Show dot grid <span class="hint">(tiles snap to it either way)</span></label>
-          <label class="opt"><input type="checkbox" bind:checked={$snapEdges} /> Magnetic edges <span class="hint">(tiles stick to their neighbours within 8 px)</span></label>
+          <h3>{tSettings("canvas")}</h3>
+          <label class="opt">
+            <input type="checkbox" bind:checked={$showGrid} /> {tSettings("showGrid")}
+            <span class="hint">{tSettings("showGridHint")}</span>
+          </label>
+          <label class="opt">
+            <input type="checkbox" bind:checked={$snapEdges} /> {tSettings("magneticEdges")}
+            <span class="hint">{tSettings("magneticEdgesHint")}</span>
+          </label>
         </section>
 
         <section>
-          <h3>Orbit &amp; Second Brain</h3>
+          <h3>{tSettings("orbitBrain")}</h3>
           <label class="opt">
-            Speed
-            <input class="speed" type="range" min="0.005" max={SPEED_MAX} step="0.005" bind:value={$brainView.speed} disabled={!turns($motion)} />
+            {tSettings("speed")}
+            <input
+              class="speed"
+              type="range"
+              min="0.005"
+              max={SPEED_MAX}
+              step="0.005"
+              bind:value={$brainView.speed}
+              disabled={!turns($motion)}
+            />
           </label>
-          <label class="opt"><input type="checkbox" bind:checked={$brainView.labels} /> Labels <span class="hint">(skills, areas and the hub)</span></label>
-          <label class="opt"><input type="checkbox" bind:checked={$brainView.fileNames} /> File names <span class="hint">(next to every note in the Second Brain)</span></label>
+          <label class="opt">
+            <input type="checkbox" bind:checked={$brainView.labels} /> {tSettings("labels")}
+            <span class="hint">{tSettings("labelsHint")}</span>
+          </label>
+          <label class="opt">
+            <input type="checkbox" bind:checked={$brainView.fileNames} /> {tSettings("fileNames")}
+            <span class="hint">{tSettings("fileNamesHint")}</span>
+          </label>
           <label class="row">
-            <span class="label">Shimmer</span>
+            <span class="label">{tSettings("shimmer")}</span>
             <select bind:value={$brainView.shine}>
               {#each SHINES as s (s.id)}
-                <option value={s.id}>{s.label}</option>
+                <option value={s.id}>{s.label()}</option>
               {/each}
             </select>
-            <span class="hint">(how the hex cells catch the light; still unless motion is Full)</span>
+            <span class="hint">{tSettings("shimmerHint")}</span>
           </label>
           <label class="row">
-            <span class="label">Layout</span>
+            <span class="label">{tSettings("layout")}</span>
             <select bind:value={$brainView.layout}>
               {#each BRAIN_LAYOUTS as l (l.id)}
-                <option value={l.id}>{l.label}</option>
+                <option value={l.id}>{l.label()}</option>
               {/each}
             </select>
-            <span class="hint">(the Second Brain: a ring of bundled links, countries or a honeycomb)</span>
+            <span class="hint">{tSettings("layoutHint")}</span>
           </label>
         </section>
 
         <section>
-          <h3>UI size</h3>
+          <h3>{tSettings("uiSize")}</h3>
           <label class="opt">
             <input
               type="checkbox"
               checked={$uiSize === "auto"}
               onchange={(e) => uiSize.set(e.currentTarget.checked ? "auto" : autoPercent)}
             />
-            Auto <span class="hint">({autoPercent}% on this display)</span>
+            {tSettings("auto")} <span class="hint">{tSettings("autoHint", { percent: autoPercent })}</span>
           </label>
           <label class="row">
-            <span class="label">Text and controls</span>
+            <span class="label">{tSettings("textAndControls")}</span>
             <!-- Taken over on release, not while dragging: the dialog itself grows with the size, and a slider that
                  moves under the pointer cannot be dragged. -->
             <input
@@ -608,16 +651,13 @@
             />
             <span class="readout">{sizeDraft}%</span>
           </label>
-          <p class="hint">
-            “Auto” follows the real pixel density of the display the window is on: on a dense monitor the interface
-            grows so it reads as well as on a MacBook. The fonts of the editor and the terminal are not affected.
-          </p>
+          <p class="hint">{tSettings("uiSizeHint")}</p>
         </section>
 
         <section>
-          <h3>Keyboard</h3>
+          <h3>{tSettings("keyboard")}</h3>
           <label class="row">
-            <span class="label">Shortcuts follow</span>
+            <span class="label">{tSettings("shortcutsFollow")}</span>
             <select
               value={$keyboardSetting}
               onchange={(e) => {
@@ -627,22 +667,18 @@
             >
               {#each KEYBOARD_SETTINGS as option (option.value)}
                 <option value={option.value}>
-                  {option.label}{option.value === "auto" ? ` (${platformLabel($platform)})` : ""}
+                  {option.label()}{option.value === "auto" ? ` (${platformLabel($platform)})` : ""}
                 </option>
               {/each}
             </select>
           </label>
-          <p class="hint">
-            Mac: ⌘ is the main key. Windows &amp; Linux: Ctrl is, and in a terminal an app shortcut takes Ctrl+Shift,
-            because Ctrl belongs to the shell there. "Auto" follows this machine; the other two let you try the other
-            keys here.
-          </p>
+          <p class="hint">{tSettings("keyboardHint")}</p>
         </section>
 
         <section>
-          <h3>Glass</h3>
+          <h3>{tSettings("glass")}</h3>
           <label class="row">
-            <span class="label">Transparency</span>
+            <span class="label">{tSettings("transparency")}</span>
             <input
               type="range"
               min="0"
@@ -654,7 +690,7 @@
             <span class="readout">{$windowTransparency}%</span>
           </label>
           <label class="row">
-            <span class="label">Blur</span>
+            <span class="label">{tSettings("blur")}</span>
             <input
               type="range"
               min="0"
@@ -663,49 +699,43 @@
               disabled={$systemReducesTransparency}
               bind:value={$glassBlur}
             />
-            <span class="readout">{$glassBlur} px</span>
+            <span class="readout">{tSettings("pixels", { n: $glassBlur })}</span>
           </label>
           <div class="row">
-            <span class="label">Background image</span>
+            <span class="label">{tSettings("backgroundImage")}</span>
             <div class="actions">
               <button
                 type="button"
                 disabled={wallpaperBusy}
-                onclick={() => void wallpaperStep(pickWallpaper, "The image was not taken")}
+                onclick={() => void wallpaperStep(pickWallpaper, "imageNotTaken")}
               >
-                {$wallpaper ? "Choose another…" : "Choose image…"}
+                {$wallpaper ? tSettings("chooseAnother") : tSettings("chooseImage")}
               </button>
               {#if $wallpaper}
                 <button
                   type="button"
                   disabled={wallpaperBusy}
-                  onclick={() => void wallpaperStep(clearWallpaper, "The image could not be removed")}>Remove</button
+                  onclick={() => void wallpaperStep(clearWallpaper, "imageNotRemoved")}>{tSettings("remove")}</button
                 >
               {/if}
             </div>
           </div>
           {#if $wallpaper}
             <label class="row">
-              <span class="label">Image dim</span>
+              <span class="label">{tSettings("imageDim")}</span>
               <input type="range" min="0" max={MAX_GROUND_DIM} step="5" bind:value={$glassDim} />
               <span class="readout">{$glassDim}%</span>
             </label>
           {/if}
-          <p class="hint">
-            Transparency: how much of the ground shows through the surfaces — 0% solid, 100% clear, 50% the theme's own
-            look. Blur: how soft the ground is, and with it everything seen through the glass. The ground is the theme's
-            own or your image, blurred once, so a softer one costs nothing while you work. Image dim: how strongly the theme's
-            own ground veils your image — darker in a dark theme, lighter in a light one —, so text stays readable. Menus and text overlays stay
-            dense either way, and macOS "Reduce transparency" makes all of it solid.
-          </p>
+          <p class="hint">{tSettings("glassHint")}</p>
           {#if $systemReducesTransparency}
-            <p class="hint">macOS "Reduce transparency" is on: the glass is solid now.</p>
+            <p class="hint">{tSettings("reduceTransparencyOn")}</p>
           {/if}
         </section>
 
         <section>
-          <h3>Custom CSS</h3>
-          <p class="status {$customTheme.status}">{$customTheme.message || "Not loaded."}</p>
+          <h3>{tSettings("customCss")}</h3>
+          <p class="status {$customTheme.status}">{$customTheme.message() || tSettings("notLoaded")}</p>
           {#if $customTheme.errors.length > 0}
             <ul class="errors">
               {#each $customTheme.errors as e, i (i)}
@@ -714,8 +744,10 @@
             </ul>
           {/if}
           <div class="actions">
-            <button type="button" disabled={reloading} onclick={reload}>{reloading ? "Reloading…" : "Reload custom CSS"}</button>
-            <button type="button" onclick={copyTemplate}>Copy template</button>
+            <button type="button" disabled={reloading} onclick={reload}>
+              {reloading ? tSettings("reloading") : tSettings("reloadCss")}
+            </button>
+            <button type="button" onclick={copyTemplate}>{tSettings("copyTemplate")}</button>
           </div>
           {#if showTemplate}
             <textarea readonly rows="8" spellcheck="false">{TEMPLATE}</textarea>
@@ -724,15 +756,20 @@
       {:else if tab === "workspace"}
         {#if config}
           <section>
-            <h3>Vault</h3>
-            <p class="lead">Root folder of the Second Brain workspace. A change takes effect after a restart.</p>
+            <h3>{tSettings("vault")}</h3>
+            <p class="lead">{tSettings("vaultLead")}</p>
             <label class="field">
-              <span>Path</span>
-              <input type="text" spellcheck="false" bind:value={config.workspace_root} placeholder="/Users/…/Vault" />
+              <span>{tSettings("path")}</span>
+              <input
+                type="text"
+                spellcheck="false"
+                bind:value={config.workspace_root}
+                placeholder={tSettings("vaultPlaceholder")}
+              />
             </label>
             <div class="actions">
               <button type="button" disabled={savingVault} onclick={saveVault}>
-                {savingVault ? "Saving…" : "Save & restart"}
+                {savingVault ? tSettings("saving") : tSettings("saveRestart")}
               </button>
             </div>
           </section>
@@ -741,11 +778,8 @@
       {:else if tab === "providers"}
         {#if config}
           <section>
-            <h3>Edit providers</h3>
-            <p class="lead">
-              A provider is where the model runs — its endpoint, key and models. Every provider is configured
-              independently here; which harness and provider serve the chat and the skills is set in the next section.
-            </p>
+            <h3>{tSettings("editProviders")}</h3>
+            <p class="lead">{tSettings("editProvidersLead")}</p>
             <ul class="providers">
               {#each PROVIDERS as p (p.id)}
                 <li>
@@ -758,10 +792,14 @@
                     <span class="text">
                       <span class="title">
                         {p.label}
-                        {#if config.agents.chat_provider === p.id}<span class="role-badge">Chat</span>{/if}
-                        {#if config.agents.skill_provider === p.id}<span class="role-badge">Skills</span>{/if}
+                        {#if config.agents.chat_provider === p.id}
+                          <span class="role-badge">{tSettings("badgeChat")}</span>
+                        {/if}
+                        {#if config.agents.skill_provider === p.id}
+                          <span class="role-badge">{tSettings("badgeSkills")}</span>
+                        {/if}
                       </span>
-                      <span class="meta">{p.blurb}</span>
+                      <span class="meta">{p.blurb()}</span>
                     </span>
                   </button>
                 </li>
@@ -781,16 +819,19 @@
               {@const pid = editingProvider}
               <div class="provider-form">
                 {#if editingMeta.key === "none"}
-                  <p class="hint">
-                    Kein Schlüssel oder Basis-URL nötig — Anthropic wird über den CLI-Login des Abos abgerechnet.
-                  </p>
+                  <p class="hint">{tSettings("anthropicNoKey")}</p>
                 {:else}
                   <label class="field">
-                    <span>Base URL</span>
-                    <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].base_url} placeholder="https://…" />
+                    <span>{tSettings("baseUrl")}</span>
+                    <input
+                      type="text"
+                      spellcheck="false"
+                      bind:value={config.agents.providers[pid].base_url}
+                      placeholder={"https://…"}
+                    />
                   </label>
                   <label class="field">
-                    <span>API key {editingMeta.key === "optional" ? "(optional)" : ""}</span>
+                    <span>{editingMeta.key === "optional" ? tSettings("apiKeyOptional") : tSettings("apiKey")}</span>
                     <input
                       type="password"
                       autocomplete="off"
@@ -798,66 +839,63 @@
                       value={keyEdits[pid] ?? ""}
                       oninput={(e) => setKeyEdit(pid, e.currentTarget.value)}
                       placeholder={config.agents.providers[pid].has_key
-                        ? "•••••• saved — leave empty to keep"
+                        ? tSettings("keySaved")
                         : editingMeta.key === "optional"
-                          ? "A placeholder is enough for a local Ollama"
-                          : "required"}
+                          ? tSettings("keyOllama")
+                          : tSettings("keyRequired")}
                     />
                     {#if config.agents.providers[pid].has_key && (keyEdits[pid] ?? "") === "" && pid in keyEdits}
-                      <span class="hint">The key is deleted on save.</span>
+                      <span class="hint">{tSettings("keyDeletedOnSave")}</span>
                     {/if}
                   </label>
                 {/if}
                 <div class="field">
-                  <span>Chat model</span>
+                  <span>{tSettings("chatModel")}</span>
                   <ModelPicker
-                    label="Chat model"
+                    label={tSettings("chatModel")}
                     bind:value={config.agents.providers[pid].chat_model}
                     options={providerOptions($modelCatalog, pid)}
-                    placeholder="e.g. claude-sonnet-5"
+                    placeholder={tSettings("modelExample", { model: "claude-sonnet-5" })}
                   />
                 </div>
                 <div class="field">
-                  <span>Skills/routines model</span>
+                  <span>{tSettings("skillsModel")}</span>
                   <ModelPicker
-                    label="Skills/routines model"
+                    label={tSettings("skillsModel")}
                     bind:value={config.agents.providers[pid].skill_model}
                     options={providerOptions($modelCatalog, pid)}
-                    placeholder="e.g. claude-haiku-5-5"
+                    placeholder={tSettings("modelExample", { model: "claude-haiku-5-5" })}
                     onRefresh={pid === "anthropic" ? undefined : () => void refreshModels(pid)}
                     refreshing={refreshingModels === pid}
                     status={catalogStatus(pid)}
                   />
                 </div>
-                <p class="hint">Ein <code>model:</code> in the SKILL.md frontmatter still overrides the skills model.</p>
+                <p class="hint">
+                  {tSettings("modelOverrideBefore")} <code>{"model:"}</code> {tSettings("modelOverrideAfter")}
+                </p>
               </div>
             {:else}
-              <p class="status error">
-                Unbekannter Provider „{editingProvider}“ — keine
-                Einstellungen zum Bearbeiten. Wähle oben einen der bekannten Provider.
-              </p>
+              <p class="status error">{tSettings("unknownProvider", { id: editingProvider })}</p>
             {/if}
 
             <div class="actions">
               <button type="button" disabled={savingProvider} onclick={saveProvider}>
-                {savingProvider ? "Saving…" : "Save provider"}
+                {savingProvider ? tSettings("saving") : tSettings("saveProvider")}
               </button>
             </div>
           </section>
 
           <section>
-            <h3>Harness &amp; provider assignment</h3>
+            <h3>{tSettings("harnessAssignment")}</h3>
             <p class="lead">
-              The harness drives the agent — its tools, rights and loop; the provider serves the model. Each role picks
-              both, e.g. Claude Code for the chat and Glut with a local Ollama for the digests. A skill's own
-              <code>backend:</code> still wins over the harness set here.
+              {tSettings("harnessLeadBefore")} <code>{"backend:"}</code> {tSettings("harnessLeadAfter")}
             </p>
             <div class="role-picks">
-              {#each [{ role: "chat", label: "chat" }, { role: "skill", label: "skills & routines" }] as r (r.role)}
+              {#each ROLE_PICKS as r (r.role)}
                 {@const harness = r.role === "chat" ? config.agents.chat_harness : config.agents.skill_harness}
                 <div class="role-pick">
                   <label class="field">
-                    <span>Harness for {r.label}</span>
+                    <span>{tSettings("harnessFor", { role: r.label() })}</span>
                     <select
                       value={harness}
                       onchange={(e) => setHarness(r.role as "chat" | "skill", e.currentTarget.value as HarnessId)}
@@ -866,14 +904,18 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span>Provider for {r.label}</span>
+                    <span>{tSettings("providerFor", { role: r.label() })}</span>
                     {#if r.role === "chat"}
                       <select bind:value={config.agents.chat_provider}>
-                        {#each providersFor(harness, PROVIDERS) as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
+                        {#each providersFor(harness, PROVIDERS) as p (p.id)}
+                          <option value={p.id}>{p.label}</option>
+                        {/each}
                       </select>
                     {:else}
                       <select bind:value={config.agents.skill_provider}>
-                        {#each providersFor(harness, PROVIDERS) as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
+                        {#each providersFor(harness, PROVIDERS) as p (p.id)}
+                          <option value={p.id}>{p.label}</option>
+                        {/each}
                       </select>
                     {/if}
                   </label>
@@ -886,60 +928,65 @@
                     {@const stored = role === "chat" ? config.agents.chat_effort : config.agents.skill_effort}
                     {@const note = unlistedNote(reasoning, stored)}
                     <label class="field">
-                      <span>Effort for {r.label}</span>
+                      <span>{tSettings("effortFor", { role: r.label() })}</span>
                       <select value={stored ?? ""} onchange={(e) => setEffort(role, e.currentTarget.value)}>
                         <option value="">
-                          Glut's own setting{reasoning?.default_effort ? `, else ${reasoning.default_effort}` : ""}
+                          {reasoning?.default_effort
+                            ? tSettings("glutOwnEffortElse", { level: reasoning.default_effort })
+                            : tSettings("glutOwnEffort")}
                         </option>
                         {#each offeredLevels(reasoning, stored) as level (level)}
-                          <option value={level}>{level}{takesLevel(reasoning, level) ? "" : " (not listed)"}</option>
+                          <option value={level}>
+                            {takesLevel(reasoning, level) ? level : tSettings("effortNotListed", { level })}
+                          </option>
                         {/each}
                       </select>
                     </label>
                     {#if note}<p class="hint">{note}.</p>{/if}
                   {/if}
-                  <p class="hint">{HARNESSES.find((h) => h.id === harness)?.blurb}</p>
+                  <p class="hint">{HARNESSES.find((h) => h.id === harness)?.blurb()}</p>
                 </div>
               {/each}
             </div>
             {#if config.agents.skill_harness === "axh"}
               <p class="hint">
-                A skill that reads the web (<code>news-web</code>) uses Glut's web search — its keys and limits are in
-                the Web search block below.
+                {tSettings("webSkillBefore")}<code>{"news-web"}</code>{tSettings("webSkillAfter")}
               </p>
             {/if}
 
             {#if needsClaude}
               <div class="provider-form claude-login">
-                <span class="title">Claude Code sign-in</span>
+                <span class="title">{tSettings("claudeSignIn")}</span>
                 {#if claudeLogin?.logged_in}
                   <p class="status applied">
-                    Signed in as {claudeLogin.email ?? "unknown"}{#if claudeLogin.subscription}
-                      &nbsp;({claudeLogin.subscription}){/if} — the app's own login, apart from yours in
-                    <code>~/.claude</code>.
+                    {tSettings("signedInAs", { email: claudeLogin.email ?? tSettings("unknownEmail") })}
+                    {#if claudeLogin.subscription}({claudeLogin.subscription}){/if}
+                    {tSettings("ownLogin")} <code>{"~/.claude"}</code>.
                   </p>
                   <div class="actions">
-                    <button type="button" onclick={signOut}>Sign out</button>
+                    <button type="button" onclick={signOut}>{tSettings("signOut")}</button>
                   </div>
                 {:else}
                   <p class="status error">
                     {#if claudeLoginError}
-                      Claude Code cannot be asked: {claudeLoginError}
+                      {tSettings("claudeUnreachable", { error: claudeLoginError })}
                     {:else}
-                      Not signed in — chat and skills on Claude Code fail until the app's Claude Code signs in.
+                      {tSettings("notSignedIn")}
                     {/if}
                   </p>
                   <div class="actions">
                     <button type="button" disabled={signingIn} onclick={signIn}>
-                      {signingIn ? "Waiting for the browser…" : "Sign in with Anthropic"}
+                      {signingIn ? tSettings("waitingForBrowser") : tSettings("signInAnthropic")}
                     </button>
                   </div>
                   {#if signingIn}
                     <label class="field">
-                      <span>Code (only if the browser page shows one)</span>
+                      <span>{tSettings("signInCode")}</span>
                       <span class="code-row">
                         <input type="text" spellcheck="false" autocomplete="off" bind:value={signInCode} />
-                        <button type="button" disabled={!signInCode.trim()} onclick={sendSignInCode}>Send</button>
+                        <button type="button" disabled={!signInCode.trim()} onclick={sendSignInCode}>
+                          {tSettings("send")}
+                        </button>
                       </span>
                     </label>
                   {/if}
@@ -948,72 +995,77 @@
             {/if}
 
             <div class="provider-form web-search">
-              <span class="title">Web search (Glut)</span>
+              <span class="title">{tSettings("webSearch")}</span>
               <p class="hint">
-                Glut's <code>web_search</code> asks Exa first, then TinyFish, then Tavily — a provider without its key is
-                skipped. Keys are stored in <code>config.toml</code> and never shown again.
+                {tSettings("webSearchBefore")} <code>{"web_search"}</code> {tSettings("webSearchMiddle")}
+                <code>{"config.toml"}</code> {tSettings("webSearchAfter")}
               </p>
               {#each WEB_KEYS as k (k.id)}
                 {@const stored = k.stored(config.agents.web)}
                 <label class="field">
-                  <span>{k.label} key</span>
+                  <span>{tSettings("webKey", { name: k.label })}</span>
                   <input
                     type="password"
                     autocomplete="off"
                     spellcheck="false"
                     value={webKeyEdits[k.id] ?? ""}
                     oninput={(e) => (webKeyEdits = { ...webKeyEdits, [k.id]: e.currentTarget.value })}
-                    placeholder={stored ? "•••••• saved — leave empty to keep" : k.id === "exa" ? "optional" : "not set"}
+                    placeholder={stored
+                      ? tSettings("keySaved")
+                      : k.id === "exa"
+                        ? tSettings("optional")
+                        : tSettings("notSet")}
                   />
-                  <span class="hint">{k.hint}</span>
+                  <span class="hint">{k.hint()}</span>
                   {#if stored && (webKeyEdits[k.id] ?? "") === "" && k.id in webKeyEdits}
-                    <span class="hint">The key is deleted on save.</span>
+                    <span class="hint">{tSettings("keyDeletedOnSave")}</span>
                   {/if}
                 </label>
               {/each}
               <div class="role-picks">
                 <label class="field">
-                  <span>Searches per day (all providers)</span>
+                  <span>{tSettings("searchesPerDay")}</span>
                   <input type="number" min="0" step="1" bind:value={config.agents.web.daily_search_limit} />
                 </label>
                 <label class="field">
-                  <span>Tavily searches per month</span>
+                  <span>{tSettings("tavilyPerMonth")}</span>
                   <input type="number" min="0" step="1" bind:value={config.agents.web.tavily_monthly_limit} />
                 </label>
               </div>
-              <p class="hint">0 turns the search (or Tavily) off. 1,000 Tavily searches a month are its free credits.</p>
+              <p class="hint">{tSettings("webLimitsHint", { n: formatNumber(1000) })}</p>
             </div>
 
             <div class="provider-form spend-form">
               {#each spend as s (s.role)}
                 {#if s.metered}
                   <p class="hint">
-                    Spend <strong>{s.role} → {s.provider}</strong>:
-                    <strong>${s.today_usd.toFixed(4)}</strong> today{#if s.daily_cap_usd != null}
-                      &nbsp;/&nbsp;${s.daily_cap_usd.toFixed(2)} limit{/if}
-                    &nbsp;·&nbsp;${s.month_usd.toFixed(2)} this month
+                    {tSettings("spend")}
+                    <strong>{tSettings("roleToProvider", { role: s.role, provider: s.provider })}</strong>:
+                    <strong>{tSettings("spendToday", { amount: usd(s.today_usd, 4) })}</strong>
+                    {#if s.daily_cap_usd != null}{tSettings("spendCap", { amount: usd(s.daily_cap_usd, 2) })}{/if}
+                    {tSettings("spendMonth", { amount: usd(s.month_usd, 2) })}
                   </p>
                 {:else}
-                  <p class="hint">{s.role} → {s.provider} is billed through the subscription — no cost tracking.</p>
+                  <p class="hint">{tSettings("subscriptionBilled", { role: s.role, provider: s.provider })}</p>
                 {/if}
               {/each}
               <label class="field">
-                <span>Daily limit (USD, paid providers)</span>
+                <span>{tSettings("dailyLimit")}</span>
                 <input
                   type="number"
                   min="0"
                   step="0.5"
-                  placeholder="empty = no limit"
+                  placeholder={tSettings("noLimit")}
                   value={config.agents.daily_usd_cap ?? ""}
                   oninput={(e) => setDailyCap(e.currentTarget.value)}
                 />
               </label>
-              <p class="hint">Once today's total reaches the limit, the next agent call through a paid provider is refused.</p>
+              <p class="hint">{tSettings("dailyLimitHint")}</p>
             </div>
 
             <div class="actions">
               <button type="button" disabled={savingProvider} onclick={saveProvider}>
-                {savingProvider ? "Saving…" : "Save assignment"}
+                {savingProvider ? tSettings("saving") : tSettings("saveAssignment")}
               </button>
             </div>
           </section>
@@ -1022,12 +1074,12 @@
         <StorageSettings />
       {:else if tab === "about"}
         <section>
-          <h3>About</h3>
+          <h3>{tSettings("tabAbout")}</h3>
           {#if info}
             <dl>
-              <dt>Owner</dt><dd>{info.owner || "— (set `owner` in ~/.axiomata/config.toml)"}</dd>
-              <dt>Workspace</dt><dd>{info.workspace_root}</dd>
-              <dt>Version</dt><dd>{info.version}</dd>
+              <dt>{tSettings("owner")}</dt><dd>{info.owner || tSettings("ownerUnset")}</dd>
+              <dt>{tSettings("workspace")}</dt><dd>{info.workspace_root}</dd>
+              <dt>{tSettings("version")}</dt><dd>{info.version}</dd>
             </dl>
           {/if}
         </section>

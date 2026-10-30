@@ -166,8 +166,9 @@
   ] as const;
   /** Looks up a HELP entry's text by its term, so the buttons below reference
    *  entries by name instead of a fragile array index. */
+  /** A term's help, found by its English name or a layout's id (the layouts' shown names follow the language). */
   function helpText(term: string): string {
-    return HELP.find(([t]) => t === term)?.[1] ?? "";
+    return HELP.find(([t]) => t.toLowerCase() === term.toLowerCase())?.[1] ?? "";
   }
   let busy = $state(false);
   let error = $state("");
@@ -643,7 +644,7 @@
       <span class="label">Layout</span>
       <div class="seg">
         {#each BRAIN_LAYOUTS as l (l.id)}
-          <button type="button" class:on={layout === l.id} title={helpText(l.label)} aria-describedby="help-{l.id}" onclick={() => setLayout(l.id)}>{l.label}</button>
+          <button type="button" class:on={layout === l.id} title={helpText(l.id)} aria-describedby="help-{l.id}" onclick={() => setLayout(l.id)}>{l.label()}</button>
         {/each}
       </div>
     </div>
