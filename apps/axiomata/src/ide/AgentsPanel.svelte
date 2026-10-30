@@ -21,6 +21,7 @@
     agentsWithWork,
     isFavorite,
     listFavorites,
+    sessionLines,
     sessionSections,
     startAgentChoice,
     toggleFavorite,
@@ -232,21 +233,12 @@
     editing = undefined;
   }
 
-  /**
-   * "Glut Medium Allrounder (Sonnet 5.5) #2" read in two lines (Q8): "Allrounder · Medium #2" over
-   * "Glut · Sonnet 5.5".
-   */
-  const SESSION_NAME = /^(Claude|Glut|Opencode) (Light|Medium|Heavy) (.+) \((.+)\)( #\d+)?$/;
-
-  function sessionTitle(agent: IdeAgent): string {
-    const m = SESSION_NAME.exec(agent.name);
-    return m ? `${m[3]} · ${m[2]}${m[5] ?? ""}` : agent.name;
-  }
-
-  function sessionSubtitle(agent: IdeAgent): string | null {
-    const m = SESSION_NAME.exec(agent.name);
-    return m ? `${m[1]} · ${m[4]}` : null;
-  }
+  /** A session's two lines (Q8), the second after the engine it runs on now; `null` for an older name. */
+  const linesOf = (agent: IdeAgent) =>
+    sessionLines(
+      agent.name,
+      engines.find((e) => e.id === agent.engine_id),
+    );
 
   /** The ring of an agent tile (G11): working or waiting for the owner; anything else has none. */
   function ringOf(tone: string | undefined): RingState {
@@ -351,6 +343,7 @@
     {/if}
     {#snippet sessionCard(agent: IdeAgent)}
           {@const card = cardOf(agent, $statuses.byAgent.get(agent.id), openAgentIds.has(agent.id), $statuses.checkedAt)}
+          {@const lines = linesOf(agent)}
           <li
             class="card {card.status.tone}"
             style:--harness="var(--ax-harness-{agent.harness})"
@@ -365,13 +358,13 @@
                   label={harnessLabel(agent.harness)}
                   title={engineName(agent, engines)}
                 />
-                {#if sessionSubtitle(agent)}
+                {#if lines}
                   <!-- Named by `agent_lines` (Q8): the title takes the card's width, the subtitle says harness and
                        model and ends in the state; a role chip and an engine line would only say the same again. -->
                   <span class="who">
-                    <span class="name" title={agent.name}>{sessionTitle(agent)}</span>
+                    <span class="name" title={agent.name}>{lines.title}</span>
                     <span class="subname">
-                      <span class="subtext">{sessionSubtitle(agent)}</span>
+                      <span class="subtext">{lines.subtitle}</span>
                       <span class="state small"><StatusDot view={card.status} /> {card.status.label}</span>
                     </span>
                   </span>

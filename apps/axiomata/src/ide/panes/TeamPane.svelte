@@ -21,7 +21,9 @@
   import EmptyState from "../../ui/EmptyState.svelte";
   import Icon from "../../ui/Icon.svelte";
   import { agentStatus, describeStatus } from "../agentStatus";
+  import { engineChoiceLabel } from "../agentStart";
   import { session } from "../projectSession";
+  import { engineCatalog } from "../rosterStore";
   import SessionMail from "../SessionMail.svelte";
   import StatusDot from "../StatusDot.svelte";
   import { flowSelection, resolvePlan } from "../flowSelection";
@@ -141,7 +143,13 @@
               <StatusDot view={status} />
               <span class="name">{tile.agent.name}</span>
               <span class="chip">{tile.agent.agent_role}</span>
-              {#if tile.agent.engine_id}<span class="chip muted">{tile.agent.engine_id}</span>{/if}
+              {#if tile.agent.engine_id}
+                <!-- The engine it runs on now: after an escalation the session's name still says the old one. -->
+                {@const engine = $engineCatalog.find((e) => e.id === tile.agent.engine_id)}
+                <span class="chip muted" title={tile.agent.engine_id}
+                  >{engine ? engineChoiceLabel(engine) : tile.agent.engine_id}</span
+                >
+              {/if}
               {#if tile.agent.branch}
                 <!-- Where the work sits: the branch its worktree has checked out (a reviewer has none, it is detached). -->
                 <span class="chip branch" title="Checked out in its worktree: {tile.agent.branch}"

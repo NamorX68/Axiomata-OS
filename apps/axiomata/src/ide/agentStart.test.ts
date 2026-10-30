@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { IdeAgent } from "../core/backend";
 import type { Role } from "../core/roster";
-import { engineChoiceLabel, enginesOf, isFavorite, sessionSections, startableRoles } from "./agentStart";
+import { engineChoiceLabel, enginesOf, isFavorite, sessionLines, sessionSections, startableRoles } from "./agentStart";
 
 const agent = (id: number, role = "allrounder"): IdeAgent => ({ id, agent_role: role, name: `a${id}` }) as IdeAgent;
 const role = (name: string): Role => ({ name }) as Role;
@@ -57,5 +57,16 @@ describe("the sessions the tab lists (Q17)", () => {
     );
     expect(sections.active).toEqual([]);
     expect(sections.waiting.map((a) => a.id)).toEqual([2]);
+  });
+});
+
+describe("a session's two lines (Q8)", () => {
+  it("reads the name and shows the engine the session runs on now", () => {
+    const name = "Glut Medium Builder (GLM 5.3) #2";
+    expect(sessionLines(name, undefined)).toEqual({ title: "Builder · Medium #2", subtitle: "Glut · GLM 5.3" });
+    // Escalated: the name keeps the old tier and model, the second line follows the new engine.
+    const now = { origin: "auto" as const, harness: "claude_code" as const, model_name: "Opus 5.5", label: "x" };
+    expect(sessionLines(name, now)?.subtitle).toBe("Claude · Opus 5.5");
+    expect(sessionLines("Builder", now)).toBeNull();
   });
 });

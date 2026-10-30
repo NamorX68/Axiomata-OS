@@ -121,3 +121,23 @@ export function engineChoiceLabel(engine: Pick<TierEngine, "origin" | "harness" 
   }
   return engine.label;
 }
+
+/** "Glut Medium Allrounder (Sonnet 5.5) #2": harness, tier, role, model and the number, as `agent_name` writes it. */
+const SESSION_NAME = /^(Claude|Glut|Opencode) (Light|Medium|Heavy) (.+) \((.+)\)( #\d+)?$/;
+
+/**
+ * A session named by `agent_lines` read in two lines (Q8): "Allrounder · Medium #2" over its harness and model. The
+ * second line follows the engine the session runs on **now** — after an escalation the name still says the old one
+ * (the card's claim is made from it). `null` for a name of another shape.
+ */
+export function sessionLines(
+  name: string,
+  engine: Pick<TierEngine, "origin" | "harness" | "model_name" | "label"> | undefined,
+): { title: string; subtitle: string } | null {
+  const m = SESSION_NAME.exec(name);
+  if (!m) return null;
+  return {
+    title: `${m[3]} · ${m[2]}${m[5] ?? ""}`,
+    subtitle: engine ? engineChoiceLabel(engine) : `${m[1]} · ${m[4]}`,
+  };
+}

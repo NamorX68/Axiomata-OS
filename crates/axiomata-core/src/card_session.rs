@@ -116,6 +116,16 @@ pub(crate) fn choose_engine(
         })
 }
 
+/// The tier a session's name says: the card's — unless the owner picked the engine, whose own tier it then runs at.
+fn named_tier(config: &Config, engine: &Engine, card_tier: Tier, picked: bool) -> Tier {
+    if !picked {
+        return card_tier;
+    }
+    crate::engines::find(config, &ModelSources::load(), &engine.id)
+        .and_then(|info| info.rated_tier)
+        .unwrap_or(card_tier)
+}
+
 /// The name of a new session on `engine_id` (`docs/plans/agents-model.md`, Q8): "Glut Medium Allrounder (Sonnet 5.5)",
 /// with ` #2`, ` #3`, … while the project has one of that name. The card's number stays on the card and its tile.
 ///
@@ -360,13 +370,13 @@ fn start_in(
         ));
     }
     let tier = needed_tier(&card, Some(role));
-    let (engine_id, _) = choose_engine(config, tier, request.engine_id.as_deref())?;
+    let (engine_id, engine) = choose_engine(config, tier, request.engine_id.as_deref())?;
     let engine_id = engine_id.as_str();
     let name = session_name(
         config,
         &agent_store::list_agents(db, request.project_id)?,
         engine_id,
-        tier,
+        named_tier(config, &engine, tier, request.engine_id.is_some()),
         &role_name,
     )?;
     let agent = roster::create_agent_on_engine(
@@ -475,15 +485,14 @@ fn worker_tier(
 }
 
 /// The reviewer of a card, the tier it reviews at and its engine (`docs/plans/agents-model.md`, Q15): the review role
-/// ([`review_role`]) at the worker's tier or above. Of each tier, from the worker's up, an engine other than the
-/// worker's is preferred — a model marking its own homework agrees with itself (A21) — else the worker's own; a tier
-/// without any engine that can run hands over to the next one up. An engine the owner asks for is taken, but never the
-/// worker's.
+/// ([`review_role`]) at the worker's tier or above, on the first engine of those tiers — the worker's tier first — that
+/// is not the worker's: a model marking its own homework agrees with itself (A21). With none, the owner is asked; the
+/// worker's engine is never taken, not even when the owner names it.
 ///
 /// # Errors
 ///
 /// No role of kind `review`, an asked-for engine that is the worker's, gone or runs its own command, or no engine of
-/// the worker's tier or above that can run.
+/// the worker's tier or above but the worker's that can run.
 fn choose_reviewer<'a>(
     config: &Config,
     roles: &'a [Role],
@@ -503,21 +512,22 @@ fn choose_reviewer<'a>(
                 "the reviewer must run on another engine than the session that worked on the card",
             ));
         }
-        let (id, _) = choose_engine(config, needed, Some(asked))?;
-        return Ok((role, needed, id));
+        let (id, engine) = choose_engine(config, needed, Some(asked))?;
+        return Ok((role, named_tier(config, &engine, needed, true), id));
     }
     for tier in Tier::ALL.into_iter().filter(|tier| *tier >= needed) {
         let engines = tier_engines(config, &sources, tier);
-        let other = engines
+        // Never the worker's engine (A21): a model marking its own homework agrees with itself.
+        if let Some(info) = engines
             .iter()
-            .find(|info| Some(info.engine.id.as_str()) != worker_engine);
-        if let Some(info) = other.or_else(|| engines.first()) {
+            .find(|info| Some(info.engine.id.as_str()) != worker_engine)
+        {
             return Ok((role, tier, info.engine.id.clone()));
         }
     }
     Err(refuse_review(&format!(
-        "no engine of the tier {} or above can run a review; switch a model of that tier on in the Studio's Models \
-         tab, or pick an engine",
+        "the reviewer needs an engine of the tier {} or above other than the worker's, and none can run; switch \
+         another model of that tier on in the Studio's Models tab, or pick one",
         needed.as_str()
     )))
 }
@@ -2451,7 +2461,8 @@ mod tests {
         let started = w.start(card, Some("sonnet")).unwrap();
         assert_eq!(started.role, "allrounder");
         assert_eq!(started.engine_id, "sonnet");
-        assert_eq!(started.agent.name, "Claude Light Allrounder (default)");
+        // Named by the tier of the engine the owner picked, not the card's.
+        assert_eq!(started.agent.name, "Claude Medium Allrounder (default)");
     }
 
     #[test]
@@ -2902,7 +2913,7 @@ mod tests {
             w.config.agents.engines.remove(id);
         }
         let refused = w.review(card, None).unwrap_err().to_string();
-        assert!(refused.contains("pick an engine"), "{refused}");
+        assert!(refused.contains("pick one"), "{refused}");
         let tip = |w: &World| {
             let branch = agent_store::get_agent(&w.db, worker.agent.id)
                 .unwrap()
@@ -2949,7 +2960,7 @@ mod tests {
     }
 
     #[test]
-    fn the_reviewer_prefers_another_engine_of_the_workers_tier_then_the_same_then_the_next_tier_up()
+    fn the_reviewer_takes_another_engine_of_the_workers_tier_else_a_tier_up_and_never_the_workers()
     {
         let mut w = world();
         w.roles
@@ -2965,12 +2976,16 @@ mod tests {
             pick(&w, &medium, Some("sonnet")),
             ("reviewer".to_owned(), Tier::Medium, "sonnet-2".to_owned())
         );
-        // The worker's engine is the only one of the tier: the same engine, not a tier up.
+        // The worker's engine is the only one of its tier: the next tier up, never the worker's own (A21).
         w.config.agents.engines.remove("sonnet-2");
-        assert_eq!(pick(&w, &medium, Some("sonnet")).2, "sonnet");
+        assert_eq!(
+            pick(&w, &medium, Some("sonnet")),
+            ("reviewer".to_owned(), Tier::Heavy, "opus".to_owned())
+        );
         // No engine of the worker's tier can run: the next tier up.
         let light = card_at(&w, Some(crate::board::Tier::Light));
-        assert_eq!(pick(&w, &light, Some("haiku")).1, Tier::Light);
+        // The only light engine is the worker's: a tier up.
+        assert_eq!(pick(&w, &light, Some("haiku")).1, Tier::Medium);
         w.config.agents.engines.remove("haiku");
         assert_eq!(
             pick(&w, &light, Some("x")),
@@ -2978,6 +2993,13 @@ mod tests {
         );
         // Never below the worker's tier, and the card may name its own review role.
         let mut heavy = card_at(&w, Some(crate::board::Tier::Heavy));
+        // One engine per tier and the worker heavy on opus: nothing but its own engine is left, so the owner is asked.
+        assert!(
+            choose_reviewer(&w.config, &w.roles, &heavy, None, Some("opus"), None)
+                .unwrap_err()
+                .to_string()
+                .contains("other than the worker's")
+        );
         assert_eq!(
             pick(&w, &heavy, Some("sonnet")),
             ("reviewer".to_owned(), Tier::Heavy, "opus".to_owned())
@@ -3091,7 +3113,10 @@ mod tests {
         flow::report_done(&mut w.db, card, &worker_actor).unwrap();
         let second = w.review(card, Some("opus")).unwrap();
         assert_ne!(first.agent.id, second.agent.id);
-        assert_eq!(second.agent.name, "Claude Medium Reviewer (default) #2");
+        assert_eq!(
+            second.agent.name, "Claude Heavy Reviewer (default) #2",
+            "named by the picked engine's tier"
+        );
     }
 
     #[test]
