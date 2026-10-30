@@ -10,8 +10,15 @@ selbst, sobald ihre Vorgänger fertig sind; jede Karte bekommt einen Arbeiter un
 fertige Arbeit sammelt sich auf einer eigenen **Linie des Plans** (einem Integrations-Branch). Am Ende übernimmst du
 den ganzen Plan mit einem Klick in den Hauptbranch.
 
-Eine Karte, die zweimal zurückgegeben wird oder abbricht, geht an die nächststärkere Rolle gleicher Art
-(**Eskalation**). Passt sie auch dann nicht, gibt das Studio sie auf und wartet auf dich.
+**Wer eine Karte bearbeitet:** die Rolle der Karte auf der Stufe der Karte — hat die Karte keine Stufe, die
+Standard-Stufe der Rolle — auf der Standard-Engine dieser Stufe; kann die nicht laufen, die nächste Engine derselben
+Stufe ([Modelle und Rollen](modelle-rollen.md)). **Der Reviewer** ist die Rolle der Art „review“ auf mindestens der
+Stufe des Bearbeiters und läuft immer auf **einer anderen Engine** als der Bearbeiter — ein Modell, das seine eigene
+Arbeit prüft, gibt sich recht. Gibt es keine solche Engine, startet kein Reviewer, und die App sagt dir, was fehlt.
+
+Eine Karte, die zweimal zurückgegeben wird, geht an **dieselbe Rolle eine Stufe höher** (**Eskalation**, einmal je
+Karte): die Sitzung wechselt an Ort und Stelle auf eine Engine der höheren Stufe, Worktree und Branch bleiben. War die
+Karte schon Heavy oder läuft keine Engine der nächsten Stufe, gibt das Studio sie nicht weiter und wartet auf dich.
 
 ## Wo die Knöpfe sind
 
@@ -47,7 +54,13 @@ Eine Karte, die zweimal zurückgegeben wird oder abbricht, geht an die nächstst
   gesperrt, mehr nicht.
 - Selbstlaufende Pläne starten zusammen höchstens vier Kartensitzungen gleichzeitig; der Rest wartet.
 - Wartet ein Agent auf dich, steht er still, bis du antwortest.
+- Hat eine Stufe nur **eine** laufbare Engine, findet der Reviewer auf dieser Stufe keine andere und weicht nach oben
+  aus; gibt es auch dort keine, bleibt die Karte ohne Review. Abhilfe: unter „Models“ ein zweites Modell der Stufe
+  einschalten.
+- Eine Karte ohne passende Engine ihrer Stufe startet nicht („no engine of the tier … can run“); dann ein Modell dieser
+  Stufe einschalten oder eine Standard-Engine setzen.
 
 ## Siehe auch
 
-[Studio](studio.md) · [Kanban](kanban.md) · [Glut](glut.md) · [Kosten](kosten.md)
+[Studio](studio.md) · [Modelle und Rollen](modelle-rollen.md) · [Kanban](kanban.md) · [Glut](glut.md) ·
+[Kosten](kosten.md)

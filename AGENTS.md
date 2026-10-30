@@ -42,7 +42,10 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   in the pane and the app at once, a budget per run, resume of a lost turn), and slash commands in the chat
   (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
   (`docs/plans/durable.md`: a journal per run, resume on click), and Opencode's exit (2026-10-23,
-  `docs/plans/opencode-exit.md`: everything on Glut or Claude Code, a plain Opencode master tile stays). LocalBrain was built, measured and not taken over
+  `docs/plans/opencode-exit.md`: everything on Glut or Claude Code, a plain Opencode master tile stays), and
+  "Engines, roles, agents" (2026-10-30, `docs/plans/agents-model.md` AM1–AM7: tiers per model, automatic engines,
+  roles without engines, the new Agents tab, the one-time migration; built on branch `agents-model`, not merged; open:
+  the owner sees the tabs live). LocalBrain was built, measured and not taken over
   (`docs/plans/localbrain.md`, "Outcome").
   Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
@@ -79,7 +82,8 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #                                              engine per tier — agents-model.md AM1; `list --unrated` + `propose` are the
 #                                              `model-tiering` skill's, AM2)
 #   ide migrate-agents [--dry-run]           (the one-time move to the 7 base roles and automatic engines, AM6;
-#                                              runs once at the app's start, backups in ~/.axiomata/agents-backup-<date>)
+#                                              runs once at the app's start, one backup per pass in
+#                                              ~/.axiomata/agents-backup-<date>[-n])
 #   ide roles list|show|save|delete|project|confirm   (AGENT.md roles; `project`/`confirm`: a project's own roles, by hash)
 #   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>
@@ -206,9 +210,14 @@ from the code itself:
   terminal, never a field of its stored config (`modules/terminal.svelte`'s `initialCommand`). A task pane's tab names
   only the task id; its command line is resolved in Rust (`task_command_line`) and kept in memory (`ide/taskRuns.ts`),
   and a project's own `.axiomata/tasks.json` runs only after the owner confirmed its exact bytes (SHA-256, `axiomata-tasks`).
-  Same for roles (`AGENT.md`, `axiomata-roster`): a role names engines by id and never carries a command line, and a project's own
+  Same for roles (`AGENT.md`, `axiomata-roster`): a role never carries a command line, and a project's own
   roles apply only after the same kind of confirmation. Engines are saved into the *file* config only (`roster::persist_engines`),
   never by saving the live config — that would undo a workspace change queued for the next start.
+- **A role names no engine; a session's engine comes from its tier** — `engines::engine_for` (the owner's default engine
+  of the tier, then by price, skipping one that cannot run); a reviewer never runs on the worker's engine (A21).
+  Automatic engines are computed from the model catalog + `[agents.models]`, never stored; own engines live only in
+  the file config (`agents.engines`). An `engine:` left in an `AGENT.md` is parsed and ignored
+  (`docs/plans/agents-model.md`).
 - **In an agent session the CLI acts as that agent** (`axiomata_core::session`, from `AXIOMATA_AGENT_ID`/`_NAME`): `--actor`
   cannot say otherwise, the owner's commands (`board plan approve`, `board approve`, `board taken-over`, deleting/archiving …)
   are closed there, and an agent adds cards only to the board's proposal column. The board store enforces the same gates for

@@ -52,6 +52,7 @@ Stand: 2026-10-29, CH1–CH5 **gebaut, am Mac abgenommen und gemergt**; dazu ver
 | `tags-links.md` | Tags, Wikilinks, Tag-Liste, Vault-Lauf |
 | `studio.md` | Studio: Projekte, Agenten, Panes, Git, Run/Tasks, Debug |
 | `flow.md` | Pläne, Agentenfluss, Karte als Plan, Grenzen, Kostenbuch |
+| `modelle-rollen.md` | Modelle, Stufen, Standard-Engines, Rollen, die Umstellung (`agents-model.md`, AM7) |
 | `kanban.md` | Kanban: Spalten, Vorschläge, Review |
 | `chat.md` | der Chat in der Leiste, Slash-Befehle, was er darf |
 | `spotlight.md` | ⌘K |

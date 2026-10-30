@@ -31,9 +31,8 @@ ersetzt. Beim Start rechnet die App schon erfasste Läufe gegen die Tabelle nach
   dann „Save assignment“.
 - **Studio → Flow**, im Plan: das Feld „Cost limit (USD)“ über dem Ziel (leer = keine eigene Grenze) und die Zeile
   „Verbrauch: …“ mit dem Tagesstand des Studios.
-- **Studio → Agents-Bereich → „Engines & roles…“ → „Roles“**, eine Rolle öffnen → „Advanced: fallback engines,
-  rights, limits“: „Cost limit (USD)“, „Token
-  limit“, „Step limit“.
+- **Studio → Agents-Bereich → „Models & roles…“ → „Roles“**, eine Rolle öffnen → „Advanced“: „Cost limit (USD)“,
+  „Token limit“, „Step limit“ (leer = die Vorgabe der Stufe).
 - Im Terminal: `axiomata-cli board usage` zeigt Schritte, Tokens und Geld einer Sitzung gegen ihre Grenzen.
 
 ## Häufige Handgriffe

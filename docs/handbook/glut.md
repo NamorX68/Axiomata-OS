@@ -21,8 +21,9 @@ Axiomata arbeitet Glut an drei Stellen:
 ## Wo die Knöpfe sind
 
 - **Harness wählen:** Settings → AI providers → „Harness for chat“ / „Harness for skills & routines“ → „Glut“.
-- **Engine für Karten:** Studio → Agents → „Engines & roles…“ → „Engines“ → „Add engine…“ → Harness Glut; im Feld
-  „Model“ wählt `openrouter/…` oder `ollama/…` den Provider.
+- **Engine für Karten:** jedes eingeschaltete OpenRouter- oder Ollama-Modell ist von selbst eine Glut-Engine (Studio →
+  Agents → „Models & roles…“ → „Models“, [Modelle und Rollen](modelle-rollen.md)). Eine eigene: dort unter „Own
+  engines“ → „Add engine…“ → Harness Glut; im Feld „Model“ wählt `openrouter/…` oder `ollama/…` den Provider.
 - **Master öffnen:** Studio → Agents → oben die Master-Kachel „Glut“.
 - **Zuschauen:** auf einer Live-Kachel im Flow „Watch“ — folgt der Sitzung nur lesend in einem eigenen Pane.
 - **Fragen beantworten:** im Dialog im Pane **oder** in der App („Allow“ / „Deny“ / „In terminal“); die erste

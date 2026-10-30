@@ -26,7 +26,8 @@ Die App-Daten liegen in `~/.axiomata` (Einstellungen, Datenbank, Skills, Protoko
 unter Settings → Workspace wählst. Jeder Agenten-Lauf — Chat, Skill, Routine, Kachel-Refresh, Karte — läuft auf
 einem **Harness** und einem **Provider** ([Provider](provider.md)) und zählt gegen die **Grenzen**
 ([Kosten](kosten.md)). Eine Aufgabe wandert typisch so: Karte im [Kanban](kanban.md) → „Start …“ → Plan im
-[Flow](flow.md) → Agenten im [Studio](studio.md) → „Take over plan“. Was du siehst, stellst du unter
+[Flow](flow.md) → Agenten im [Studio](studio.md) → „Take over plan“. Welche Rolle auf welchem Modell arbeitet, steht
+unter [Modelle und Rollen](modelle-rollen.md). Was du siehst, stellst du unter
 [Einstellungen](einstellungen.md) ein; aufgeräumt wird unter [Storage](storage.md).
 
 Der Chat antwortet aus diesen Seiten. Steht eine Antwort hier nicht, sagt er das — dann gehört sie ins Handbuch.
@@ -43,6 +44,7 @@ Seiten in der Gruppe „Handbook“, und `/help <thema>` im Chat öffnet die pas
 - [Tags und Wikilinks](tags-links.md) — Wie man Notizen mit `#tags` und `[[Wikilinks]]` verknüpft, wie die Tag-Liste in TAGS.md gepflegt wird und wie der einmalige Vault-Lauf Tags und Links für alle Notizen vorschlägt.
 - [Studio](studio.md) — Wie die Werkbank für Code-Projekte aufgebaut ist: Projekte, die Modi Editor, Canvas und Flow, Panes, Agenten mit eigenem Worktree, Git, Run/Tasks und Debug.
 - [Flow: Pläne, Agententeam und Grenzen](flow.md) — Wie man im Studio-Modus „Flow“ einen Plan anlegt, vom Planer in Karten zerlegen lässt, freigibt, selbst laufen lässt und am Ende übernimmt — mit Grenzen, Kostenstand, Fragen der Agenten und Eskalation.
+- [Modelle, Stufen und Rollen](modelle-rollen.md) — Wie das Studio Modelle einschaltet und in die Stufen Light, Medium und Heavy einordnet, welche Engine eine Stufe startet, was eine Rolle ist und was die einmalige Umstellung auf Rollen mit Stufen gemacht hat.
 - [Kanban](kanban.md) — Wie das Kanban-Board funktioniert: Boards, Spalten mit den festen Spalten Proposal und Review, Kartenfelder, die Knöpfe einer Karte und was Agenten auf dem Board dürfen.
 - [Der Chat in der Leiste](chat.md) — Wie man mit dem Agenten unten in der Leiste spricht, welche Slash-Befehle es gibt, was Plan und Build bedeuten und was der Chat in der App tun darf.
 - [Spotlight (⌘K)](spotlight.md) — Wie man mit ⌘K alles in Axiomata findet und startet: Befehle, Kacheln, Skills, Routinen, Karten, Pläne, Projekte, Tags und Dateien — und wie man von dort den Chat fragt.

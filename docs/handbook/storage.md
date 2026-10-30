@@ -24,6 +24,8 @@ Einmal pro Woche räumt die App beim Start von selbst auf, im Hintergrund. Was w
 | Claude sessions | 30 Tage (nie der ganze Ordner — dort liegt die Anmeldung) |
 | Database file | wird verdichtet, wenn über 10 % frei sind |
 | Orphaned worktrees | gehen mit ihrem Agenten; einer mit Änderungen wartet auf dich |
+| Beendete Studio-Sitzungen ohne Arbeit | gehen nach mindestens einem Tag Ruhe, nach erneuter Prüfung |
+| Backups of the old roles and engines | bis du sie löschst — nie von selbst |
 
 ## Wo die Knöpfe sind
 
@@ -36,7 +38,12 @@ Einmal pro Woche räumt die App beim Start von selbst auf, im Hintergrund. Was w
   Glut das noch nicht melden;
 - „Clean up once a week at start“ (schaltet nur den Wochenlauf ab, nie den Knopf);
 - „Save rules“ und „Clean up now“;
-- „Orphaned worktrees waiting for you“ mit einem Papierkorb je Worktree (nur sichtbar, wenn es welche gibt).
+- „Orphaned worktrees waiting for you“ mit einem Papierkorb je Worktree (nur sichtbar, wenn es welche gibt);
+- „Ended sessions a clean-up removes“ (vor dem Aufräumen) bzw. „Ended sessions removed“ (danach): die beendeten
+  Studio-Sitzungen ohne eigene Arbeit, die das Aufräumen mit Worktree und leerem Branch wegnimmt;
+- „Backups of the old roles and engines“: je Sicherungsordner der Umstellung auf Rollen mit Stufen
+  (`agents-backup-<Datum>`, ggf. mit `-2` …) Pfad, Größe und ein Papierkorb „Delete backup …“ (nur sichtbar, wenn es
+  welche gibt; [Modelle und Rollen](modelle-rollen.md)).
 
 Im Terminal: `axiomata-cli maintenance status` (zeigt nur) und `axiomata-cli maintenance clean [--dry-run]`.
 
@@ -48,6 +55,8 @@ Im Terminal: `axiomata-cli maintenance status` (zeigt nur) und `axiomata-cli mai
    nach den gespeicherten Regeln und ist gesperrt, solange Änderungen offen sind.
 3. **Einen verwaisten Worktree wegwerfen:** unter „Orphaned worktrees waiting for you“ den Papierkorb → bestätigen.
    Die ungesicherte Arbeit darin ist danach endgültig weg.
+4. **Eine Sicherung der alten Rollen löschen:** unter „Backups of the old roles and engines“ den Papierkorb →
+   bestätigen („Delete the backup …? The old role files and engines in it are gone for good.“) → „Backup deleted“.
 
 ## Fallen
 
@@ -55,8 +64,13 @@ Im Terminal: `axiomata-cli maintenance status` (zeigt nur) und `axiomata-cli mai
   behalten will, übernimmt die Arbeit vorher im Studio (siehe [Studio](studio.md)).
 - Löschen eines Agenten im Studio nimmt seinen Worktree und Branch mit; hat er Änderungen, fragt die App vorher.
 - Build-Ordner von Projekten (`target/`, `node_modules`) sind Sache der Projekte — „Storage“ zeigt sie nicht.
+- Eine Studio-Sitzung mit Arbeit — Ungesichertes, ein Commit über ihre Basis, eine offene Karte oder ein Plan, für den
+  sie gestartet wurde — räumt das Aufräumen nie weg; sie steht im Studio unter „Waiting for you: take over or
+  discard“. Master-Sitzungen bleiben immer.
+- Eine Sicherung der alten Rollen wird nie von selbst gelöscht; nichts benutzt sie mehr, sie ist nur dein Rückweg.
 - Die Datenbank wird nur verdichtet, wenn es sich lohnt; ein Lauf ohne fällige Posten tut das trotzdem, falls nötig.
 
 ## Siehe auch
 
-[Einstellungen](einstellungen.md) · [Kosten](kosten.md) · [Glut](glut.md)
+[Einstellungen](einstellungen.md) · [Kosten](kosten.md) · [Glut](glut.md) · [Studio](studio.md) ·
+[Modelle und Rollen](modelle-rollen.md)

@@ -273,12 +273,15 @@ Not built yet: the CLI mirror `agent send|inbox` (A31), the start prompt of a ca
 
 The Studio's **engines and roles** (`docs/plans/a2a.md`, A5, CP-A1) — pure like `axiomata-tasks`: no Tauri, no database,
 no `axiomata-core`, it takes directories and returns data. Three levels, kept apart on purpose: an **engine** is harness +
-model + environment (the owner's catalog, `config.agents.engines`, global so a switch happens in one place), a **role** is
-a kind of work with a tier, an engine, limits and instructions (one `~/.axiomata/agents/<name>/AGENT.md`, YAML
-frontmatter with `deny_unknown_fields` plus a Markdown body), and a **session** is a started agent with its worktree — still
-the `ide_agents` row, which now carries `engine_id` and `agent_role` (migration 14, `axiomata_ide::SCHEMA_SQL_V6`).
+model + environment (since `docs/plans/agents-model.md` mostly **automatic**, one per switched-on model and harness,
+computed and never stored; the owner's own ones in `config.agents.engines`), a **role** is a kind of work with a
+default tier, limits and instructions (one `~/.axiomata/agents/<name>/AGENT.md`, YAML frontmatter with
+`deny_unknown_fields` plus a Markdown body), and a **session** is a started agent with its worktree — still the
+`ide_agents` row, which carries `engine_id` and `agent_role` (migration 14, `axiomata_ide::SCHEMA_SQL_V6`). A role names
+**no engine** any more (AM1): an `engine`/`fallback_engines` it still carries is parsed and ignored, the session's
+engine comes from its tier (§5 "Engines, roles and agents").
 
-Load-bearing: a role names engines **by id and never carries a command line**, so a role file arriving with a cloned
+Load-bearing: a role **never carries a command line**, so a role file arriving with a cloned
 repository can change what an agent is told but not which program runs. Even so, a project's own roles
 (`<project>/.axiomata/agents/`, `overrides.rs`) apply only after the owner confirmed their exact content: SHA-256 over every
 file read, kept in `~/.axiomata/agent-roles-trust.json` (the store of `axiomata-tasks`, keyed by the overrides directory so it
@@ -1106,6 +1109,48 @@ cards, note tags, the inbox, the router, `module-action`; `run-skill`, routine c
 asking actions; everything else — deletes, the owner's board steps, plan changes, the Studio's sessions, grants,
 `files write`, other agent runs (`assistant`, `harness`, `import`), `models refresh`, a real clean-up — is refused.
 
+### Engines, roles and agents (`docs/plans/agents-model.md`, AM1–AM7, built 2026-10-30)
+
+An agent is **role × tier × engine**, computed, never stored (Q7). Where each part lives:
+
+- **Tiers per model** (`model_tiers`): `[agents.models]` in the config holds the owner's choices per provider-qualified
+  key (`anthropic/…`, `openrouter/…`, `ollama/…`: on/off and an owner tier), the price limits (`tier_limits`,
+  light below 1, heavy above 10 USD per million output tokens) and the default engine per tier (`default_engines`).
+  The effective tier is owner > research proposal > price proposal > unrated (no agent). A provider list of at most
+  `SMALL_LIST_MAX` (20) models is on as a whole, a larger one off until the owner ticks models. Research proposals sit
+  in `~/.axiomata/model-tiers.json` (with the time each was asked for, under a flock lock file), written only by the
+  bundled `model-tiering` skill through `axiomata-cli ide models propose` (AM2, `model_research`): it starts after a
+  catalog refresh for switched-on models without a tier (`claim_due`, at most once a day per model) and on the
+  owner's "Propose again"; a proposal is never the owner's value.
+- **Automatic engines** (`engines`): one per switched-on model and harness that can run it (Claude Code: Anthropic's
+  newest model per family; Glut: OpenRouter and Ollama), id `<harness>-<slug(model)>` (hashed when too long or when
+  two models collide), computed from the catalog on every read and **never stored**. Own engines (with a command, an
+  environment, a tier or a billing of their own) stay in the **file** config's `agents.engines` and win their id.
+  `engines::Lookup` resolves any engine id, reading the catalog only when it has to.
+- **The start resolution** (`engines::engine_for(tier)`): the owner's default engine of the tier first, then the
+  tier's engines by output price; an engine that cannot run (no key, unreachable, its model gone) is skipped. A
+  session started by hand (`agent_start`, the Agents tab's "Start an agent" and its favorites) takes an asked-for
+  engine or that first one, named "‹Harness› ‹Tier› ‹Role› (‹Model›)" plus ` #n` when the name is taken. Card
+  sessions (AM5, `card_session`): the worker is the card's role at the card's tier (else the role's default tier) on
+  `choose_engine`; the reviewer is the `review` role at ≥ the worker's tier on **another engine than the worker's**
+  (A21 — refused with a reason when there is none, never silently the same); after two returns the same role one
+  tier up, in place (`escalate_card`; at heavy `NoStrongerRole`, the owner decides).
+- **Favorites**: `[[agents.favorites]]` in the config, a role at a tier on an engine or on "the tier's default"
+  (which follows a changed default), toggled in the file config under its lock.
+- **The Agents tab** lists only running and waiting sessions and the ended ones with work not taken over; the weekly
+  maintenance removes ended non-master sessions without work after checking again (`maintenance/sessions.rs`).
+- **The one-time migration** (`agents_migration`, AM6): from 22 roles that carried engines to the seven base roles
+  (`axiomata_roster::base_roles`); equal variants move to a backup, differing ones stay and are shown (Keep / Fold);
+  own engines that equal an automatic one fold into it; defaults per unset tier are seeded from the old roles'
+  engines; defaults, favorites and sessions naming a removed engine follow it. The pass computes its whole plan, stores
+  it as in progress in `~/.axiomata/agents-migration.json`, then applies backups → one DB transaction → one file-config
+  save → role files, and records itself done (`app_meta`) only after that; a cut-off pass resumes from the stored plan.
+  One pass at a time across processes (`agents-migration.lock`). Each pass gets its own owner-only backup folder
+  `~/.axiomata/agents-backup-<date>[-n]` that is never overwritten and only deleted from Settings → Storage. It runs
+  at the app's start before the window opens (`bootstrap.rs`), or as `axiomata-cli ide migrate-agents [--dry-run]`.
+- **UI**: the Studio's "Models & roles…" pane (`ide/panes/RosterPane.svelte`: `ModelsSection`, `RolesSection` with the
+  migration notice) replaced "Engines & roles"; the handbook page is `docs/handbook/modelle-rollen.md`.
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
@@ -1897,6 +1942,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `opencode` values read as today's harness, its engines as Glut engines, migration 36 moved its Studio sessions to
   Glut. The Agents panel keeps a plain Opencode tile (the owner's own `opencode`, no team tools); the master tiles are
   Glut and Claude Code side by side, Opencode below.
+- **Engines, roles and agents built** (2026-10-30, `docs/plans/agents-model.md`, AM1–AM7, branch `agents-model`, not
+  merged): tiers per model with research and price proposals, automatic engines computed from the catalog, a role
+  without an engine, agents computed as role × tier × engine with favorites, the Studio's Models/Roles tabs and the new
+  Agents tab, card sessions by tier, the one-time migration with backups. §5 "Engines, roles and agents". Open: the
+  owner sees the tabs live.
 - **Watching a Glut session** (2026-10-23, Glut TUI8d): Glut's TUI writes every session's event log itself — a card's
   channel `glut-events.jsonl` (`Launch::log`), the owner's beside their session in `~/.glut/sessions` — and `glut watch`
   follows one read-only. A Glut tile in Flow has **Watch**: `axiomata-cli harness watch --agent N` in a pane of its own,

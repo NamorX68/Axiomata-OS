@@ -12,7 +12,7 @@ Welcher Harness (Claude Code oder Glut) und welcher Provider (Anthropic, OpenRou
 - Es gibt zwei **Rollen**: den Chat und „skills & routines“. Jede Rolle wählt Harness und Provider für sich — etwa
   Claude Code für den Chat und Glut mit Ollama für die Digests.
 - Ein Skill kann mit `backend:` und `model:` im eigenen Kopf davon abweichen. Die Agenten des Studios wählen ihr
-  Modell dagegen über **Engines** (siehe [Studio](studio.md)).
+  Modell dagegen über ihre **Stufe** und deren Engine (siehe [Modelle und Rollen](modelle-rollen.md)).
 
 ## Wo die Knöpfe sind
 

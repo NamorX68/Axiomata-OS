@@ -11,7 +11,11 @@ Das Studio ist Axiomatas Entwicklungsumgebung. Es öffnet sich groß über allem
 - **„Flow“** — Pläne, Agententeam und Graph ([Flow](flow.md)).
 
 Ein Modus, den du nicht ansiehst, läuft weiter. **Agenten** sind Sitzungen im Projekt: eine **Rolle** (wofür) auf
-einer **Engine** (Harness + Modell), mit eigenem Branch in einem eigenen Worktree unter `~/Worktrees/axiomata-agents`.
+einer **Stufe** (Light · Medium · Heavy) und einer **Engine** (Harness + Modell), mit eigenem Branch in einem eigenen
+Worktree unter `~/Worktrees/axiomata-agents`. Die Rolle nennt keine Engine — die kommt aus der Stufe: deine
+Standard-Engine der Stufe, sonst die billigste ([Modelle und Rollen](modelle-rollen.md)). Ein Agent heißt danach,
+etwa „Glut Medium Allrounder (Sonnet 5.5)“, angezeigt in zwei Zeilen (oben Rolle · Stufe, darunter Harness · Modell);
+eine zweite Sitzung desselben Agenten bekommt „#2“.
 Ein **Master** ist dagegen die Engine so, wie du sie selbst benutzt — im echten Projektordner, ohne Worktree. Ein
 weiterer Klick auf die Master-Kachel, während der Master offen ist, startet einen zweiten daneben (`master-glut-2`, …);
 er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
@@ -24,9 +28,17 @@ er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
   „Choose where…“), „Close project“, „Change folder…“, „Remove from list“ (der Ordner bleibt), Farbmarke.
 - **Leiste links:** „Files“, „Search the project“ (⇧⌘F), „Git“, „Run — build, test, start“, „Debug“, „Agents“;
   dazu „New terminal“ und „Open a file…“ (⌘O).
-- **„Agents“:** oben die Master-Kacheln (Glut, Claude Code, Opencode), darunter „Start an agent“ mit Rollen nach
-  „Planning / Implementation / Review / Testing / Documentation“, die Agenten-Karten mit Status, „New agent…“ und
-  „Engines & roles…“ (Engines: „Add engine…“; Rollen: „Add role…“, Grenzen unter „Advanced“).
+- **„Agents“** (in jedem Modus derselbe Reiter), von oben nach unten:
+  - **„Master“** — die Master-Kacheln Glut, Claude Code und Opencode.
+  - **„Favorites“** — deine gemerkten Agenten als Kacheln; ein Klick startet. Ein Favorit, dessen Engine gerade nicht
+    laufen kann, ist abgeblendet und wird nie still auf eine andere Engine gelegt.
+  - **„Start an agent“** — eine Rolle wählen, dann Light · Medium · Heavy (vorgewählt die Standard-Stufe der Rolle),
+    dann die Engine („Default of the tier“ oder eine Engine der Stufe, die Standard-Engine mit „standard“ markiert),
+    „Start“. Kürzester Weg: Rolle → „Start“. Der Stern („Keep this choice as a favorite“) merkt die Wahl.
+  - **„Sessions“** — nur, was dich angeht: laufende und wartende Sitzungen und unter „Waiting for you: take over or
+    discard“ beendete mit Arbeit, die noch nicht übernommen ist. Ist nichts davon da: „No session runs or waits for
+    you.“ Jede Sitzung hat einen Stern („Keep this agent as a favorite“).
+  - unten „New agent…“ und **„Models & roles…“** (Reiter „Models“ und „Roles“, [Modelle und Rollen](modelle-rollen.md)).
 - **Agenten-Pane:** Reiter „Terminal“, „Plan“, „Diffs“, „Inbox“ (Nachrichten an die Sitzung, ⌘↩ sendet);
   „Restart the agent“. Unter „Diffs“: „Discard file“, „Commit…“, „Take over…“ (Squash oder Merge, „Never pushes.“).
 - **„Git“:** Branch wechseln, „New branch from here“, „Fetch …“, „Stage all“, Commit-Nachricht (⌘↩), ✨ schreibt
@@ -41,9 +53,11 @@ er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
 ## Häufige Handgriffe
 
 1. **Projekt anlegen:** Projektleiste → „New project…“ → Name, Ort, ggf. „Start a git repository“.
-2. **Agenten starten:** „Agents“ → unter „Start an agent“ eine Rolle wählen — oder eine Karte im Kanban mit
-   „Start …“ starten ([Kanban](kanban.md)).
-3. **Arbeit eines Agenten übernehmen:** Agenten-Pane → „Diffs“ → prüfen → „Take over…“ → Squash oder Merge.
+2. **Agenten starten:** „Agents“ → „Start an agent“ → Rolle → ggf. Stufe und Engine → „Start“ — oder einen Favoriten
+   anklicken, oder eine Karte im Kanban mit „Start …“ starten ([Kanban](kanban.md)).
+3. **Einen Agenten merken:** in „Start an agent“ oder an einer Sitzung den Stern klicken; er steht dann unter
+   „Favorites“. Ein Favorit mit „Default of the tier“ zieht mit, wenn du die Standard-Engine der Stufe änderst.
+4. **Arbeit eines Agenten übernehmen:** Agenten-Pane → „Diffs“ → prüfen → „Take over…“ → Squash oder Merge.
 
 ## Fallen
 
@@ -51,6 +65,12 @@ er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
   nachdem du sie geprüft hast („… need your review“ → „Review…“ → „Allow …“). Ändert sich die Datei, fragt die App
   erneut.
 - Einen Agenten entfernen nimmt **Worktree und Branch** mit; ungesicherte Arbeit ist dann weg (die App fragt).
+- Eine beendete Sitzung **ohne eigene Arbeit** (nichts Ungesichertes, kein Commit über ihre Basis, keine offene Karte)
+  steht nicht mehr in der Liste. Die wöchentliche Wartung prüft sie erneut und räumt sie dann weg — Worktree, leerer
+  Branch, Eintrag — und nennt sie unter Settings → Storage ([Storage](storage.md)). Arbeit wird nie von selbst
+  gelöscht.
+- Ein Modell ohne Stufe ist kein Agent und fehlt unter „Start an agent“; schalte es unter „Models“ ein und gib ihm
+  eine Stufe.
 - „Take over…“ und „Commit & Push“ pushen nie mit Gewalt; „Take over…“ pusht gar nicht.
 - Der Opencode-Master ist nur dein eigenes `opencode` im Projektordner, ohne Team-Werkzeuge.
 - Mehrere Master arbeiten im **selben** Ordner: ändern zwei dieselbe Datei, kommen sie sich in die Quere. Für
@@ -60,4 +80,5 @@ er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
 
 ## Siehe auch
 
-[Flow](flow.md) · [Kanban](kanban.md) · [Glut](glut.md) · [Editor](editor.md) · [Kosten](kosten.md)
+[Modelle und Rollen](modelle-rollen.md) · [Flow](flow.md) · [Kanban](kanban.md) · [Glut](glut.md) ·
+[Editor](editor.md) · [Kosten](kosten.md)

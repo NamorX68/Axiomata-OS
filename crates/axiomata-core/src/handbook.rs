@@ -45,6 +45,7 @@ pub const PAGES: &[Page] = pages![
     "tags-links",
     "studio",
     "flow",
+    "modelle-rollen",
     "kanban",
     "chat",
     "spotlight",
@@ -188,7 +189,7 @@ mod tests {
     use crate::test_support::unique_temp_dir;
 
     /// The pages of `docs/plans/chat-knows-app.md` §3, in its order.
-    const PLANNED: [&str; 20] = [
+    const PLANNED: [&str; 21] = [
         "index",
         "orbit",
         "second-brain",
@@ -197,6 +198,7 @@ mod tests {
         "tags-links",
         "studio",
         "flow",
+        "modelle-rollen",
         "kanban",
         "chat",
         "spotlight",

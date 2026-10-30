@@ -1,7 +1,8 @@
 # Engines, Rollen, Agenten — neu gedacht
 
-Stand: 2026-10-30, **gegrillt** (Q1–Q21, Owner), Go zum Bau ohne Zwischenhalt (Owner: „Baue ruhig alles fertig“; ein
-Review-Agent gibt je Schritt grünes Licht). Die Inspektor-Reiter (Q20) schaut der Owner danach live an.
+Stand: 2026-10-30, **gebaut (AM1–AM7) auf Branch agents-model, nicht gemergt; offen: Owner sieht die Reiter live**.
+Gegrillt Q1–Q21 (Owner), gebaut ohne Zwischenhalt (Owner: „Baue ruhig alles fertig“; ein Review-Agent gab je Schritt
+grünes Licht).
 
 ## 1. Heute
 
