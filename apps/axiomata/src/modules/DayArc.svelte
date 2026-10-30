@@ -4,6 +4,7 @@
   hexagon on the arc and the time in the middle. Geometry in `core/dayArc.ts`.
 -->
 <script lang="ts">
+  import { formatTime } from "../core/format";
   import type { CalendarEvent } from "../core/calendar";
   import { ARC_FROM_HOUR, ARC_TO_HOUR, arcFraction, arcPath, arcPoint, arcSegments } from "../core/dayArc";
 
@@ -27,7 +28,7 @@
   const here = $derived(arcPoint(nowAt));
   const outside = $derived(now.getHours() < ARC_FROM_HOUR || now.getHours() >= ARC_TO_HOUR);
   const segments = $derived(arcSegments(events, at));
-  const time = $derived(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  const time = $derived(formatTime(now));
   /** Read out: the time and today's events by name, since their titles are otherwise only tooltips. */
   const label = $derived(
     segments.length === 0

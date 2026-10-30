@@ -143,6 +143,10 @@ from the code itself:
   ordinary build while the copied binary is missing) and is found next to the executable (`agent_entry::cli_path`). Ad-hoc
   signature, no notarization: the macOS may ask again for file/automation access after each new build. The icon's source is
   `apps/axiomata/app-icon.svg` (`cargo tauri icon app-icon.svg` regenerates `src-tauri/icons/`).
+- **Texts the owner reads come from a catalog** (`docs/plans/i18n.md`, `src/i18n/`): English the source, German of the
+  same shape (`npm run check` fails on a missing one), German says "du" and never genders (`catalogs.test.ts`). A
+  converted component goes into `coverage.test.ts` `CONVERTED` and draws no text of its own; dates and numbers only
+  through `core/format.ts`. What a model reads (roles, prompts, skills, `APP_GUIDE`) and the CLI stay English.
 - **The handbook is part of the build** (`docs/handbook/`, `docs/plans/chat-knows-app.md`): one page per area of the
   app, embedded by `axiomata_core::handbook` and replaced in `~/.axiomata/handbook/` at start. A change the owner can
   see updates its page in the same commit — a new ring entry, view or Settings tab also gets its row in

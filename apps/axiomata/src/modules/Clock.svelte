@@ -9,6 +9,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
 
+  import { formatDate } from "../core/format";
   import type { CalendarEvent } from "../core/calendar";
   import DayArc from "./DayArc.svelte";
 
@@ -28,7 +29,7 @@
   const hh = $derived(String(now.getHours()).padStart(2, "0"));
   const mm = $derived(String(now.getMinutes()).padStart(2, "0"));
   const dateLine = $derived(
-    now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
+    formatDate(now, { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
   );
 </script>
 

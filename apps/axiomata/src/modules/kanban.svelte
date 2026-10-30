@@ -24,6 +24,7 @@
   import { get } from "svelte/store";
   import { SvelteSet } from "svelte/reactivity";
 
+  import { formatDateTime } from "../core/format";
   import { draggable, type DragDelta, type DragPoint } from "../canvas/drag";
   import { onMount, tick } from "svelte";
 
@@ -1265,7 +1266,9 @@
             <li>
               <span class="h-kind">{EVENT_LABEL[event.kind]}</span>
               <span class="h-who">{actorLabel(event.actor)}</span>
-              <time class="h-when" datetime={event.at}>{new Date(event.at).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}</time>
+              <time class="h-when" datetime={event.at}
+                >{formatDateTime(event.at, { dateStyle: "short", timeStyle: "short" })}</time
+              >
               {#if event.text}<p class="h-text">{event.text}</p>{/if}
             </li>
           {/each}

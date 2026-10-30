@@ -1,6 +1,6 @@
 # Einstellungen und Darstellung
 
-Was in den Einstellungen steht und wie man das Aussehen anpasst: Theme, Schrift, Bewegung, Glas mit Hintergrundbild, UI-Größe und Tastatur.
+Was in den Einstellungen steht und wie man das Aussehen anpasst: Theme, Schrift, Sprache, Bewegung, Glas mit Hintergrundbild, UI-Größe und Tastatur.
 
 ## Was es ist
 
@@ -18,6 +18,9 @@ Seit der Glas-Umstellung liegen alle Flächen als halbdurchsichtiges Glas über 
 - **„Theme“:** Graphite, Paper, Steampunk, Forest, Ocean, fünf Catppuccin-Varianten, Tokyo Night, GitHub Dark und
   GitHub Light. Dasselbe schnell über „Theme“ im Dock.
 - **„Typeface“:** Geist, Inter oder IBM Plex Sans (nicht für Editor und Terminal).
+- **„Language“ / „Sprache“:** „System“ (die erste Sprache von macOS, die die App kann), „Deutsch“ oder „English“;
+  gilt sofort. Namen wie Studio, Canvas, Flow oder Skills bleiben in beiden Sprachen gleich, und der Chat antwortet
+  in der gewählten Sprache. Noch nicht jede Ansicht ist übersetzt — was fehlt, steht vorerst auf Englisch.
 - **„Motion“ → „Movement“:** „Full“, „Calm“ oder „Off“. macOS „Bewegung reduzieren“ stellt auf „Off“.
 - **„Light“:** „Light under the pointer“, „Time-of-day light“, „Start ignition“.
 - **„Sound“:** „Sounds“ (nur, solange Axiomata im Hintergrund ist), mit Hörproben.

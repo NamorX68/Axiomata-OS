@@ -30,6 +30,7 @@
     type Beat,
     type Fuel,
   } from "../core/heartbeat";
+  import { formatTime } from "../core/format";
   import { openKanban } from "../modules/kanbanApp";
   import StatusMark from "../ui/StatusMark.svelte";
 
@@ -102,7 +103,7 @@
     };
   });
 
-  const clock = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const clock = (ms: number): string => formatTime(ms);
 
   function describe(beat: Beat): string {
     const until = beat.end === null ? "now" : clock(beat.end);

@@ -3,10 +3,11 @@
  * it is tested without a backend.
  */
 import type { SessionUsage, Unmeasured } from "../core/backend";
+import { formatNumber } from "../core/format";
 
-/** A token count the way a limit is spoken of: `950`, `340 k`, `1,5 M`. */
+/** A token count the way a limit is spoken of: `950`, `340 k`, `1.5 M` (German `1,5 M`). */
 export function formatTokens(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toLocaleString("de-DE", { maximumFractionDigits: 1 })} M`;
+  if (count >= 1_000_000) return `${formatNumber(count / 1_000_000, { maximumFractionDigits: 1 })} M`;
   if (count >= 1_000) return `${Math.round(count / 1_000)} k`;
   return String(count);
 }

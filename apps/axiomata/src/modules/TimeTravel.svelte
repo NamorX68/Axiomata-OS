@@ -7,6 +7,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
 
+  import { formatDate } from "../core/format";
   import IconButton from "../ui/IconButton.svelte";
 
   interface Props {
@@ -32,7 +33,7 @@
   const label = $derived(
     step >= STEPS
       ? "today"
-      : new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }),
+      : formatDate(at, { day: "numeric", month: "short", year: "numeric" }),
   );
 
   function show(next: number): void {

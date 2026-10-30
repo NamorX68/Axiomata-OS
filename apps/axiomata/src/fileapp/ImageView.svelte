@@ -5,6 +5,7 @@
   and file size underneath. View only — there is no text to edit.
 -->
 <script lang="ts">
+  import { formatBytes } from "../core/format";
   import { invokeBackend } from "../core/backend";
   import { messageOf } from "../core/errors";
 
@@ -42,11 +43,6 @@
     };
   });
 
-  function formatBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  }
 </script>
 
 <div class="image-view">

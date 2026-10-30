@@ -44,7 +44,7 @@
     type CalendarEvent,
     type NewCalendarEvent,
   } from "../core/calendar";
-  import { dayLabel, relativeTime } from "../core/format";
+  import { dayLabel, formatDate, relativeTime } from "../core/format";
   import { monthDiff, monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
   import { resolveSkillName, staleDigestNote, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
@@ -121,7 +121,7 @@
 
   const agendaEnd = $derived(agendaDayList[agendaDayList.length - 1]);
   const agendaCaption = $derived(
-    `${dayLabel(selectedDay)} – ${new Date(`${agendaEnd}T00:00:00`).toLocaleDateString(undefined, {
+    `${dayLabel(selectedDay)} – ${formatDate(`${agendaEnd}T00:00:00`, {
       day: "numeric",
       month: "short",
     })}`,

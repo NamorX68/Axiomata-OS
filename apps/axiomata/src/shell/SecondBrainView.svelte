@@ -22,7 +22,7 @@
   import { fade } from "svelte/transition";
 
   import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
-  import { absoluteTime, formatBytes, relativeTime } from "../core/format";
+  import { absoluteTime, formatBytes, formatDate, relativeTime } from "../core/format";
   import { BRAIN_DISC, BRAIN_LAYOUTS, brainView, spinOf, travelAt, type BrainLayout } from "../core/brainView";
   import { animates, motion } from "../core/motion";
   import { getSetting, setSetting } from "../core/persist";
@@ -467,7 +467,7 @@
   const growthAt = $derived(growth ? growthMoment(growth.elapsed, growth.span) : 0);
   const growthLabel = $derived.by(() => {
     if (!growth || !graph) return "";
-    const day = new Date(growthAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    const day = formatDate(growthAt, { day: "numeric", month: "short", year: "numeric" });
     // Notes without a time are there from the start.
     const count = countBornBy(births, growthAt) + (graph.files.length - births.length);
     return `${day} · ${count} ${count === 1 ? "note" : "notes"}`;

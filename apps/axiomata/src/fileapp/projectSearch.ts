@@ -10,6 +10,7 @@
  */
 
 import type { FileMatches, SearchQuery, SearchSummary } from "./backend";
+import { formatNumber } from "../core/format";
 
 /** The options beside the query field. Globs are typed comma-separated. */
 export interface SearchOptions {
@@ -133,7 +134,7 @@ export function statusText(view: SearchView): string {
   const found =
     n === 0
       ? "No results"
-      : `${n.toLocaleString()} ${n === 1 ? "result" : "results"} in ${files} ${files === 1 ? "file" : "files"}`;
+      : `${formatNumber(n)} ${n === 1 ? "result" : "results"} in ${files} ${files === 1 ? "file" : "files"}`;
   if (view.status === "running") return n === 0 ? "Searching…" : `${found} — searching…`;
   return view.truncated ? `${found} — stopped at 10,000 results; narrow the search` : found;
 }

@@ -21,6 +21,8 @@
     invokeBackend,
     isEffortLevel,
   } from "../core/backend";
+  import { formatDateTime } from "../core/format";
+  import LanguageSetting from "./LanguageSetting.svelte";
   import { emit } from "../core/bus";
   import { registerShellView } from "../core/openViews";
   import { HARNESSES, providerAfterHarnessChange, providersFor, usesClaudeCode } from "../core/harness";
@@ -378,7 +380,7 @@
     const entry = $modelCatalog?.providers[id];
     if (!entry) return "No model list yet.";
     if (entry.error) return `The last fetch failed: ${entry.error}`;
-    const when = entry.fetched_at ? new Date(entry.fetched_at).toLocaleString() : "never";
+    const when = entry.fetched_at ? formatDateTime(entry.fetched_at) : "never";
     return `${entry.models.length} models, fetched ${when}; refreshed at start and once a day.`;
   }
 
@@ -483,6 +485,8 @@
           </div>
           <p class="hint">For the whole interface. Code in the editor and the terminal keep their own fonts.</p>
         </section>
+
+        <LanguageSetting />
 
         <section>
           <h3>Motion</h3>

@@ -41,7 +41,8 @@
   } = $props();
 
   const grid = $derived(monthGrid(month.year, month.month, today));
-  const weekdays = weekdayLabels("short");
+  // Derived: the names follow a language switch (i18n.md, Q14).
+  const weekdays = $derived(weekdayLabels("short"));
 
   const canPrev = $derived(!minMonth || monthDiff(minMonth, month) > 0);
   const canNext = $derived(!maxMonth || monthDiff(month, maxMonth) > 0);

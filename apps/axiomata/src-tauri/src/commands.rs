@@ -1472,8 +1472,11 @@ pub async fn get_workspace_graph(state: State<'_, CoreState>) -> Result<Workspac
 /// Renders the mounted-module manifest into `~/.axiomata/module-context.md`
 /// for the agent. Returns `true` if the file changed.
 #[tauri::command]
-pub fn write_module_manifest(entries: Vec<ManifestEntry>) -> Result<bool, String> {
-    bridge::write_manifest(&entries).map_err(|err| err.to_string())
+pub fn write_module_manifest(
+    entries: Vec<ManifestEntry>,
+    language: Option<bridge::OwnerLanguage>,
+) -> Result<bool, String> {
+    bridge::write_manifest(&entries, language.unwrap_or_default()).map_err(|err| err.to_string())
 }
 
 /// Takes every pending agent → module action request out of the inbox queue

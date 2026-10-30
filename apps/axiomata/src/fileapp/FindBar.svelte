@@ -15,6 +15,7 @@
   * `version` is the surface's redraw counter — the model is a plain class.
 -->
 <script lang="ts">
+  import { formatNumber } from "../core/format";
   import { keyHints } from "../core/keyHints";
   import { chord, platform } from "../core/keys";
   import type { FindModel } from "../editor/search/findModel";
@@ -53,7 +54,7 @@
     if (s.kind === "pending") return { text: "…", error: false, title: "Searching" };
     if (s.kind === "error") return { text: "Invalid", error: true, title: s.message };
     if (s.count === 0) return { text: "No results", error: true, title: "" };
-    const total = `${s.count.toLocaleString("en")}${s.truncated ? "+" : ""}`;
+    const total = `${formatNumber(s.count)}${s.truncated ? "+" : ""}`;
     return { text: s.index === null ? `${total} found` : `${s.index + 1}/${total}`, error: false, title: "" };
   });
 

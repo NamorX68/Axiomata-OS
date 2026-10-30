@@ -12,6 +12,7 @@
 
 import { get } from "svelte/store";
 
+import { languageSetting, lang } from "../i18n/lang.svelte";
 import { invokeBackend } from "./backend";
 import { noteToolCall } from "./chat";
 import { invokeAgentAction, manifest, type ManifestEntry } from "./registry";
@@ -46,7 +47,13 @@ export function startAgentBridge(): () => void {
   if (started) return () => {};
   started = true;
 
-  const unsubscribe = instances.subscribe(() => scheduleManifest());
+  const unsubscribeInstances = instances.subscribe(() => scheduleManifest());
+  // The chat answers in the app's language (i18n.md, Q16): a switch rewrites the manifest's language line.
+  const unsubscribeLanguage = languageSetting.subscribe(() => scheduleManifest());
+  const unsubscribe = () => {
+    unsubscribeInstances();
+    unsubscribeLanguage();
+  };
   const poll = setInterval(() => void pollOnce(), POLL_MS);
   void pollOnce();
 
@@ -65,10 +72,11 @@ function scheduleManifest(): void {
 
 export async function writeManifest(): Promise<void> {
   const entries: ManifestEntry[] = manifest();
-  const json = JSON.stringify(entries);
+  const language = lang();
+  const json = JSON.stringify({ entries, language });
   if (json === lastManifestJson) return;
   try {
-    await invokeBackend<boolean>("write_module_manifest", { entries });
+    await invokeBackend<boolean>("write_module_manifest", { entries, language });
     lastManifestJson = json;
   } catch (err) {
     console.warn("write_module_manifest failed:", err);

@@ -12,6 +12,7 @@
 import { brainView, legacyMotionLevel, readBrainView } from "./brainView";
 import { isMotionLevel, motionSetting } from "./motion";
 import { isUiFont, uiFont } from "./uiFont";
+import { isLanguageSetting, languageSetting } from "../i18n/lang.svelte";
 import { get, writable, type Readable } from "svelte/store";
 
 import { appGroups, loadAppGroups, type AppGroup } from "./appGroups";
@@ -300,6 +301,8 @@ export async function initPersistence(): Promise<void> {
   setSetting("motion", get(motionSetting));
   const savedUiFont = getSetting<unknown>("uiFont");
   if (isUiFont(savedUiFont)) uiFont.set(savedUiFont);
+  const savedLanguage = getSetting<unknown>("language");
+  if (isLanguageSetting(savedLanguage)) languageSetting.set(savedLanguage);
   effects.set(readEffects(getSetting<unknown>("effects")));
   loading = false;
   dashboardRead.set(true);
@@ -334,6 +337,10 @@ export async function initPersistence(): Promise<void> {
   });
   uiFont.subscribe((v) => {
     if (!first) setSetting("uiFont", v);
+  });
+  // `i18n/lang.svelte.ts` follows it; only its persistence is here.
+  languageSetting.subscribe((v) => {
+    if (!first) setSetting("language", v);
   });
   // `shell/Ambient.svelte` reads it; only its persistence is here.
   effects.subscribe((v) => {

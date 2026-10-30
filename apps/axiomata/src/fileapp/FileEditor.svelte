@@ -40,6 +40,7 @@
 </script>
 
 <script lang="ts">
+  import { formatDateTime } from "../core/format";
   import { keyHints } from "../core/keyHints";
   import { get } from "svelte/store";
   import BreakpointEditor from "../ide/BreakpointEditor.svelte";
@@ -1453,7 +1454,7 @@
     <div class="banner" class:danger={banner.kind === "error" || banner.kind === "deleted"} role="status">
       {#if banner.kind === "recovery"}
         <span>
-          Unsaved changes from {new Date(banner.entry.saved_at).toLocaleString()} were kept.
+          Unsaved changes from {formatDateTime(banner.entry.saved_at)} were kept.
           {#if banner.changedSince}The file has changed on disk since.{/if}
         </span>
         <button type="button" onclick={() => void act((s) => s.restoreRecovery())}>Restore</button>
