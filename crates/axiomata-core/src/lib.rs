@@ -11,6 +11,7 @@ pub mod agent_entry;
 pub mod agent_mcp;
 pub mod agent_start;
 pub mod agents;
+pub mod agents_migration;
 pub mod app_state;
 /// The Kanban board core, re-exported so callers reach it as
 /// `axiomata_core::board::…` without taking a direct dependency on the crate.

@@ -78,6 +78,8 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   ide models list|set|limits|default|propose  (models on/off, tier per model and its source, price limits, default
 #                                              engine per tier — agents-model.md AM1; `list --unrated` + `propose` are the
 #                                              `model-tiering` skill's, AM2)
+#   ide migrate-agents [--dry-run]           (the one-time move to the 7 base roles and automatic engines, AM6;
+#                                              runs once at the app's start, backups in ~/.axiomata/agents-backup-<date>)
 #   ide roles list|show|save|delete|project|confirm   (AGENT.md roles; `project`/`confirm`: a project's own roles, by hash)
 #   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>

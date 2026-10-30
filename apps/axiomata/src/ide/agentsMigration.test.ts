@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+
+import type { Role } from "../core/roster";
+import { fieldText, migrationSummary, type MigrationReport } from "./agentsMigration";
+
+const report = (over: Partial<MigrationReport> = {}): MigrationReport => ({
+  dry_run: false,
+  backup: "/h/.axiomata/agents-backup-2026-10-30",
+  created: [],
+  moved: [],
+  kept: [],
+  stripped: [],
+  engines_mapped: {},
+  models_switched_on: [],
+  defaults_seeded: {},
+  sessions_remapped: 0,
+  ...over,
+});
+
+describe("the migration's notice", () => {
+  it("says what moved, what was kept and what is automatic now", () => {
+    const text = migrationSummary(
+      report({
+        moved: ["a-x", "b-y"],
+        kept: [{ name: "c-z", base: "c" }],
+        engines_mapped: { old: "new" },
+        created: ["implementer"],
+      }),
+    );
+    expect(text).toBe(
+      "Roles and engines tidied: 2 copied roles moved, 1 kept as own roles, implementer added, 1 engine now automatic.",
+    );
+    expect(migrationSummary(report())).toContain("already tidy");
+  });
+
+  it("shows a role's field as text", () => {
+    const role = { instructions: "Do it.", permissions: ["A", "B"], limits: { max_steps: 3 }, kind: "test", creates: ["doc"] };
+    expect(fieldText(role as unknown as Role, "permissions")).toBe("A\nB");
+    expect(fieldText(role as unknown as Role, "limits")).toBe('{"max_steps":3}');
+  });
+});

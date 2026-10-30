@@ -25,6 +25,7 @@
     waitingWorktrees,
   } from "../core/maintenance";
   import { toast } from "../core/toast";
+  import { deleteAgentsBackup, listAgentsBackups, type AgentsBackup } from "../ide/agentsMigration";
   import IconButton from "../ui/IconButton.svelte";
 
   let view = $state<StorageView | null>(null);
@@ -34,6 +35,8 @@
   let cleaning = $state(false);
   let saving = $state(false);
   let removing = $state<string | null>(null);
+  /** The agents migration's backup folders (agents-model.md, AM6): kept until the owner deletes them here. */
+  let backups = $state<AgentsBackup[]>([]);
 
   const problem = $derived(draft ? ruleProblem(draft) : null);
   const changed = $derived(view !== null && draft !== null && rulesChanged(view.settings, draft));
@@ -45,6 +48,7 @@
     try {
       const loaded = await invokeBackend<StorageView>("maintenance_report");
       view = loaded;
+      backups = await listAgentsBackups().catch(() => []);
       // Keep what the owner is typing across a reload after a clean-up.
       if (!draft || !changed) draft = { ...loaded.settings };
       loadError = null;
@@ -100,6 +104,20 @@
       await load();
     } catch (err) {
       toast(`Could not delete the worktree: ${String(err)}`, "danger");
+    } finally {
+      removing = null;
+    }
+  }
+
+  async function removeBackup(backup: AgentsBackup) {
+    if (!confirm(`Delete the backup ${backup.path}? The old role files and engines in it are gone for good.`)) return;
+    removing = backup.path;
+    try {
+      await deleteAgentsBackup(backup.path);
+      toast("Backup deleted", "info");
+      await load();
+    } catch (err) {
+      toast(`Could not delete the backup: ${String(err)}`, "danger");
     } finally {
       removing = null;
     }
@@ -259,6 +277,29 @@
               size="sm"
               disabled={removing !== null}
               onclick={() => void removeWorktree(orphan)}
+            />
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if backups.length > 0}
+      <h3 class="sub">Backups of the old roles and engines</h3>
+      <p class="hint">
+        The role copies and engines the move to roles at tiers put aside. Nothing uses them; delete one when you no
+        longer need it.
+      </p>
+      <ul class="orphans">
+        {#each backups as backup (backup.path)}
+          <li class="orphan">
+            <span class="path" title={backup.path}>{shortPath(backup.path, 2)}</span>
+            <span class="amount">{formatBytes(backup.bytes)}</span>
+            <IconButton
+              icon="trash-2"
+              label="Delete backup {backup.path}"
+              size="sm"
+              disabled={removing !== null}
+              onclick={() => void removeBackup(backup)}
             />
           </li>
         {/each}

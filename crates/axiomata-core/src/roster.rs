@@ -95,7 +95,9 @@ fn disk_config() -> Result<Config> {
     Config::load()
 }
 
-/// Gives every agent without an engine one: reuses an engine that describes its profile, else adds one.
+/// Gives every agent without an engine one: reuses an engine that describes its profile — an own one, or an automatic
+/// one of `auto` (`docs/plans/agents-model.md`, AM6: a profile of a switched-on model is that model's engine) — else
+/// adds one.
 ///
 /// Returns the assignments to write (`agent id → engine id`). Touches only `engines`; saving the config and
 /// writing the rows is [`sync_agents`]' job, so this stays testable without the owner's home directory.
@@ -106,10 +108,15 @@ fn disk_config() -> Result<Config> {
 pub fn derive_engines(
     agents: &[Agent],
     engines: &mut BTreeMap<String, Engine>,
+    auto: &[Engine],
 ) -> Vec<(i64, String)> {
     let mut assignments = Vec::new();
     for agent in agents {
-        if let Some(existing) = engines.values().find(|e| describes(e, agent)) {
+        if let Some(existing) = engines
+            .values()
+            .chain(auto.iter())
+            .find(|e| describes(e, agent))
+        {
             assignments.push((agent.id, existing.id.clone()));
             continue;
         }
@@ -172,7 +179,12 @@ pub fn sync_agents(db: &Connection, config: &mut Config) -> Result<usize> {
     let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
     let mut engines = disk.agents.engines.clone();
-    let assignments = derive_engines(&agents, &mut engines);
+    let auto: Vec<Engine> = crate::engines::all(&disk, &crate::model_tiers::ModelSources::load())
+        .into_iter()
+        .filter(|info| info.origin == crate::engines::EngineOrigin::Auto)
+        .map(|info| info.engine)
+        .collect();
+    let assignments = derive_engines(&agents, &mut engines, &auto);
     if engines != disk.agents.engines {
         disk.agents.engines = engines.clone();
         disk.save()?;
@@ -810,6 +822,32 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_of_a_switched_on_model_takes_its_automatic_engine_and_adds_none() {
+        let (conn, project, _dir) = fixture();
+        add(
+            &conn,
+            project,
+            "a",
+            Harness::ClaudeCode,
+            Some("claude-opus-5-5"),
+            "",
+        );
+        let agents = agent_store::unassigned_agents(&conn).unwrap();
+        let auto = Engine {
+            env: String::new(),
+            ..engine_on(
+                "claude-code-claude-opus-5-5",
+                Harness::ClaudeCode,
+                Some("claude-opus-5-5"),
+            )
+        };
+        let mut engines = BTreeMap::new();
+        let assigned = derive_engines(&agents, &mut engines, std::slice::from_ref(&auto));
+        assert_eq!(assigned[0].1, auto.id);
+        assert!(engines.is_empty(), "no own copy of an automatic engine");
+    }
+
+    #[test]
     fn equal_profiles_share_an_engine_and_different_ones_get_their_own() {
         let (conn, project, _dir) = fixture();
         add(
@@ -840,7 +878,7 @@ mod tests {
 
         let agents = agent_store::unassigned_agents(&conn).unwrap();
         let mut engines = BTreeMap::new();
-        let assigned = derive_engines(&agents, &mut engines);
+        let assigned = derive_engines(&agents, &mut engines, &[]);
 
         assert_eq!(engines.len(), 3);
         assert_eq!(assigned[0].1, assigned[1].1, "same profile, same engine");
@@ -861,10 +899,10 @@ mod tests {
         let a = add(&conn, project, "a", Harness::Glut, None, "");
         let b = add(&conn, project, "b", Harness::Glut, None, "glut --x");
         let mut engines = BTreeMap::new();
-        let first = derive_engines(&[a.clone(), b.clone()], &mut engines);
+        let first = derive_engines(&[a.clone(), b.clone()], &mut engines, &[]);
         assert_eq!(first[0].1, "glut");
         assert_eq!(first[1].1, "glut-2");
-        let again = derive_engines(&[a, b], &mut engines);
+        let again = derive_engines(&[a, b], &mut engines, &[]);
         assert_eq!(again, first);
         assert_eq!(engines.len(), 2);
     }
@@ -875,7 +913,7 @@ mod tests {
         let model = "provider/".to_string() + &"very-long-model-name-".repeat(6);
         let agent = add(&conn, project, "a", Harness::Glut, Some(&model), "");
         let mut engines = BTreeMap::new();
-        derive_engines(&[agent], &mut engines);
+        derive_engines(&[agent], &mut engines, &[]);
         let engine = engines.values().next().unwrap();
         engine.validate().unwrap();
         assert!(engine.id.len() <= MAX_IDENT_LEN);
@@ -1379,12 +1417,9 @@ mod tests {
                     "allrounder",
                     "documenter",
                     "grill",
-                    "implementer-heavy",
-                    "implementer-light",
+                    "implementer",
                     "planner",
                     "reviewer",
-                    "reviewer-heavy",
-                    "reviewer-light",
                     "tester"
                 ]
             );

@@ -24,6 +24,7 @@
     type SkippedRole,
   } from "../core/roster";
   import { toast } from "../core/toast";
+  import MigrationNotice from "./MigrationNotice.svelte";
   import RoleChip from "./RoleChip.svelte";
   import { roleIdFor } from "./rosterLook";
   import { bumpRoster } from "./rosterStore";
@@ -123,6 +124,7 @@
       <h3>Roles</h3>
       <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add role…</button>
     </div>
+    <MigrationNotice onChange={() => void reload()} />
     {#if loading}
       <p class="hint">Loading…</p>
     {:else}

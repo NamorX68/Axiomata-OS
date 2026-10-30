@@ -3099,6 +3099,57 @@ pub fn list_agent_choices(
     )
 }
 
+// ---- The agents migration (agents-model.md, AM6) ----
+
+/// What the migration did, whether the owner saw it, and the kept roles still waiting for a decision.
+#[derive(serde::Serialize)]
+pub struct AgentsMigrationView {
+    report: Option<axiomata_core::agents_migration::Report>,
+    notice_seen: bool,
+    pending: Vec<axiomata_core::agents_migration::VariantDiff>,
+}
+
+#[tauri::command]
+pub fn agents_migration_state() -> Result<AgentsMigrationView, String> {
+    let state = axiomata_core::agents_migration::load_state();
+    Ok(AgentsMigrationView {
+        pending: axiomata_core::agents_migration::pending().map_err(|err| err.to_string())?,
+        report: state.report,
+        notice_seen: state.notice_seen,
+    })
+}
+
+/// "Keep as own role": not asked about again.
+#[tauri::command]
+pub fn keep_role_variant(name: String) -> Result<(), String> {
+    axiomata_core::agents_migration::keep_variant(&name).map_err(|err| err.to_string())
+}
+
+/// "Fold into <base>": the role goes into the backup, its sessions play the base.
+#[tauri::command]
+pub fn fold_role_variant(state: State<'_, CoreState>, name: String) -> Result<(), String> {
+    let db = state.db_lock();
+    axiomata_core::agents_migration::fold_variant(&db, &name, chrono::Local::now().date_naive())
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn dismiss_agents_migration_notice() -> Result<(), String> {
+    axiomata_core::agents_migration::dismiss_notice().map_err(|err| err.to_string())
+}
+
+/// The migration's backup folders, for Settings → Storage.
+#[tauri::command]
+pub fn list_agents_backups() -> Vec<axiomata_core::agents_migration::Backup> {
+    axiomata_core::agents_migration::backups()
+}
+
+/// Deletes one of them — the owner's click, after the app asked; only a listed backup folder is accepted.
+#[tauri::command]
+pub fn delete_agents_backup(path: PathBuf) -> Result<(), String> {
+    axiomata_core::agents_migration::delete_backup(&path).map_err(|err| err.to_string())
+}
+
 // ---- Starting agents and favorites (agents-model.md, AM4) ----
 
 /// The roles of a project an agent may be started as: its roles in force, without the master's.

@@ -52,6 +52,7 @@ import type {
 } from "./backend";
 import { mockGraphTags, mockTagCommand } from "./devmockTags";
 import { mockAgentName, mockEngineEntries, mockModelCommand, mockResolveEngine } from "./devmockModels";
+import type { MigrationView } from "../ide/agentsMigration";
 import { hunksFromTexts, parseHunkHeader } from "../editor/diff/hunks";
 import { textLines } from "../editor/diff/model";
 
@@ -655,6 +656,26 @@ let ideAgents: IdeAgent[] = [
     }),
   ),
 ];
+/** The agents migration as it ran (agents-model.md, AM6): two copies moved, the light reviewer kept as its own. */
+let mockMigration: MigrationView = {
+  report: {
+    dry_run: false,
+    backup: "/Users/demo/.axiomata/agents-backup-2026-10-30",
+    created: ["implementer"],
+    moved: ["allrounder-glut", "tester-haiku"],
+    kept: [{ name: "reviewer-haiku", base: "reviewer" }],
+    stripped: ["allrounder", "reviewer"],
+    engines_mapped: { "opencode-openrouter-z-ai-glm-5-3": "glut-openrouter-z-ai-glm-5-3" },
+    models_switched_on: [],
+    defaults_seeded: { light: "claude-code-claude-haiku-5-5", medium: "claude-code-claude-sonnet-5-5" },
+    sessions_remapped: 1,
+  },
+  notice_seen: false,
+  pending: [],
+};
+const mockMigrationDecided = new Set<string>();
+let mockBackups = [{ path: "/Users/demo/.axiomata/agents-backup-2026-10-30", bytes: 48_000 }];
+
 /** The mock sessions that hold work not taken over (`ide_agents_with_work`). */
 const mockWithWork = new Set([1, 4]);
 
@@ -2348,6 +2369,31 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "ide_agent_has_changes":
     case "ide_agent_unsaved_work":
       return mockWithWork.has(Number(args.id)) as T;
+    case "agents_migration_state": {
+      // The kept variant beside its base, read from the mock's roles now (they are made further down the file).
+      const pending = (mockMigration.report?.kept ?? []).flatMap((kept) => {
+        const variant = mockRoles.find((r) => r.name === kept.name);
+        const base = mockRoles.find((r) => r.name === kept.base);
+        if (!variant || !base || mockMigrationDecided.has(kept.name)) return [];
+        return [{ variant, base, differs: ["instructions" as const] }];
+      });
+      return { ...mockMigration, pending } as T;
+    }
+    case "keep_role_variant":
+    case "fold_role_variant": {
+      const name = String(args.name);
+      mockMigrationDecided.add(name);
+      if (cmd === "fold_role_variant") mockRoles = mockRoles.filter((r) => r.name !== name);
+      return undefined as T;
+    }
+    case "dismiss_agents_migration_notice":
+      mockMigration = { ...mockMigration, notice_seen: true };
+      return undefined as T;
+    case "list_agents_backups":
+      return mockBackups as T;
+    case "delete_agents_backup":
+      mockBackups = mockBackups.filter((b) => b.path !== String(args.path));
+      return undefined as T;
     case "ide_agents_with_work":
       return ideAgents
         .filter((a) => a.project_id === Number(args.projectId) && mockWithWork.has(a.id))

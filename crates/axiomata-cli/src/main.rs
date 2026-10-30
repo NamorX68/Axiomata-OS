@@ -311,6 +311,14 @@ enum IdeAction {
         #[command(subcommand)]
         action: ide_models_cmd::ModelAction,
     },
+    /// The one-time move to roles at tiers and automatic engines (agents-model.md, AM6): variants equal to their base
+    /// into a backup folder, own copies of automatic engines folded in, sessions remapped. It runs once at the app's
+    /// start by itself; this runs it again (it is idempotent).
+    MigrateAgents {
+        /// Say what would change, change nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1849,6 +1857,7 @@ fn ide_owner_gate(action: &IdeAction) -> Option<&'static str> {
         },
         IdeAction::Models { action } => (!action.reads_only())
             .then_some("changing the models, their tiers or the default engines"),
+        IdeAction::MigrateAgents { .. } => Some("migrating the roles, engines and sessions"),
     }
 }
 
@@ -1931,7 +1940,70 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
         IdeAction::Engines { action } => engine_cmd(core, action),
         IdeAction::Roles { action } => role_cmd(core, action),
         IdeAction::Models { action } => ide_models_cmd::run(core, action),
+        IdeAction::MigrateAgents { dry_run } => migrate_agents(core, dry_run),
     }
+}
+
+/// `ide migrate-agents`: runs the agents migration and prints what it did (or, with `--dry-run`, would do).
+fn migrate_agents(core: &AxiomataCore, dry_run: bool) -> Result<()> {
+    let mut config = config_snapshot(core);
+    let report = {
+        let db = core.db_lock();
+        axiomata_core::agents_migration::run(
+            &db,
+            &mut config,
+            dry_run,
+            chrono::Local::now().date_naive(),
+        )?
+    };
+    if !dry_run {
+        let mut live = core
+            .config
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        live.agents.engines = config.agents.engines;
+        live.agents.models = config.agents.models;
+    }
+    if report.is_empty() {
+        println!("nothing to migrate");
+        return Ok(());
+    }
+    let verb = if dry_run { "would" } else { "did" };
+    let list = |items: &[String]| {
+        if items.is_empty() {
+            "-".to_owned()
+        } else {
+            items.join(", ")
+        }
+    };
+    println!("the migration {verb}:");
+    println!("  create base roles: {}", list(&report.created));
+    println!(
+        "  move into the backup (equal to their base): {}",
+        list(&report.moved)
+    );
+    let kept: Vec<String> = report
+        .kept
+        .iter()
+        .map(|k| format!("{} (differs from {})", k.name, k.base))
+        .collect();
+    println!("  keep as own roles: {}", list(&kept));
+    println!(
+        "  drop engine/fallback_engines from: {}",
+        list(&report.stripped)
+    );
+    for (old, new) in &report.engines_mapped {
+        println!("  engine {old} -> {new}");
+    }
+    println!("  switch models on: {}", list(&report.models_switched_on));
+    for (tier, engine) in &report.defaults_seeded {
+        println!("  default engine of {tier}: {engine}");
+    }
+    println!("  sessions remapped: {}", report.sessions_remapped);
+    if let Some(backup) = &report.backup {
+        println!("  backup: {}", backup.display());
+    }
+    Ok(())
 }
 
 fn parse_billing(raw: &str) -> Result<axiomata_roster::Billing> {

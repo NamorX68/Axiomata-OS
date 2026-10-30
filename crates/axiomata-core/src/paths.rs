@@ -136,6 +136,12 @@ pub fn model_tiers_path() -> PathBuf {
     axiomata_home().join("model-tiers.json")
 }
 
+/// Path to the record of the agents migration (`~/.axiomata/agents-migration.json`, `docs/plans/agents-model.md` AM6):
+/// its report, whether the owner saw it, the kept roles the owner decided on (`crate::agents_migration`).
+pub fn agents_migration_path() -> PathBuf {
+    axiomata_home().join("agents-migration.json")
+}
+
 /// The advisory lock file beside [`model_tiers_path`]: the app and a skill run's CLI both write the proposals.
 pub fn model_tiers_lock_path() -> PathBuf {
     axiomata_home().join("model-tiers.json.lock")

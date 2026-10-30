@@ -33,6 +33,30 @@ pub fn bootstrap() -> Services {
     // cannot write there) must not rewrite the app's copy — it reads its own embedded pages anyway.
     axiomata_core::handbook::install();
 
+    // The one-time move to roles at tiers and automatic engines (agents-model.md, AM6): here and not in
+    // `AxiomataCore::init`, since every CLI call (a skill run's, an agent session's) starts the core too. Before the
+    // window opens, so the Studio shows the roles and engines as they are after it.
+    {
+        let mut config = core.config_read().clone();
+        let report = {
+            let db = core.db_lock();
+            axiomata_core::agents_migration::run_once(
+                &db,
+                &mut config,
+                chrono::Local::now().date_naive(),
+            )
+        };
+        if let Some(report) = report {
+            tracing::info!(?report, "the agents migration ran");
+            let mut live = core
+                .config
+                .write()
+                .unwrap_or_else(|poison| poison.into_inner());
+            live.agents.engines = config.agents.engines;
+            live.agents.models = config.agents.models;
+        }
+    }
+
     // Off the setup thread so a large vault or a slow disk doesn't stall
     // window creation. A failure surfaces as a "stale" badge the user can act
     // on with "Sync now" — it is not fatal to starting the app. A one-shot

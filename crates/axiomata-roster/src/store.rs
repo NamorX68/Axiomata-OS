@@ -489,6 +489,37 @@ fn working_role(name: &str, description: &str, tier: Tier, kind: &str, instructi
     }
 }
 
+/// The implementer: the card's change, done as the card says, at the tier the card calls for
+/// (`docs/plans/agents-model.md`, Q5 — one role, its strength is the tier's engine, no `-light`/`-heavy` copies).
+pub fn implementer_role() -> Role {
+    working_role(
+        "implementer",
+        "Implements a well-specified card, exactly as it says",
+        Tier::Medium,
+        "implement",
+        "You implement the card. Do what it asks and nothing around it: no refactoring you were not asked for, no new \
+         abstractions, no renames beyond the card. Read the code and its tests first, and the card's history if it \
+         was sent back — it says what was wrong. Follow the project's own conventions (AGENTS.md, CLAUDE.md, the code \
+         around yours) rather than your habits, keep the change as small as the problem allows and write the tests \
+         that would catch it breaking. If the card needs a design decision or a change its criteria do not cover, say \
+         so in your report instead of guessing.",
+    )
+}
+
+/// The seven roles every install has (`docs/plans/agents-model.md`, Q5), in their order: what [`seed_default_roles`]
+/// writes when one is missing. A role's strength is the tier of the engine it runs on, not a copy of the role.
+pub fn base_roles() -> [Role; 7] {
+    [
+        default_role(),
+        implementer_role(),
+        documenter_role(),
+        planner_role(),
+        reviewer_role(),
+        tester_role(),
+        grill_role(),
+    ]
+}
+
 /// The light implementer: small, well-specified changes — a rename, a missing guard, a text, a small component — done
 /// exactly as the card says. Cheap and fast; a card that turns out larger is sent back (and, after two returns, to a
 /// stronger role).
@@ -598,18 +629,7 @@ pub fn reviewer_heavy_role() -> Role {
 /// As [`save_role`].
 pub fn seed_default_roles(dir: &Path) -> Result<bool> {
     let mut wrote = false;
-    for role in [
-        default_role(),
-        reviewer_role(),
-        planner_role(),
-        grill_role(),
-        implementer_light_role(),
-        implementer_heavy_role(),
-        documenter_role(),
-        tester_role(),
-        reviewer_light_role(),
-        reviewer_heavy_role(),
-    ] {
+    for role in base_roles() {
         if fs::symlink_metadata(dir.join(&role.name)).is_ok() {
             continue;
         }
@@ -838,7 +858,17 @@ pub(crate) mod tests {
             "every seeded role is a valid one: {:?}",
             loaded.skipped
         );
-        let role = |name: &str| loaded.roles.iter().find(|r| r.name == name).unwrap();
+        // The seeded seven, and the strengths that are kept as role texts but no longer seeded (agents-model.md, Q5).
+        let mut all = loaded.roles.clone();
+        all.extend([
+            implementer_light_role(),
+            implementer_heavy_role(),
+            reviewer_light_role(),
+            reviewer_heavy_role(),
+        ]);
+        let names: Vec<&str> = loaded.roles.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names.len(), 7, "{names:?}");
+        let role = |name: &str| all.iter().find(|r| r.name == name).unwrap();
         let shape = |name: &str| (role(name).kind.clone(), role(name).tier);
         assert_eq!(
             shape("implementer-light"),
