@@ -10,11 +10,16 @@ import { describe, expect, it } from "vitest";
 const SOURCES = import.meta.glob<string>("../**/*.svelte", { query: "?raw", import: "default" });
 
 /** The converted components, relative to `src/`. */
-const CONVERTED = ["shell/LanguageSetting.svelte"];
+const CONVERTED = [
+  "shell/LanguageSetting.svelte",
+  "shell/AssistantBar.svelte",
+  "shell/SlashPanel.svelte",
+  "shell/EffortSwitch.svelte",
+];
 
 /** Marks and names that may stand as they are: names stay English in both languages (Q13). */
 const NAMES = "Studio|Canvas|Flow|Kanban|Orbit|Skills?|Routines?|Master";
-const ALLOWED = new RegExp(`^(?:[\\s\\d·•…—–\\-+×/:,.()[\\]{}<>|?!%#@&*'"]|${NAMES})*$`);
+const ALLOWED = new RegExp(`^(?:[\\s\\d·•…—–\\-+×/:,.()[\\]{}<>|?!%#@&*'"›‹]|${NAMES})*$`);
 
 /** The markup of a component without its script, its style and its comments. */
 function markup(source: string): string {
@@ -41,8 +46,33 @@ function expressions(html: string): { inner: string; start: number; end: number 
   return found;
 }
 
-/** A string literal of an expression that reads as words: not a key, a class, a path or an option name. */
-const WORDS = /(["'`])((?:(?!\1)[^\\]|\\.)*[A-Za-z]{2,}(?:(?!\1)[^\\]|\\.)*\s(?:(?!\1)[^\\]|\\.)*)\1/g;
+/** The string literals of an expression, read quote by quote (so the code between two strings is never one). */
+function strings(expression: string): string[] {
+  const found: string[] = [];
+  let quote: string | null = null;
+  let text = "";
+  for (let i = 0; i < expression.length; i++) {
+    const c = expression[i] ?? "";
+    if (quote === null) {
+      if (c === '"' || c === "'" || c === "`") {
+        quote = c;
+        text = "";
+      }
+    } else if (c === "\\") {
+      text += expression[i + 1] ?? "";
+      i++;
+    } else if (c === quote) {
+      found.push(text);
+      quote = null;
+    } else {
+      text += c;
+    }
+  }
+  return found;
+}
+
+/** A string that reads as words — two letters and a space — rather than a key, a class, a path or an option. */
+const READS_AS_WORDS = /[A-Za-z]{2,}.*\s|\s.*[A-Za-z]{2,}/;
 
 /**
  * Literal texts the markup shows: text between tags, the attributes a person reads (also around an `{expression}`),
@@ -57,7 +87,7 @@ export function literalTexts(source: string): string[] {
     if (trimmed && !ALLOWED.test(trimmed)) found.push(trimmed);
   };
   const exprs = expressions(html);
-  for (const e of exprs) for (const m of e.inner.matchAll(WORDS)) keep(m[2] ?? "");
+  for (const e of exprs) for (const text of strings(e.inner)) if (READS_AS_WORDS.test(text.trim())) keep(text);
   // The markup with every expression blanked, so `=>` or `>` inside one does not read as a tag's end.
   let plain = "";
   let at = 0;
@@ -87,5 +117,6 @@ describe("the converted components", () => {
     expect(literalTexts('<p>{busy ? "Starting now" : t("start")}</p>')).toEqual(["Starting now"]);
     expect(literalTexts('<button title="Open {name}" onclick={() => go(a > b)}>{t("go")}</button>')).toEqual(["Open"]);
     expect(literalTexts('<p>{formatDate(x, { dateStyle: "short" })}</p>')).toEqual([]);
+    expect(literalTexts('<b>{t("newSession", { keys: hint("⌘N", p) })}</b>')).toEqual([]);
   });
 });

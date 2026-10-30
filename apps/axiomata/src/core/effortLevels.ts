@@ -6,6 +6,7 @@
 
 import { EFFORT_LEVELS, type EffortLevel, type ProviderId } from "./backend";
 import type { ModelCatalog, ModelReasoning } from "./modelCatalog";
+import { tChat } from "../i18n/chat";
 
 /** The catalog's word on `model` of `provider`; `undefined` when the catalog does not know it or its levels. */
 export function reasoningOf(
@@ -35,7 +36,9 @@ export function takesLevel(reasoning: ModelReasoning | undefined, level: EffortL
 
 /** `default (high)` — what "no level" means for this model, as a picker's first entry reads. */
 export function defaultLabel(reasoning: ModelReasoning | undefined): string {
-  return reasoning?.default_effort ? `default (${reasoning.default_effort})` : "default";
+  return reasoning?.default_effort
+    ? tChat("effortDefaultOf", { level: reasoning.default_effort })
+    : tChat("effortDefault");
 }
 
 /** Where the level of the next chat turn comes from. */
@@ -57,15 +60,15 @@ export function effortState(
   reasoning: ModelReasoning | undefined,
 ): EffortState {
   const fallback = reasoning?.default_effort
-    ? `Glut's own setting, else the model's default (${reasoning.default_effort})`
-    : "Glut's own setting, else the provider's default";
+    ? tChat("effortGlutDefault", { level: reasoning.default_effort })
+    : tChat("effortProviderDefault");
   if (turn) {
-    const settings = configured ? `the configured ${configured}` : fallback;
-    const explanation = `${turn} for this conversation — default: ${settings}`;
+    const settings = configured ? tChat("effortConfiguredIs", { level: configured }) : fallback;
+    const explanation = tChat("effortTurn", { level: turn, fallback: settings });
     return { level: turn, source: "conversation", explanation };
   }
   if (configured) {
-    return { level: configured, source: "settings", explanation: `${configured}, the configured chat effort` };
+    return { level: configured, source: "settings", explanation: tChat("effortSettings", { level: configured }) };
   }
   return { level: null, source: "default", explanation: fallback };
 }
@@ -73,5 +76,5 @@ export function effortState(
 /** Said beside a level the model does not name: OpenRouter takes a near one, another provider may refuse it. */
 export function unlistedNote(reasoning: ModelReasoning | undefined, level: EffortLevel | null): string | null {
   if (!level || takesLevel(reasoning, level)) return null;
-  return `the model does not list ${level} — the provider takes a near level or refuses it`;
+  return tChat("effortUnlisted", { level });
 }

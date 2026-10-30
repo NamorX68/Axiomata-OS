@@ -4,7 +4,8 @@ Wie man mit dem Agenten unten in der Leiste spricht, welche Slash-Befehle es gib
 
 ## Was es ist
 
-Unten auf dem Bildschirm liegt die Eingabe „Ask the agent, or /help for commands“. Was du dort schreibst, geht an den
+Unten auf dem Bildschirm liegt die Eingabe „Frag den Agenten, oder /help für Kommandos“ (auf Englisch „Ask the agent,
+or /help for commands“). Was du dort schreibst, geht an den
 Chat-Agenten — auf dem Harness und Provider, die unter Settings → AI providers für den Chat gewählt sind. Er arbeitet
 im Vault, kennt die Aktionen der offenen Kacheln und die Kanban-Aktionen und antwortet aus diesem Handbuch; steht
 etwas nicht darin, sagt er das. Seine Antworten erscheinen im Fenster „Agent“ mit den benutzten Aktionen und den
@@ -22,6 +23,12 @@ Kosten des Zugs.
   - App: `/tile add|remove <typ>` bzw. `/tile <typ> <aktion> [json]`, `/theme <id>`, `/open <pfad>`, `/newfile
     <pfad>`, `/brain [pfad | ? suche]`.
   - Dazu die eigenen Befehle des Harness, unter ihrem Namen oder mit `/glut:` bzw. `/cc:` davor.
+- **Das Panel über der Leiste:** Sobald `/model`, `/skills`, `/resume`, `/help` oder `/effort` ihr Leerzeichen
+  haben, öffnet sich die Liste darüber („Modelle“, „Skills“, „Frühere Gespräche“, „Kommandos und Handbuch“,
+  „Effort“); was du weitertippst, filtert sie (`/model deep`). ↑/↓ wählt, ⏎ übernimmt, Esc oder ein Klick daneben
+  schließt. Ein Skill fragt erst „‹name› starten? ⏎ ja · Esc nein“. Passt bei `/model` kein Eintrag, nimmt
+  „‹id› verwenden“ die getippte ID. `/cost`, `/undo` und die Ausgabe einer Kachel-Aktion erscheinen im selben Panel —
+  kein Kommando schreibt mehr in den Gesprächsverlauf.
 - ↑/↓ ohne offene Liste blättern durch die letzten 50 Eingaben.
 
 ## Häufige Handgriffe
