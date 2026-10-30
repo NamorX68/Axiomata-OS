@@ -46,15 +46,18 @@ pub fn bootstrap() -> Services {
                 chrono::Local::now().date_naive(),
             )
         };
-        if let Some(report) = report {
-            tracing::info!(?report, "the agents migration ran");
+        {
             let mut live = core
                 .config
                 .write()
                 .unwrap_or_else(|poison| poison.into_inner());
-            live.agents.engines = config.agents.engines;
-            live.agents.models = config.agents.models;
+            // A fold of a variant an earlier pass kept may have moved a favorite even when no pass ran.
             live.agents.favorites = config.agents.favorites;
+            if let Some(report) = report {
+                tracing::info!(?report, "the agents migration ran");
+                live.agents.engines = config.agents.engines;
+                live.agents.models = config.agents.models;
+            }
         }
         // The base roles the pass did not make (it makes a missing one at its variants' tier) are seeded now — only
         // after it ran: a pass skipped at this start (another process held it) makes them at the next.

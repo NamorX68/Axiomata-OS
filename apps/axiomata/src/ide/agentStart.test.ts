@@ -47,6 +47,18 @@ describe("the sessions the tab lists (Q17)", () => {
     expect(sections.waiting.map((a) => a.id)).toEqual([2]);
   });
 
+  it("does not count a stale “idle” without a pane as running — a pane closed with the app never says it ended", () => {
+    const sections = sessionSections(
+      [agent(1), agent(2), agent(3)],
+      [],
+      (a) => a.id === 3,
+      () => "idle",
+      new Set([2]),
+    );
+    expect(sections.active.map((a) => a.id)).toEqual([3]);
+    expect(sections.waiting.map((a) => a.id)).toEqual([2]);
+  });
+
   it("does not count a session without a known state as running", () => {
     const sections = sessionSections(
       [agent(1), agent(2)],

@@ -452,6 +452,15 @@ const FILE_STYLE: &str = "Change files with your edit tools, never with a shell 
 const RUN_STYLE: &str = "Run a build or the tests only when your change can affect them: a change to documentation \
      needs neither, reading the diff is its check.";
 
+/// How deep a reviewer looks, by the card's tier — once the texts of the `reviewer-light`/`-heavy` copies, now one rule
+/// for every reviewer (`docs/plans/agents-model.md`: a role has no strengths of its own).
+const REVIEW_DEPTH: &str = "How deep you look follows the card's `tier` in `get_card`. A light card is small: check \
+     that it does what the criteria say and nothing around it, that it builds or reads correctly where that can be seen \
+     at once, and that no unrelated file changed — do not hold a small change to the standard of a redesign. A heavy \
+     card is delicate: besides the criteria, look for what the author may not have thought of — a state that is not \
+     handled, a race, an input that is not checked, a migration that cannot be undone, a refusal that is missing; read \
+     the code the change touches, not just the diff. Return a card for a defect you can name, never for taste.";
+
 /// The first thing a session started for a card is told (A35): who it is and which card, never the card's text — that
 /// comes through `get_card`, so no card text ever sits in a shell line. A restart goes through the same words, which is
 /// why they say what to do with work that is already there.
@@ -479,8 +488,8 @@ pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
              cannot change it and must not try. Read the card with `get_card` — its acceptance criteria are your \
              standard — then look at what was done: `git log {base}..HEAD` and `git diff {base}...HEAD`. When you have \
              decided, call `review_verdict` with `approve` or `return` and a short note that says exactly what is wrong \
-             and how to see it, so the worker can fix it without asking you. {COMMAND_STYLE} {RUN_STYLE} A criterion that asks for a build or a \
-             test the change cannot affect is met by the diff, not by running it.",
+             and how to see it, so the worker can fix it without asking you. {REVIEW_DEPTH} {COMMAND_STYLE} {RUN_STYLE} \
+             A criterion that asks for a build or a test the change cannot affect is met by the diff, not by running it.",
             worker = target.worker,
             base = target.base,
         ),
@@ -1482,6 +1491,11 @@ mod tests {
         );
         let review = start_prompt(&agent, &Launch::from(CardLaunch::review(7, "w", "base")));
         assert!(!review.contains("edit tools"), "{review}");
+        // The depth of a review follows the card's tier, not a copy of the role per strength.
+        assert!(
+            review.contains("A light card") && review.contains("A heavy card"),
+            "{review}"
+        );
     }
 
     #[test]
@@ -1489,12 +1503,9 @@ mod tests {
         for role in [
             axiomata_roster::default_role(),
             axiomata_roster::reviewer_role(),
-            axiomata_roster::implementer_light_role(),
-            axiomata_roster::implementer_heavy_role(),
+            axiomata_roster::implementer_role(),
             axiomata_roster::documenter_role(),
             axiomata_roster::tester_role(),
-            axiomata_roster::reviewer_light_role(),
-            axiomata_roster::reviewer_heavy_role(),
         ] {
             assert_eq!(
                 role.permissions

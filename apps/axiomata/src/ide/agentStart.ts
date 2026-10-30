@@ -83,14 +83,18 @@ export function isFavorite(favorites: readonly Favorite[], choice: Favorite): bo
 
 /** Which sessions the tab lists, and where (Q17). */
 export interface SessionSections {
-  /** Running or waiting: a pane is open, or the harness works, waits or is idle. Further masters head it. */
+  /** Running or waiting: a pane is open, or the harness works or waits for an answer. Further masters head it. */
   active: IdeAgent[];
   /** Ended, with work not taken over: "Waiting for you: take over or discard". */
   waiting: IdeAgent[];
 }
 
-/** A harness state that says the session runs. */
-const RUNNING = new Set(["working", "waiting", "idle", "starting"]);
+/**
+ * A harness state that says the session runs without a pane open here. "idle" and "starting" do not: a pane closed with
+ * the app never reports its end, so the last state stays "idle" for good — the status dot reads it as "closed" too
+ * (`withoutPane`).
+ */
+const RUNNING = new Set(["working", "waiting"]);
 
 /**
  * Splits the non-master sessions (and the further masters, which always head the list) into what the tab shows: an

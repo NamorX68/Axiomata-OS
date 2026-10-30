@@ -1140,7 +1140,10 @@ An agent is **role × tier × engine**, computed, never stored (Q7). Where each 
 - **The Agents tab** lists only running and waiting sessions and the ended ones with work not taken over; the weekly
   maintenance removes ended non-master sessions without work after checking again (`maintenance/sessions.rs`).
 - **The one-time migration** (`agents_migration`, AM6): from 22 roles that carried engines to the seven base roles
-  (`axiomata_roster::base_roles`); equal variants move to a backup, differing ones stay and are shown (Keep / Fold);
+  (`axiomata_roster::base_roles`); every variant `<base>-<suffix>` moves to a backup — one that differed by a line was
+  first kept and shown (Keep / Fold), which the owner found pointless on the live pass (2026-10-30), so a kept one of
+  that first pass is folded at the next start (`fold_leftovers`) and a reviewer's depth by the card's tier is in its
+  start prompt (`agent_entry::REVIEW_DEPTH`), not in role copies;
   own engines that equal an automatic one fold into it; defaults per unset tier are seeded from the old roles'
   engines; defaults, favorites and sessions naming a removed engine follow it. The pass computes its whole plan, stores
   it as in progress in `~/.axiomata/agents-migration.json`, then applies backups → one DB transaction → one file-config

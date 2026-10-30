@@ -93,6 +93,12 @@ export function roleTone(kind: string | null | undefined): RoleTone {
   return "other";
 }
 
+/** A role's two letters on its hexagon in "Start an agent": "allrounder" → "AL", "grill" → "GR". */
+export function roleBadge(name: string): string {
+  const letters = name.replace(/[^a-z0-9]/gi, "");
+  return (letters.slice(0, 2) || "?").toUpperCase();
+}
+
 /** "reviewer-light" → "Reviewer light": an id read as a name. */
 export function roleTitle(name: string): string {
   const text = name.replace(/[-_]+/g, " ").trim();

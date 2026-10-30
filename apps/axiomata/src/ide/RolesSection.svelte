@@ -263,6 +263,10 @@
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(calc(220px * var(--ax-ui-scale)), 34%) minmax(0, 1fr);
+    /* The same centred column as the Models tab, not the whole width of a wide pane. */
+    width: 100%;
+    max-width: calc(980px * var(--ax-ui-scale));
+    margin: 0 auto;
   }
   /* In a narrow pane the list and the form take turns: the form never sits at the end of a long list. */
   .back {

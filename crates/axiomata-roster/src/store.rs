@@ -520,40 +520,6 @@ pub fn base_roles() -> [Role; 7] {
     ]
 }
 
-/// The light implementer: small, well-specified changes — a rename, a missing guard, a text, a small component — done
-/// exactly as the card says. Cheap and fast; a card that turns out larger is sent back (and, after two returns, to a
-/// stronger role).
-pub fn implementer_light_role() -> Role {
-    working_role(
-        "implementer-light",
-        "Small, well-specified changes, exactly as the card says",
-        Tier::Light,
-        "implement",
-        "You make small, well-specified changes. Do exactly what the card asks and nothing around it: no refactoring you were \
-         not asked for, no new abstractions, no renames beyond the card. Follow the project's own conventions \
-         (AGENTS.md, CLAUDE.md, the code around yours) rather than your habits. If the card turns out to need a design \
-         decision, a change across several modules or something its criteria do not cover, stop and say so in your report \
-         instead of guessing: a stronger role takes it from there.",
-    )
-}
-
-/// The heavy implementer: cross-cutting or delicate work — a change that touches several modules, concurrency, data
-/// migrations, security-relevant code. The target of the escalation from the lighter roles.
-pub fn implementer_heavy_role() -> Role {
-    working_role(
-        "implementer-heavy",
-        "Cross-cutting or delicate changes: several modules, concurrency, migrations, security",
-        Tier::Heavy,
-        "implement",
-        "You take the cards that need judgement: a change across several modules, concurrency, a data migration, \
-         security-relevant code, or work an earlier session got wrong. Read the code and its tests first, and the history \
-         of the card if it was sent back — it says what was wrong. Work out the design before you touch a file, keep the \
-         change as small as the problem allows, and say in your report what you decided and why. Write the tests that \
-         would have caught the problem. Follow the project's conventions (AGENTS.md, CLAUDE.md). If acceptance criteria \
-         contradict each other, report that instead of satisfying one of them.",
-    )
-}
-
 /// The documenter: documentation, comments and README text — not code. Light by default: reading the diff is its check.
 pub fn documenter_role() -> Role {
     working_role(
@@ -585,43 +551,8 @@ pub fn tester_role() -> Role {
     )
 }
 
-fn reviewer_with(name: &str, description: &str, tier: Tier, focus: &str) -> Role {
-    let mut role = reviewer_role();
-    role.name = name.into();
-    role.description = description.into();
-    role.tier = tier;
-    role.instructions = format!("{}\n\n{focus}", role.instructions);
-    role
-}
-
-/// The light reviewer: judges small cards against their criteria — what was asked, nothing less, nothing more.
-pub fn reviewer_light_role() -> Role {
-    reviewer_with(
-        "reviewer-light",
-        "Judges small cards against their acceptance criteria",
-        Tier::Light,
-        "This card is small: check that it does what the criteria say and nothing around it, that it builds or reads \
-         correctly where that can be seen at once, and that no unrelated file changed. Do not hold a small change to the \
-         standard of a redesign.",
-    )
-}
-
-/// The heavy reviewer: for cards where being wrong is expensive — design, concurrency, security, migrations.
-pub fn reviewer_heavy_role() -> Role {
-    reviewer_with(
-        "reviewer-heavy",
-        "Judges delicate cards: design, concurrency, security, migrations",
-        Tier::Heavy,
-        "This card is delicate: besides the criteria, look for what the author may not have thought of — a state that is \
-         not handled, a race, an input that is not checked, a migration that cannot be undone, a refusal that is missing. \
-         Read the code the change touches, not just the diff, and run the tests that can show a problem. Return the card \
-         for a defect you can name; do not return it for taste.",
-    )
-}
-
-/// Seeds the roles every install starts with — the allrounder, the reviewers, the planner, the grill, the implementers of
-/// two other strengths, the documenter and the tester — where they are missing — never overwrites, like the
-/// bundled skills.
+/// Seeds the seven base roles ([`base_roles`]) where they are missing — never overwrites, like the bundled skills. A
+/// role has no strengths of its own: how strong an agent is comes from the tier it runs at.
 /// Returns whether it wrote anything.
 ///
 /// # Errors
@@ -849,7 +780,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_seeded_set_has_the_working_roles_in_their_strengths_and_the_reviewers_to_match() {
+    fn the_seeded_set_is_the_seven_base_roles_with_their_default_tiers() {
         let tmp = Tmp::new();
         assert!(seed_default_roles(&tmp.0).unwrap());
         let loaded = load_roles(&tmp.0, Source::User).unwrap();
@@ -858,52 +789,42 @@ pub(crate) mod tests {
             "every seeded role is a valid one: {:?}",
             loaded.skipped
         );
-        // The seeded seven, and the strengths that are kept as role texts but no longer seeded (agents-model.md, Q5).
-        let mut all = loaded.roles.clone();
-        all.extend([
-            implementer_light_role(),
-            implementer_heavy_role(),
-            reviewer_light_role(),
-            reviewer_heavy_role(),
-        ]);
-        let names: Vec<&str> = loaded.roles.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names.len(), 7, "{names:?}");
+        let all = loaded.roles.clone();
+        let mut names: Vec<&str> = all.iter().map(|r| r.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "allrounder",
+                "documenter",
+                "grill",
+                "implementer",
+                "planner",
+                "reviewer",
+                "tester"
+            ]
+        );
         let role = |name: &str| all.iter().find(|r| r.name == name).unwrap();
         let shape = |name: &str| (role(name).kind.clone(), role(name).tier);
-        assert_eq!(
-            shape("implementer-light"),
-            ("implement".to_owned(), Tier::Light)
-        );
         assert_eq!(shape("allrounder"), ("implement".to_owned(), Tier::Medium));
-        assert_eq!(
-            shape("implementer-heavy"),
-            ("implement".to_owned(), Tier::Heavy)
-        );
+        assert_eq!(shape("implementer"), ("implement".to_owned(), Tier::Medium));
         assert_eq!(shape("documenter"), ("doc".to_owned(), Tier::Light));
         assert_eq!(shape("tester"), ("test".to_owned(), Tier::Medium));
-        assert_eq!(shape("reviewer-light"), ("review".to_owned(), Tier::Light));
         assert_eq!(shape("reviewer"), ("review".to_owned(), Tier::Medium));
-        assert_eq!(shape("reviewer-heavy"), ("review".to_owned(), Tier::Heavy));
-        // None names an engine: the first start asks once and saves it into the role.
-        assert!(loaded.roles.iter().all(|r| r.engine.is_none()));
-        // The roles that read only (planner, grill, documenter, reviewers) get git reads and nothing that runs the
-        // project;
-        // the workers may also build and test.
+        // None names an engine: the tier's engine runs it.
+        assert!(all.iter().all(|r| r.engine.is_none()));
+        // The roles that read only (planner, grill, documenter, reviewer) get git reads and nothing that runs the
+        // project; the workers may also build and test.
         let permissions = |name: &str| role(name).permissions.clone();
-        for name in ["planner", "grill"] {
+        for name in ["planner", "grill", "documenter", "reviewer"] {
             assert!(
                 permissions(name)
                     .iter()
                     .all(|rule| rule.starts_with("Bash(git ")),
-                "{name} only reads"
+                "{name} only reads with git"
             );
         }
-        assert!(
-            permissions("documenter")
-                .iter()
-                .all(|rule| rule.starts_with("Bash(git "))
-        );
-        for name in ["implementer-light", "implementer-heavy", "tester"] {
+        for name in ["implementer", "tester"] {
             assert!(
                 permissions(name)
                     .iter()
@@ -911,24 +832,6 @@ pub(crate) mod tests {
                 "{name} runs the tests without asking"
             );
         }
-        // A reviewer runs nothing of the work it judges without asking: it only reads with git.
-        for name in ["reviewer", "reviewer-light", "reviewer-heavy"] {
-            assert!(
-                permissions(name)
-                    .iter()
-                    .all(|rule| rule.starts_with("Bash(git ")),
-                "{name} reads with git only"
-            );
-        }
-        // A reviewer keeps the review method and adds what its strength looks for.
-        assert!(
-            role("reviewer-heavy")
-                .instructions
-                .contains("review_verdict")
-                == role("reviewer").instructions.contains("review_verdict")
-        );
-        assert!(role("reviewer-heavy").instructions.contains("delicate"));
-        assert!(role("reviewer-light").instructions.contains("small"));
     }
 
     #[test]

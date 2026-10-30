@@ -50,7 +50,7 @@ Studio → Leiste „Agents“ → **„Models & roles…“** öffnet ein groß
   instructions (Markdown)“, „Rights (harness rules, one per line)“, unter „Advanced“ die Grenzen („Step limit“, „Token
   limit“, „Cost limit (USD)“) und „Creates cards without asking“; „Save role“.
 - **Umstellungs-Hinweis** im Reiter „Roles“ unter der Kopfzeile (nur nach der Umstellung): eine Zeile, was geschah,
-  „OK“; je Rolle, die anders ist als ihre Grundrolle, „Side by side“, „Keep as own role“ und „Fold into ‹Grundrolle›“.
+  wo die Sicherung liegt, „OK“.
 
 Im Terminal: `axiomata-cli ide models list|set|limits|default`, `ide engines list`, `ide roles list|show`,
 `ide migrate-agents --dry-run`.
@@ -70,8 +70,10 @@ Im Terminal: `axiomata-cli ide models list|set|limits|default`, `ide engines lis
 Früher trug jede Rolle eine Engine, daher Kopien wie `planner-haiku` oder `reviewer-heavy`. Beim ersten Start mit dem
 neuen Modell stellt die App einmalig um:
 
-- Die sieben Grundrollen werden angelegt, falls sie fehlen. Eine Kopie, die dasselbe sagt wie ihre Grundrolle, wandert
-  in die Sicherung; eine mit eigenem Text bleibt als eigene Rolle und erscheint im Umstellungs-Hinweis.
+- Die sieben Grundrollen werden angelegt, falls sie fehlen. **Jede Kopie** (`planner-haiku`, `reviewer-heavy` …)
+  wandert in die Sicherung, auch eine mit ein, zwei eigenen Zeilen: Wie stark ein Agent ist, sagt seine Stufe, nicht
+  eine Kopie der Rolle. Ihre Sitzungen und Favoriten spielen danach die Grundrolle. Was `reviewer-light` und
+  `reviewer-heavy` eigens sagten, sagt jetzt jedem Reviewer seine Startanweisung, nach der Stufe der Karte.
 - Eigene Engines, die nur eine automatische sind, gehen in ihr auf (ihr Modell wird eingeschaltet). Eine eigene Engine
   mit eigenem Befehl, eigener Umgebung, eigener Stufe oder eigener Abrechnung bleibt.
 - Je Stufe ohne deine Wahl wird die Standard-Engine gesetzt, die die alten Rollen dieser Stufe am meisten nutzten.
@@ -89,7 +91,6 @@ neuen Modell stellt die App einmalig um:
   (`.axiomata/agents/`), das sagt die App beim Bestätigen.
 - Chat und Skills wählen ihr Modell weiter unter Settings → „AI providers“ ([Provider](provider.md)), nicht hier.
 - Eine Standard-Engine, die nicht zur Stufe passt, steht als „— not of this tier“ in der Auswahl; besser neu wählen.
-- „Fold into ‹Grundrolle›“ legt die Kopie in die Sicherung, ihre Sitzungen spielen danach die Grundrolle.
 
 ## Siehe auch
 

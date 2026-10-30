@@ -65,6 +65,13 @@ grünes Licht).
   Stufe; Preisgrenzen; „Own engines“) und „Roles“ (Anweisung, Rechte, Grenzen, Standard-Stufe, „Add role…“); „Engines
   & roles“ fällt weg. Der Owner will es **live sehen**.
 - **Q21** Chat und Skills bleiben bei ihrer Modellwahl in den Einstellungen; Skills nach Stufe später.
+- **Q14 neu** (Owner, 2026-10-30, nach dem echten Lauf: 15 Varianten zu Keep/Fold, die sich um ein, zwei Zeilen
+  unterschieden): Es gibt nur die 7 Grundrollen — **jede** Variante geht in die Sicherung, auch eine mit eigenem Text;
+  die beim ersten Lauf behaltenen werden beim nächsten Start eingefaltet. Die Absätze von `reviewer-light`/`-heavy`
+  stehen als Prüftiefe nach der Stufe der Karte in der Startanweisung jedes Reviewers.
+- **Q16 nachgebessert** (2026-10-30): „Start an agent“ zeigt die Rollen als Sechseck-Kacheln statt Chips; der Reiter
+  „Roles“ steht in derselben zentrierten Spalte wie „Models“; eine Sitzung mit veraltetem „idle“ ohne offene Pane gilt
+  nicht als laufend.
 
 ## 3. Bau
 

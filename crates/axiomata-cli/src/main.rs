@@ -311,7 +311,7 @@ enum IdeAction {
         #[command(subcommand)]
         action: ide_models_cmd::ModelAction,
     },
-    /// The one-time move to roles at tiers and automatic engines (agents-model.md, AM6): variants equal to their base
+    /// The one-time move to roles at tiers and automatic engines (agents-model.md, AM6): every variant of a base role
     /// into a backup folder, own copies of automatic engines folded in, sessions remapped. It runs once at the app's
     /// start by itself; this runs it again (it is idempotent).
     MigrateAgents {
@@ -1980,15 +1980,9 @@ fn migrate_agents(core: &AxiomataCore, dry_run: bool) -> Result<()> {
     println!("the migration {verb}:");
     println!("  create base roles: {}", list(&report.created));
     println!(
-        "  move into the backup (equal to their base): {}",
+        "  move into the backup (variants of a base role): {}",
         list(&report.moved)
     );
-    let kept: Vec<String> = report
-        .kept
-        .iter()
-        .map(|k| format!("{} (differs from {})", k.name, k.base))
-        .collect();
-    println!("  keep as own roles: {}", list(&kept));
     println!(
         "  drop engine/fallback_engines from: {}",
         list(&report.stripped)

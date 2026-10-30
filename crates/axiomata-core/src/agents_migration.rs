@@ -4,10 +4,10 @@
 //! `reviewer-heavy`, `allrounder-glut` — and the config held engines that are now automatic. This pass:
 //!
 //! * **roles** (`~/.axiomata/agents/`): makes sure the seven base roles exist (from the bundled text, at the variants'
-//!   most common tier); a variant `<base>-<suffix>` that says the same as its base (instructions, permissions, limits,
-//!   kind, creates) is moved into a backup folder, one that differs stays as an own role and is shown to the owner
-//!   ([`pending`]); the roles that stay lose `engine`/`fallback_engines` — their original files are copied into the
-//!   backup first;
+//!   most common tier); every variant `<base>-<suffix>` is moved into a backup folder — it was a copy of its base for
+//!   another engine, and its strength is now the tier its agent runs at (owner, 2026-10-30, after the first live pass
+//!   kept 13 that differed by a line or two); the roles that stay lose `engine`/`fallback_engines` — their original
+//!   files are copied into the backup first;
 //! * **engines**: an own engine that is just an automatic one (same harness and model, no command, no environment, no
 //!   tier or billing of its own) is removed from the config — its model switched on if it was off — and its id mapped
 //!   to the automatic one's; the removed entries are written to the backup as `engines.toml`;
@@ -60,7 +60,8 @@ pub const START_LOCK_WAIT: Duration = Duration::from_secs(3);
 /// How often a bounded wait for the lock looks again.
 const LOCK_POLL: Duration = Duration::from_millis(50);
 
-/// A variant that differs from its base and stays as an own role.
+/// A variant an earlier pass kept as an own role because its text differed from its base's; [`fold_leftovers`] folds it
+/// at the next start.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeptVariant {
     pub name: String,
@@ -78,7 +79,7 @@ pub struct Report {
     pub created: Vec<String>,
     /// Variants equal to their base, moved into the backup.
     pub moved: Vec<String>,
-    /// Variants that differ from their base and stay as own roles.
+    /// Variants an earlier pass kept as own roles, not folded yet; a pass today keeps none.
     pub kept: Vec<KeptVariant>,
     /// Roles whose `engine`/`fallback_engines` were dropped (their originals are in the backup).
     pub stripped: Vec<String>,
@@ -114,7 +115,7 @@ impl Report {
 }
 
 /// The app's memory of the pass (`~/.axiomata/agents-migration.json`): its report, whether the owner saw the notice,
-/// and the kept variants the owner already decided on.
+/// and the kept variants already folded.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct State {
     pub version: u64,
@@ -122,7 +123,7 @@ pub struct State {
     pub report: Option<Report>,
     #[serde(default)]
     pub notice_seen: bool,
-    /// Kept variants the owner kept or folded: no longer asked about.
+    /// Kept variants already folded (or, before 2026-10-30, kept by the owner's word).
     #[serde(default)]
     pub decided: BTreeSet<String>,
     /// The plan of a pass that started and has not finished: the next run goes on with it.
@@ -147,7 +148,7 @@ impl Default for State {
 /// # Errors
 ///
 /// A state file this build cannot read — of another version, or not of this shape. It is never replaced: the pass and
-/// the owner's keep, fold and dismiss refuse until a build that knows it runs.
+/// the fold of kept variants and the dismiss refuse until a build that knows it runs.
 pub fn read_state() -> Result<State> {
     let path = paths::agents_migration_path();
     let loaded = json_state::load(&path, || {
@@ -188,16 +189,6 @@ fn save_state(state: &State) -> Result<()> {
             reason: err.to_string(),
         })?;
     json_state::save(&paths::agents_migration_path(), &json)
-}
-
-/// Whether variant `variant` says what `base` says: instructions, permissions, limits, kind and what it may create —
-/// its name, description, engines and tier aside.
-fn same_job(variant: &Role, base: &Role) -> bool {
-    variant.instructions.trim() == base.instructions.trim()
-        && variant.permissions == base.permissions
-        && variant.limits == base.limits
-        && variant.kind == base.kind
-        && variant.creates == base.creates
 }
 
 /// The base a role name is a variant of (`planner-haiku` → `planner`), if it is one.
@@ -371,30 +362,23 @@ fn plan(
             .iter()
             .filter(|r| base_of(&r.name) == Some(bundled.name.as_str()))
             .collect();
-        let base = match by_name.get(bundled.name.as_str()) {
-            Some(own) => (*own).clone(),
+        if !by_name.contains_key(bundled.name.as_str()) {
             // Something is there that is no readable role (a link, a broken file): it is said once, never replaced.
-            None if fs::symlink_metadata(dir.join(&bundled.name)).is_ok() => continue,
-            None => {
-                let mut made = bundled.clone();
-                if let Some(tier) = most_common(variants.iter().map(|v| v.tier)) {
-                    made.tier = tier;
-                }
-                plan.report.created.push(made.name.clone());
-                plan.create.push(made.clone());
-                made
+            if fs::symlink_metadata(dir.join(&bundled.name)).is_ok() {
+                continue;
             }
-        };
-        for variant in variants {
-            if same_job(variant, &base) {
-                plan.report.moved.push(variant.name.clone());
-            } else {
-                plan.report.kept.push(KeptVariant {
-                    name: variant.name.clone(),
-                    base: base.name.clone(),
-                });
+            let mut made = bundled.clone();
+            if let Some(tier) = most_common(variants.iter().map(|v| v.tier)) {
+                made.tier = tier;
             }
+            plan.report.created.push(made.name.clone());
+            plan.create.push(made);
         }
+        // A variant was a copy of its base for another engine; its strength is now the tier its agent runs at. What its
+        // text said beyond the base's stays in the backup.
+        plan.report
+            .moved
+            .extend(variants.iter().map(|variant| variant.name.clone()));
     }
     let moved: BTreeSet<&str> = plan.report.moved.iter().map(String::as_str).collect();
     for role in roles {
@@ -823,7 +807,7 @@ fn apply(
 static MIGRATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The migration's lock across processes: an advisory lock on `agents-migration.lock`, held for a whole pass (and for
-/// the owner's keep and fold), taken while this process holds [`MIGRATION_LOCK`].
+/// the fold of a kept variant), taken while this process holds [`MIGRATION_LOCK`].
 struct MigrationLock {
     _thread: std::sync::MutexGuard<'static, ()>,
     file: fs::File,
@@ -1039,6 +1023,10 @@ fn run_once_within(
         .ok()
         .flatten();
     if done.is_some() && load_state().in_progress.is_none() {
+        let folded = fold_leftovers(db, config, today);
+        if !folded.is_empty() {
+            tracing::info!(?folded, "folded the role variants an earlier pass kept");
+        }
         return None;
     }
     match run_with(db, config, false, today, None, Some(wait)) {
@@ -1064,59 +1052,6 @@ pub fn done(db: &Connection) -> bool {
     .is_some()
 }
 
-/// A kept variant beside its base, for the owner's side-by-side look.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct VariantDiff {
-    pub variant: Role,
-    pub base: Role,
-    /// The fields that differ: `instructions`, `permissions`, `limits`, `kind`, `creates`.
-    pub differs: Vec<&'static str>,
-}
-
-/// The kept variants still in the folder that the owner has not decided on.
-///
-/// # Errors
-///
-/// A failing read of the roles.
-pub fn pending() -> Result<Vec<VariantDiff>> {
-    let state = load_state();
-    let Some(report) = &state.report else {
-        return Ok(Vec::new());
-    };
-    let dir = paths::agent_roles_dir();
-    let roles = axiomata_roster::load_roles(&dir, Source::User)?.roles;
-    let find = |name: &str| roles.iter().find(|role| role.name == name).cloned();
-    Ok(report
-        .kept
-        .iter()
-        .filter(|kept| !state.decided.contains(&kept.name))
-        .filter_map(|kept| {
-            let (variant, base) = (find(&kept.name)?, find(&kept.base)?);
-            let mut differs = Vec::new();
-            if variant.instructions.trim() != base.instructions.trim() {
-                differs.push("instructions");
-            }
-            if variant.permissions != base.permissions {
-                differs.push("permissions");
-            }
-            if variant.limits != base.limits {
-                differs.push("limits");
-            }
-            if variant.kind != base.kind {
-                differs.push("kind");
-            }
-            if variant.creates != base.creates {
-                differs.push("creates");
-            }
-            Some(VariantDiff {
-                variant,
-                base,
-                differs,
-            })
-        })
-        .collect())
-}
-
 /// The kept variant `name` of the last pass and its base, if `name` is one.
 fn kept_base(state: &State, name: &str) -> Result<String> {
     axiomata_roster::check_slug("name", name)?;
@@ -1128,33 +1063,49 @@ fn kept_base(state: &State, name: &str) -> Result<String> {
         .ok_or_else(|| refusal("role", format!("“{name}” is no role the migration kept")))
 }
 
-/// The owner's "Keep as own role": not asked about again.
-///
-/// # Errors
-///
-/// A refusal for a name that is no kept variant of the pass; a failing write of the state.
-pub fn keep_variant(name: &str) -> Result<()> {
-    let _lock = MigrationLock::take(None)?;
-    let mut state = read_state()?;
-    kept_base(&state, name)?;
-    state.decided.insert(name.to_owned());
-    save_state(&state)
+/// Folds the variants an earlier pass kept as own roles — one that differed from its base by a line was shown to the
+/// owner then; now every variant goes into its base. Runs at the app's start, waiting for the lock no longer than
+/// [`START_LOCK_WAIT`] each; returns the names it folded. One whose base is gone stays (its sessions would play no
+/// role); at the first failure the rest wait for the next start.
+pub fn fold_leftovers(db: &Connection, config: &mut Config, today: NaiveDate) -> Vec<String> {
+    let state = load_state();
+    let Some(report) = &state.report else {
+        return Vec::new();
+    };
+    let dir = paths::agent_roles_dir();
+    let mut folded = Vec::new();
+    for kept in &report.kept {
+        if state.decided.contains(&kept.name)
+            || fs::symlink_metadata(dir.join(&kept.name)).is_err()
+            || !dir.join(&kept.base).join(ROLE_FILE).is_file()
+        {
+            continue;
+        }
+        if let Err(err) = fold_variant(db, config, &kept.name, today, Some(START_LOCK_WAIT)) {
+            tracing::warn!(%err, role = %kept.name, "a kept role variant was not folded at this start");
+            break;
+        }
+        folded.push(kept.name.clone());
+    }
+    folded
 }
 
-/// The owner's "Fold into <base>": its sessions and the favorites naming it play the base, then the variant's folder
-/// goes into the backup, then it is recorded — each step safe to run again, so a fold cut off is finished by the next
-/// click. `config` (the live one) takes the file config's favorites.
+/// Folds the kept variant `name` into its base: its sessions and the favorites naming it play the base, then the
+/// variant's folder goes into the backup, then it is recorded — each step safe to run again, so a fold cut off is
+/// finished at the next start. `config` (the live one) takes the file config's favorites; `wait` bounds the wait for
+/// the lock (`None`: as long as it takes).
 ///
 /// # Errors
 ///
 /// A refusal for a name that is no kept variant of the pass; a failing move or write.
-pub fn fold_variant(
+fn fold_variant(
     db: &Connection,
     config: &mut Config,
     name: &str,
     today: NaiveDate,
+    wait: Option<Duration>,
 ) -> Result<()> {
-    let _lock = MigrationLock::take(None)?;
+    let _lock = MigrationLock::take(wait)?;
     let mut state = read_state()?;
     let base = kept_base(&state, name)?;
     let home = paths::axiomata_home();
@@ -1194,13 +1145,16 @@ pub fn fold_variant(
     }
     move_role(&paths::agent_roles_dir(), &backup, name)?;
     state.decided.insert(name.to_owned());
-    if let Some(report) = &mut state.report
-        && report
+    if let Some(report) = &mut state.report {
+        report.kept.retain(|kept| kept.name != name);
+        report.moved.push(name.to_owned());
+        if report
             .backup
             .as_ref()
             .is_none_or(|path| !is_backup_place(&home, path))
-    {
-        report.backup = Some(backup);
+        {
+            report.backup = Some(backup);
+        }
     }
     save_state(&state)
 }

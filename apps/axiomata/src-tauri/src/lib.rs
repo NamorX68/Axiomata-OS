@@ -360,8 +360,6 @@ pub fn run() {
             commands::start_agent_choice,
             commands::ide_agents_with_work,
             commands::agents_migration_state,
-            commands::keep_role_variant,
-            commands::fold_role_variant,
             commands::dismiss_agents_migration_notice,
             commands::list_agents_backups,
             commands::delete_agents_backup,

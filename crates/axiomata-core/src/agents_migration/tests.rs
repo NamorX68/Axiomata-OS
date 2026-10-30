@@ -521,21 +521,24 @@ fn the_owners_layout_folds_into_seven_roles_and_automatic_engines() {
     );
     // The missing base is made from the bundled text.
     assert_eq!(report.created, ["implementer"]);
-    // Variants equal to their base go into the backup; the others stay as own roles.
-    assert_eq!(
-        report.moved,
-        ["allrounder-glut", "documenter-haiku", "tester-haiku"]
-    );
-    let kept: Vec<&str> = report.kept.iter().map(|k| k.name.as_str()).collect();
+    // Every variant goes into the backup, also one whose text differs from its base's: its strength is a tier now.
+    assert_eq!(report.moved.len(), 16, "{:?}", report.moved);
     for name in [
+        "allrounder-glut",
         "allrounder-heavy",
         "grill-sonnet",
         "implementer-light",
         "planner-haiku",
         "reviewer-heavy",
+        "tester-haiku",
     ] {
-        assert!(kept.contains(&name), "{name} differs and stays: {kept:?}");
+        assert!(
+            report.moved.iter().any(|m| m == name),
+            "{name} goes: {:?}",
+            report.moved
+        );
     }
+    assert!(report.kept.is_empty(), "{:?}", report.kept);
     let backup = report.backup.clone().unwrap();
     assert_eq!(backup, h.dir.join("agents-backup-2026-10-30"));
     assert!(
@@ -558,7 +561,7 @@ fn the_owners_layout_folds_into_seven_roles_and_automatic_engines() {
         original.contains("claude-code-claude-opus-5-5"),
         "the backup keeps the original"
     );
-    assert_eq!(roles.len(), 22 - 3 + 1);
+    assert_eq!(roles.len(), 7, "the seven base roles");
 
     // Engines: an own copy of an automatic one goes and maps to it; one with a model no catalog lists stays.
     let mapped = &report.engines_mapped;
@@ -606,7 +609,7 @@ fn the_owners_layout_folds_into_seven_roles_and_automatic_engines() {
         Some("claude-code-claude-opus-5-5")
     );
 
-    // Sessions: a moved variant's plays its base, on the automatic engine; a kept one's role stays.
+    // Sessions: a moved variant's plays its base, on the automatic engine.
     let get = |id| agent_store::get_agent(&h.db, id).unwrap().unwrap();
     assert_eq!(get(tester).agent_role, "tester");
     assert_eq!(
@@ -614,7 +617,7 @@ fn the_owners_layout_folds_into_seven_roles_and_automatic_engines() {
         Some("glut-openrouter-z-ai-glm-5-3-flash")
     );
     assert_eq!(get(tester).name, "old tester", "names stay");
-    assert_eq!(get(griller).agent_role, "grill-sonnet");
+    assert_eq!(get(griller).agent_role, "grill");
     // A master keeps its role, but a removed engine it names is followed too.
     assert_eq!(get(master).agent_role, "master");
     assert_eq!(
@@ -630,7 +633,7 @@ fn the_owners_layout_folds_into_seven_roles_and_automatic_engines() {
 }
 
 #[test]
-fn it_runs_once_and_a_kept_variant_is_kept_or_folded_on_the_owners_word() {
+fn it_runs_once_and_a_variant_an_earlier_pass_kept_is_folded_at_the_next_start() {
     let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
     let mut h = home();
     let project = crate::ide::store::create_project(
@@ -642,13 +645,6 @@ fn it_runs_once_and_a_kept_variant_is_kept_or_folded_on_the_owners_word() {
     )
     .unwrap()
     .id;
-    let planner = add_session(
-        &h.db,
-        project,
-        "old planner",
-        "planner-haiku",
-        "claude-code-claude-haiku-5-5",
-    );
     assert!(run_once(&h.db, &mut h.config, today()).is_some());
     assert!(
         run_once(&h.db, &mut h.config, today()).is_none(),
@@ -657,46 +653,58 @@ fn it_runs_once_and_a_kept_variant_is_kept_or_folded_on_the_owners_word() {
     let state = load_state();
     assert!(!state.notice_seen, "the owner is told what happened");
 
-    let waiting = pending().unwrap();
-    let haiku = waiting
-        .iter()
-        .find(|d| d.variant.name == "planner-haiku")
-        .unwrap();
-    assert_eq!(haiku.base.name, "planner");
-    assert_eq!(haiku.differs, ["instructions"]);
+    kept_by_an_earlier_pass("reviewer-strict", "reviewer");
+    kept_by_an_earlier_pass("reviewer-mine", "reviewer");
+    let mut state = load_state();
+    state.decided.insert("reviewer-mine".into());
+    save_state(&state).unwrap();
+    let session = add_session(
+        &h.db,
+        project,
+        "old reviewer",
+        "reviewer-strict",
+        "claude-code-claude-haiku-5-5",
+    );
 
-    keep_variant("planner-mimo").unwrap();
-    fold_variant(&h.db, &mut h.config, "planner-haiku", today()).unwrap();
-    let names: Vec<String> = pending()
-        .unwrap()
-        .into_iter()
-        .map(|d| d.variant.name)
-        .collect();
     assert!(
-        !names.contains(&"planner-mimo".to_owned()) && !names.contains(&"planner-haiku".to_owned())
+        run_once(&h.db, &mut h.config, today()).is_none(),
+        "no pass runs again"
     );
     assert!(
-        paths::agent_roles_dir().join("planner-mimo").exists(),
-        "kept stays"
-    );
-    assert!(
-        !paths::agent_roles_dir().join("planner-haiku").exists(),
-        "folded goes to the backup"
+        !paths::agent_roles_dir().join("reviewer-strict").exists(),
+        "folded at the start"
     );
     assert!(
         h.dir
-            .join("agents-backup-2026-10-30/planner-haiku")
-            .exists()
+            .join("agents-backup-2026-10-30/reviewer-strict")
+            .exists(),
+        "into the pass's backup"
     );
     assert_eq!(
-        agent_store::get_agent(&h.db, planner)
+        agent_store::get_agent(&h.db, session)
             .unwrap()
             .unwrap()
             .agent_role,
-        "planner"
+        "reviewer"
     );
     assert!(
-        fold_variant(&h.db, &mut h.config, "tester", today()).is_err(),
+        paths::agent_roles_dir().join("reviewer-mine").exists(),
+        "one the owner kept stays"
+    );
+    // A variant whose base is gone stays: its sessions would play no role.
+    kept_by_an_earlier_pass("orphan-x", "orphan");
+    assert!(run_once(&h.db, &mut h.config, today()).is_none());
+    assert!(paths::agent_roles_dir().join("orphan-x").exists());
+    let report = load_state().report.unwrap();
+    assert!(
+        report
+            .kept
+            .iter()
+            .all(|kept| kept.name != "reviewer-strict")
+    );
+    assert!(report.moved.iter().any(|name| name == "reviewer-strict"));
+    assert!(
+        fold_variant(&h.db, &mut h.config, "tester", today(), None).is_err(),
         "only a kept variant folds"
     );
 
@@ -947,14 +955,16 @@ fn a_base_whose_place_holds_a_link_is_not_made_and_the_pass_does_not_fail() {
 }
 
 #[test]
-fn only_a_kept_variant_is_kept_and_only_a_backup_place_is_believed() {
+fn only_a_kept_variant_folds_and_only_a_backup_place_is_believed() {
     let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
     let mut h = home();
     run(&h.db, &mut h.config, false, today()).unwrap();
-    assert!(keep_variant("planner-haiku").is_ok());
-    assert!(keep_variant("tester").is_err(), "no kept variant");
-    assert!(keep_variant("../etc").is_err());
-    assert!(keep_variant(&"x".repeat(200)).is_err());
+    kept_by_an_earlier_pass("planner-mine", "planner");
+    let state = load_state();
+    assert!(kept_base(&state, "planner-mine").is_ok());
+    assert!(kept_base(&state, "tester").is_err(), "no kept variant");
+    assert!(kept_base(&state, "../etc").is_err());
+    assert!(kept_base(&state, &"x".repeat(200)).is_err());
     let home = paths::axiomata_home();
     assert!(is_backup_place(
         &home,
@@ -963,6 +973,23 @@ fn only_a_kept_variant_is_kept_and_only_a_backup_place_is_believed() {
     assert!(!is_backup_place(&home, &home.join("agents")));
     assert!(!is_backup_place(&home, Path::new("/tmp/agents-backup-x")));
     assert!(!is_backup_place(&home, &home.join("agents-backup-x/inner")));
+}
+
+/// A role variant `name` of `base` in the folder, recorded as kept the way a pass before 2026-10-30 kept one.
+fn kept_by_an_earlier_pass(name: &str, base: &str) {
+    let mut variant = role(name, "review", Tier::Heavy, "x", &[], "a line of its own");
+    variant.engine = None;
+    axiomata_roster::save_role(&paths::agent_roles_dir(), &variant).unwrap();
+    let mut state = load_state();
+    state
+        .report
+        .get_or_insert_with(Report::default)
+        .kept
+        .push(KeptVariant {
+            name: name.into(),
+            base: base.into(),
+        });
+    save_state(&state).unwrap();
 }
 
 /// The engine a role file names, read back from the disk.
@@ -1092,7 +1119,8 @@ fn a_state_file_of_another_version_stops_the_pass_and_is_kept() {
     assert!(refused.contains("version 99"), "{refused}");
     assert!(run_once(&h.db, &mut h.config, today()).is_none());
     assert!(!done(&h.db));
-    assert!(dismiss_notice().is_err() && keep_variant("planner-haiku").is_err());
+    assert!(dismiss_notice().is_err());
+    assert!(fold_leftovers(&h.db, &mut h.config, today()).is_empty());
     assert_eq!(fs::read_to_string(&path).unwrap(), future, "kept as it is");
     assert_eq!(
         snapshot(&paths::agent_roles_dir()),
@@ -1175,7 +1203,7 @@ fn the_start_waits_only_a_little_for_a_pass_elsewhere_and_skips_it() {
 }
 
 #[test]
-fn a_pass_with_only_a_new_kept_variant_records_it_and_shows_the_notice() {
+fn a_variant_made_after_the_pass_goes_into_the_backup_at_the_next_pass() {
     let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
     let mut h = home();
     run(&h.db, &mut h.config, false, today()).unwrap();
@@ -1184,30 +1212,11 @@ fn a_pass_with_only_a_new_kept_variant_records_it_and_shows_the_notice() {
     own.engine = None;
     axiomata_roster::save_role(&paths::agent_roles_dir(), &own).unwrap();
     let report = run(&h.db, &mut h.config, false, today()).unwrap();
-    assert!(report.is_empty());
-    let state = load_state();
-    assert!(!state.notice_seen, "shown");
-    let stored = state.report.unwrap();
-    assert!(
-        stored
-            .kept
-            .iter()
-            .any(|kept| kept.name == "tester-special" && kept.base == "tester")
-    );
-    assert!(!stored.moved.is_empty(), "the first pass's record stays");
-    assert!(
-        pending()
-            .unwrap()
-            .iter()
-            .any(|diff| diff.variant.name == "tester-special")
-    );
-    let file = fs::read(paths::agents_migration_path()).unwrap();
-    run(&h.db, &mut h.config, false, today()).unwrap();
-    assert_eq!(
-        fs::read(paths::agents_migration_path()).unwrap(),
-        file,
-        "nothing new: untouched"
-    );
+    assert_eq!(report.moved, ["tester-special"]);
+    assert!(report.kept.is_empty());
+    assert!(!paths::agent_roles_dir().join("tester-special").exists());
+    let again = run(&h.db, &mut h.config, false, today()).unwrap();
+    assert!(again.is_empty(), "{again:?}");
 }
 
 #[test]
@@ -1227,7 +1236,8 @@ fn a_fold_moves_the_favorites_of_the_variant_to_its_base() {
     ];
     disk.save().unwrap();
     run(&h.db, &mut h.config, false, today()).unwrap();
-    fold_variant(&h.db, &mut h.config, "planner-haiku", today()).unwrap();
+    kept_by_an_earlier_pass("planner-haiku", "planner");
+    fold_variant(&h.db, &mut h.config, "planner-haiku", today(), None).unwrap();
     let expected = vec![favorite("planner"), favorite("tester")];
     assert_eq!(
         Config::load().unwrap().agents.favorites,

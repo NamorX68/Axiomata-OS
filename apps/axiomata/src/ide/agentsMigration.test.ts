@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Role } from "../core/roster";
-import { fieldText, migrationSummary, type MigrationReport } from "./agentsMigration";
+import { migrationSummary, type MigrationReport } from "./agentsMigration";
 
 const report = (over: Partial<MigrationReport> = {}): MigrationReport => ({
   dry_run: false,
@@ -29,14 +28,8 @@ describe("the migration's notice", () => {
       }),
     );
     expect(text).toBe(
-      "Roles and engines tidied: 2 copied roles moved, 1 kept as own roles, implementer added, 1 engine now automatic.",
+      "Roles and engines tidied: 2 copied roles moved, implementer added, 1 engine now automatic.",
     );
     expect(migrationSummary(report())).toContain("already tidy");
-  });
-
-  it("shows a role's field as text", () => {
-    const role = { instructions: "Do it.", permissions: ["A", "B"], limits: { max_steps: 3 }, kind: "test", creates: ["doc"] };
-    expect(fieldText(role as unknown as Role, "permissions")).toBe("A\nB");
-    expect(fieldText(role as unknown as Role, "limits")).toBe('{"max_steps":3}');
   });
 });

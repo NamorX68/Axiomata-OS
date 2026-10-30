@@ -9,6 +9,7 @@ import {
   harnessLabel,
   modelShort,
   roleIdFor,
+  roleBadge,
   roleTitle,
   roleTone,
   slugify,
@@ -119,6 +120,9 @@ describe("new agents for a role", () => {
   it("reads an id as a name", () => {
     expect(roleTitle("reviewer-light")).toBe("Reviewer light");
     expect(roleTitle("planner")).toBe("Planner");
+    expect(roleBadge("allrounder")).toBe("AL");
+    expect(roleBadge("grill")).toBe("GR");
+    expect(roleBadge("-")).toBe("?");
   });
 
 });

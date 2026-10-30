@@ -13,9 +13,9 @@
   import { messageOf } from "../core/errors";
   import { TIERS, type Role, type Tier } from "../core/roster";
   import { toast } from "../core/toast";
+  import HexAvatar from "../ui/HexAvatar.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
-  import RoleChip from "./RoleChip.svelte";
   import {
     engineChoiceLabel,
     enginesOf,
@@ -27,6 +27,7 @@
     type Favorite,
     type TierEngines,
   } from "./agentStart";
+  import { roleBadge, roleTitle, roleTone } from "./rosterLook";
   import { rosterVersion } from "./rosterStore";
 
   interface Props {
@@ -121,18 +122,23 @@
       <button
         type="button"
         role="radio"
-        class="role"
+        class="role {roleTone(r.kind)}"
         class:picked={roleName === r.name}
         aria-checked={roleName === r.name}
         title={r.description || r.name}
         onclick={() => pickRole(r)}
       >
-        <RoleChip label={r.name} kind={r.kind} />
+        <HexAvatar text={roleBadge(r.name)} ring="var(--tone)" />
+        <span class="role-text">
+          <span class="role-name">{roleTitle(r.name)}</span>
+          <span class="role-tier">{r.tier}</span>
+        </span>
       </button>
     {/each}
   </div>
 
   {#if role}
+    {#if role.description}<p class="hint">{role.description}</p>{/if}
     <div class="segments" role="radiogroup" aria-label="Tier">
       {#each TIERS as t (t.id)}
         <button
@@ -212,23 +218,77 @@
     margin-bottom: var(--ax-space-3);
   }
 
+  /* The roles as small tiles, hexagon on top like the masters' (Q16): as many to a row as the column takes. */
   .roles {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ax-space-1);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(calc(96px * var(--ax-ui-scale)), 1fr));
+    gap: var(--ax-space-2);
   }
 
   .role {
-    padding: calc(2px * var(--ax-ui-scale));
-    border: 1px solid transparent;
-    border-radius: var(--ax-radius-pill);
-    background: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--ax-space-1);
+    min-width: 0;
+    padding: var(--ax-space-2) var(--ax-space-1);
+    border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--ax-border));
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-surface-2);
+    color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    text-align: center;
     cursor: pointer;
   }
 
+  .role:hover {
+    border-color: color-mix(in srgb, var(--tone) 60%, var(--ax-border));
+    background: var(--ax-surface-3);
+  }
+
+  /* Selected ≠ alive (accent rule): the picked role is a selection, not orange. */
   .role.picked {
     border-color: var(--ax-border-strong);
     background: var(--ax-selected-bg);
+  }
+
+  .role-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .role-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
+  }
+
+  .role-tier {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  /* The tone of the role's kind of work, as `RoleChip` tints it. */
+  .plan {
+    --tone: var(--ax-accent);
+  }
+
+  .review {
+    --tone: var(--ax-success);
+  }
+
+  .implement {
+    --tone: var(--ax-harness-opencode);
+  }
+
+  .other {
+    --tone: var(--ax-text-muted);
   }
 
   .segments {
