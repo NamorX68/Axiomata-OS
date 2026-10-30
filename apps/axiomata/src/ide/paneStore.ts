@@ -33,6 +33,16 @@ export const SLOT_ATTR = "data-ide-slot";
 /** Elements inside a pane that keep their scroll position across a move (`fileapp/keepScroll.ts`). */
 export { KEEP_SCROLL_ATTR };
 
+/**
+ * The panes in the order the store renders them: by id, never by layout. The store's keyed `{#each}` moves a node when
+ * its item moves in the list, and a DOM move resets every scroll position inside the pane with no scroll event — the
+ * editor then drew the rows of its old position over a blank band. Listed in layout order (the shown mode's tabs, then
+ * the parked ones), every mode switch and tab reorder moved panes; by id, a pane is only ever added or removed.
+ */
+export function storeOrder<T extends { id: string }>(tabs: readonly T[]): T[] {
+  return [...tabs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 const keptScroll = new WeakMap<Element, { top: number; left: number }>();
 
 /** Moves `pane` under `parent`, carrying the scroll positions it asked to keep. */

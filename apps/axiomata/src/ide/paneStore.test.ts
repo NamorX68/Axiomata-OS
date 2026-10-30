@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { KEEP_SCROLL } from "../fileapp/keepScroll";
-import { KEEP_SCROLL_ATTR, PANE_ATTR, SLOT_ATTR, focusedIn, parkPanes, placePanes, restoreFocus } from "./paneStore";
+import {
+  KEEP_SCROLL_ATTR,
+  PANE_ATTR,
+  SLOT_ATTR,
+  focusedIn,
+  parkPanes,
+  placePanes,
+  restoreFocus,
+  storeOrder,
+} from "./paneStore";
 
 /**
  * Builds a dock: a store holding panes, and slots wherever the tree wants one.
@@ -37,6 +46,19 @@ function paneIn(root: HTMLElement, id: string): Element | null {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+});
+
+describe("storeOrder", () => {
+  it("keeps one order whatever the layout's order — a mode switch or a tab reorder moves no pane in the store", () => {
+    const a = { id: "b-2" };
+    const b = { id: "a-1" };
+    const c = { id: "c-3" };
+    // The shown mode's tabs come first in the layout's list; switching the mode swaps them with the parked ones.
+    const code = storeOrder([a, b, c]);
+    const flow = storeOrder([c, a, b]);
+    expect(code.map((t) => t.id)).toEqual(["a-1", "b-2", "c-3"]);
+    expect(flow).toEqual(code);
+  });
 });
 
 describe("parkPanes", () => {

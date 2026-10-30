@@ -110,7 +110,7 @@
   import UnsavedQuestion from "../fileapp/UnsavedQuestion.svelte";
   import { cycleTab, nthTab, splitActive } from "./dockKeys";
   import PaneHost from "./panes/PaneHost.svelte";
-  import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "./paneStore";
+  import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus, storeOrder } from "./paneStore";
     import * as projectSession from "./projectSession";
   import { accentColor, themeAreaSwatches } from "./projectAccent";
   import { flushLayout } from "./projects";
@@ -873,8 +873,8 @@
     hint: () => drag.hint,
   });
 
-  /** Every pane in the layout, flat — the store renders exactly this list. */
-  const panes = $derived([...allTabs(layout), ...parkedLayouts(parked).flatMap(allTabs)]);
+  /** Every pane in the layout, flat and in a fixed order (`storeOrder`) — the store renders exactly this list. */
+  const panes = $derived(storeOrder([...allTabs(layout), ...parkedLayouts(parked).flatMap(allTabs)]));
   /** The panes on screen: the active tab of every group, while the view is open. */
   const visibleTabs = $derived(new Set(open ? allGroups(layout).map((g) => g.active) : []));
 
