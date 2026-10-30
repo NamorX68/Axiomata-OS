@@ -751,6 +751,7 @@ mod tests {
             scopes: Vec::new(),
             from: None,
             keychain: false,
+            note: None,
         }
     }
 
