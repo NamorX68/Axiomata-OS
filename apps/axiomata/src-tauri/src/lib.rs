@@ -355,6 +355,7 @@ pub fn run() {
             commands::set_default_engine,
             commands::list_agent_choices,
             model_research::research_model_tiers,
+            model_research::model_research_running,
             commands::list_roles,
             commands::save_role,
             commands::delete_role,

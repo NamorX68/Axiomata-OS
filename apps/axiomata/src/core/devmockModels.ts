@@ -57,6 +57,10 @@ const catalog: MockModel[] = [
 ];
 
 let choices: Record<string, ModelChoice> = {};
+/** The mock's research run: under way at first, so the Models tab's note can be seen. */
+let researchRunning = true;
+/** How long the mock's research run "takes". */
+const RESEARCH_MS = 8000;
 let limits: TierLimits = { light_below: 1, heavy_above: 10 };
 let defaults: TierEngines = {};
 
@@ -217,12 +221,16 @@ export function mockModelCommand(
     }
     case "list_agent_choices":
       return { value: choicesFor(roles(), engines()) };
+    case "model_research_running":
+      return { value: researchRunning };
     case "research_model_tiers": {
       // The mock has no skill to run: it forgets the proposals asked about, as the app does before its run starts.
       const asked = (args.keys as string[] | null) ?? models().filter((m) => m.enabled).map((m) => m.key);
       const unknown = asked.find((key) => !catalog.some((m) => keyOf(m) === key));
       if (unknown) throw new Error(`roster: invalid model: the catalog offers no model “${unknown}”`);
-      for (const m of catalog) if (asked.includes(keyOf(m))) m.proposal = null;
+      // Like the app, the old proposals stay until the run records new ones; the mock's run "ends" a moment later.
+      researchRunning = true;
+      setTimeout(() => (researchRunning = false), RESEARCH_MS);
       return { value: asked };
     }
     default:

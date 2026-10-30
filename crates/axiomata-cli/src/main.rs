@@ -802,8 +802,9 @@ async fn main() -> Result<()> {
         && !skill_run_may(&command)
     {
         bail!(
-            "a skill run of the app may list skills, runs and boards, add a plain card and tag notes, nothing \
-             else; the owner does the rest"
+            "a skill run of the app may list skills, runs and boards, add a plain card, tag notes, and read and \
+             propose model tiers (`ide models list --unrated`, `ide models propose`), nothing else; the owner does \
+             the rest"
         );
     }
     // What a chat turn never does, or does only through the owner's yes in the app (chat-knows-app CH5, Q8).

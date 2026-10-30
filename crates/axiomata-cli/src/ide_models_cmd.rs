@@ -163,7 +163,20 @@ pub fn run(core: &AxiomataCore, action: ModelAction) -> Result<()> {
         } => {
             not_in_a_session(axiomata_core::session::session_actor().as_deref())?;
             let tier = parse_tier(&tier)?;
-            model_research::propose(&model_catalog::load(), &key, tier, &reason, &source)?;
+            // A skill run answers only for the models that wait for research; the owner's terminal for any offered one.
+            if crate::board_flow::harness_run_kind() == Some(crate::board_flow::HarnessRun::Skill) {
+                let config = snapshot(core);
+                model_research::propose_due(
+                    &config,
+                    &ModelSources::load(),
+                    &key,
+                    tier,
+                    &reason,
+                    &source,
+                )?;
+            } else {
+                model_research::propose(&model_catalog::load(), &key, tier, &reason, &source)?;
+            }
             println!("proposed {} for {key}", tier.as_str());
             Ok(())
         }

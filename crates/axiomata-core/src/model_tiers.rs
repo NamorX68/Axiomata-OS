@@ -53,8 +53,52 @@ const DATE_PART_DIGITS: usize = 6;
 /// Longest model name shown in an agent's name, in characters (the catalog's names come from a remote list).
 pub const MAX_MODEL_NAME_CHARS: usize = 60;
 
-/// Serialises the read-modify-write of `model-tiers.json` in this process.
+/// Serialises the read-modify-write of `model-tiers.json` in this process; [`ProposalsLock`] does it across processes.
 static PROPOSALS_LOCK: Mutex<()> = Mutex::new(());
+
+/// The proposals file's lock across processes — the app and a skill run's CLI both write it: an advisory lock
+/// (`flock`) on `model-tiers.json.lock`, held until dropped, taken while this process holds [`PROPOSALS_LOCK`].
+struct ProposalsLock {
+    _thread: std::sync::MutexGuard<'static, ()>,
+    file: std::fs::File,
+}
+
+impl ProposalsLock {
+    fn take() -> Result<Self> {
+        let thread = PROPOSALS_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let path = paths::model_tiers_lock_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| AxiomataError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let io = |source| AxiomataError::Io {
+            path: path.clone(),
+            source,
+        };
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(io)?;
+        file.lock().map_err(io)?;
+        Ok(Self {
+            _thread: thread,
+            file,
+        })
+    }
+}
+
+impl Drop for ProposalsLock {
+    fn drop(&mut self) {
+        // Closing the file releases the lock as well; unlocking first says so.
+        let _ = self.file.unlock();
+    }
+}
 
 // ---- The owner's settings (`[agents.models]`) ----
 
@@ -465,9 +509,7 @@ pub fn load_proposals() -> TierProposals {
 ///
 /// What `change` returns; a failing write.
 pub(crate) fn edit_proposals<T>(change: impl FnOnce(&mut TierProposals) -> Result<T>) -> Result<T> {
-    let _guard = PROPOSALS_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = ProposalsLock::take()?;
     let mut proposals = load_proposals();
     let before = proposals.clone();
     let out = change(&mut proposals)?;
@@ -510,15 +552,7 @@ pub fn record_proposal(key: &str, proposal: TierProposal) -> Result<()> {
 ///
 /// A failing write.
 pub fn forget_proposal(key: &str) -> Result<bool> {
-    let _guard = PROPOSALS_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    let mut proposals = load_proposals();
-    if proposals.proposals.remove(key).is_none() {
-        return Ok(false);
-    }
-    write_proposals(&proposals)?;
-    Ok(true)
+    edit_proposals(|proposals| Ok(proposals.proposals.remove(key).is_some()))
 }
 
 /// Everything besides the config that says what a model is: the catalog and the research proposals, both read from
@@ -1208,6 +1242,8 @@ mod tests {
             let stored = load_proposals();
             assert_eq!(stored.proposals["ollama/qwen3:32b"].tier, Tier::Medium);
             assert!(paths::model_tiers_path().exists());
+            // The app and a skill run's CLI both write it: the write took the lock file beside it.
+            assert!(paths::model_tiers_lock_path().exists());
             assert!(
                 !std::fs::read_to_string(paths::config_path())
                     .unwrap()

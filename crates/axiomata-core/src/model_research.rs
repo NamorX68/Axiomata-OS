@@ -48,14 +48,15 @@ pub struct ResearchTodo {
     pub models: Vec<ResearchItem>,
 }
 
-/// The models research is for: switched on, no research proposal, and no tier of the owner's unless the owner asked.
+/// The models research is for: switched on, and either asked about again by the owner, or with neither a research
+/// proposal nor a tier of the owner's.
 pub fn todo(config: &Config, sources: &ModelSources) -> ResearchTodo {
     let models = model_tiers::models(config, sources)
         .into_iter()
         .filter(|model| {
             model.enabled
-                && model.proposal.is_none()
-                && (model.owner_tier.is_none() || sources.proposals.wanted.contains(&model.key))
+                && (sources.proposals.wanted.contains(&model.key)
+                    || (model.proposal.is_none() && model.owner_tier.is_none()))
         })
         .map(|model| {
             let context_length = sources
@@ -95,32 +96,61 @@ fn due_keys(todo: &ResearchTodo, proposals: &TierProposals, now: DateTime<Utc>) 
         .collect()
 }
 
+/// The models a run was started for, and what marking them changed — so a run that could not start is taken back
+/// ([`unmark`]) and one that ended lets go of what it did not answer ([`finish`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Marked {
+    pub keys: Vec<String>,
+    /// Each key's attempt time before the mark.
+    previous_attempts: Vec<(String, Option<String>)>,
+    /// The keys the mark made wanted that were not before.
+    added_wanted: Vec<String>,
+}
+
+impl Marked {
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+}
+
+/// Marks `keys` attempted at `now` (and wanted, when `want`) in `proposals`.
+fn mark(
+    proposals: &mut TierProposals,
+    keys: Vec<String>,
+    want: bool,
+    now: DateTime<Utc>,
+) -> Marked {
+    let mut marked = Marked::default();
+    for key in &keys {
+        let before = proposals.attempts.insert(key.clone(), now.to_rfc3339());
+        marked.previous_attempts.push((key.clone(), before));
+        if want && proposals.wanted.insert(key.clone()) {
+            marked.added_wanted.push(key.clone());
+        }
+    }
+    marked.keys = keys;
+    marked
+}
+
 /// The models a research run should start for by itself now, marked as attempted at `now` in the same write; empty
 /// when nothing is due — then no run starts.
 ///
 /// # Errors
 ///
 /// A failing write of `model-tiers.json`.
-pub fn claim_due(
-    config: &Config,
-    catalog: &ModelCatalog,
-    now: DateTime<Utc>,
-) -> Result<Vec<String>> {
+pub fn claim_due(config: &Config, catalog: &ModelCatalog, now: DateTime<Utc>) -> Result<Marked> {
     model_tiers::edit_proposals(|proposals| {
         let sources = ModelSources {
             catalog: catalog.clone(),
             proposals: proposals.clone(),
         };
         let due = due_keys(&todo(config, &sources), proposals, now);
-        for key in &due {
-            proposals.attempts.insert(key.clone(), now.to_rfc3339());
-        }
-        Ok(due)
+        Ok(mark(proposals, due, false, now))
     })
 }
 
-/// The owner's "propose again": forgets the proposals of `keys` (every switched-on model when `None`), asks for them
-/// again even where the owner set a tier, and marks them attempted at `now`. Returns the keys asked for.
+/// The owner's "propose again": asks for `keys` (every switched-on model when `None`) again, even where the owner
+/// set a tier, and marks them attempted at `now`. Their proposals stay until the run records new ones.
 ///
 /// # Errors
 ///
@@ -130,7 +160,7 @@ pub fn request(
     catalog: &ModelCatalog,
     keys: Option<&[String]>,
     now: DateTime<Utc>,
-) -> Result<Vec<String>> {
+) -> Result<Marked> {
     let sources = ModelSources {
         catalog: catalog.clone(),
         proposals: TierProposals::default(),
@@ -155,13 +185,41 @@ pub fn request(
             .map(|model| model.key.clone())
             .collect(),
     };
+    model_tiers::edit_proposals(|proposals| Ok(mark(proposals, keys, true, now)))
+}
+
+/// Takes back a mark whose run could not start: the attempts as they were, the keys it made wanted no longer wanted.
+///
+/// # Errors
+///
+/// A failing write.
+pub fn unmark(marked: &Marked) -> Result<()> {
     model_tiers::edit_proposals(|proposals| {
-        for key in &keys {
-            proposals.proposals.remove(key);
-            proposals.wanted.insert(key.clone());
-            proposals.attempts.insert(key.clone(), now.to_rfc3339());
+        for (key, before) in &marked.previous_attempts {
+            match before {
+                Some(at) => proposals.attempts.insert(key.clone(), at.clone()),
+                None => proposals.attempts.remove(key),
+            };
         }
-        Ok(keys.clone())
+        for key in &marked.added_wanted {
+            proposals.wanted.remove(key);
+        }
+        Ok(())
+    })
+}
+
+/// After a run for `marked` ended: a key it left without a proposal is no longer wanted — so a model with the owner's
+/// tier is not researched again every day — while its attempt time keeps a failed one from starting again at once.
+///
+/// # Errors
+///
+/// A failing write.
+pub fn finish(marked: &Marked) -> Result<()> {
+    model_tiers::edit_proposals(|proposals| {
+        for key in &marked.keys {
+            proposals.wanted.remove(key);
+        }
+        Ok(())
     })
 }
 
@@ -210,6 +268,33 @@ pub fn propose(
     )
 }
 
+/// [`propose`] as a skill run may: only for a model research is for ([`todo`]) — a run cannot overwrite the proposal
+/// of a model nobody asked about.
+///
+/// # Errors
+///
+/// A refusal for a model not in the todo; as [`propose`].
+pub fn propose_due(
+    config: &Config,
+    sources: &ModelSources,
+    key: &str,
+    tier: Tier,
+    reason: &str,
+    source: &str,
+) -> Result<()> {
+    if !todo(config, sources)
+        .models
+        .iter()
+        .any(|model| model.key == key)
+    {
+        return Err(refusal(
+            "model",
+            format!("“{key}” is not waiting for research (see `ide models list --unrated`)"),
+        ));
+    }
+    propose(&sources.catalog, key, tier, reason, source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,7 +337,7 @@ mod tests {
             let morning = at("2026-10-30T08:00:00Z");
             // The four offered Anthropic models have a price proposal only: all of them are due.
             let first = claim_due(&config(), &catalog, morning).unwrap();
-            assert_eq!(first.len(), 4);
+            assert_eq!(first.keys.len(), 4);
             // Attempted: a failing run does not loop.
             assert!(
                 claim_due(&config(), &catalog, at("2026-10-30T20:00:00Z"))
@@ -269,8 +354,8 @@ mod tests {
             )
             .unwrap();
             let next = claim_due(&config(), &catalog, at("2026-10-31T08:00:00Z")).unwrap();
-            assert_eq!(next.len(), 3);
-            assert!(!next.contains(&"anthropic/claude-haiku-5-5".to_owned()));
+            assert_eq!(next.keys.len(), 3);
+            assert!(!next.keys.contains(&"anthropic/claude-haiku-5-5".to_owned()));
         });
     }
 
@@ -305,7 +390,7 @@ mod tests {
                 now,
             )
             .unwrap();
-            assert_eq!(asked, ["anthropic/claude-opus-5-5"]);
+            assert_eq!(asked.keys, ["anthropic/claude-opus-5-5"]);
             let todo_now = todo(&config, &sources(model_tiers::load_proposals()));
             let opus = todo_now
                 .models
@@ -319,7 +404,115 @@ mod tests {
             assert!(opus.name.chars().count() <= MAX_MODEL_NAME_CHARS);
             assert!(request(&config, &catalog, Some(&["openrouter/none".into()]), now).is_err());
             // None asks for every model that is on.
-            assert_eq!(request(&config, &catalog, None, now).unwrap().len(), 4);
+            assert_eq!(request(&config, &catalog, None, now).unwrap().keys.len(), 4);
+        });
+    }
+
+    #[test]
+    fn asking_again_keeps_the_proposal_until_a_new_one_and_a_run_without_one_lets_go() {
+        with_temp_home(|| {
+            let catalog = ModelCatalog::default();
+            let mut config = config();
+            let opus = "anthropic/claude-opus-5-5";
+            config.agents.models.choices.insert(
+                opus.into(),
+                ModelChoice {
+                    enabled: None,
+                    tier: Some(Tier::Heavy),
+                },
+            );
+            propose(
+                &catalog,
+                opus,
+                Tier::Heavy,
+                "Top of the board.",
+                "https://lmarena.ai",
+            )
+            .unwrap();
+            let marked = request(
+                &config,
+                &catalog,
+                Some(&[opus.into()]),
+                at("2026-10-30T08:00:00Z"),
+            )
+            .unwrap();
+            let stored = model_tiers::load_proposals();
+            assert!(
+                stored.proposals.contains_key(opus),
+                "kept until a new one is recorded"
+            );
+            assert!(stored.wanted.contains(opus));
+            // The run ended without a proposal: no longer wanted, so the owner-tiered model is left alone.
+            finish(&marked).unwrap();
+            let sources = ModelSources {
+                catalog: catalog.clone(),
+                proposals: model_tiers::load_proposals(),
+            };
+            assert!(!todo(&config, &sources).models.iter().any(|m| m.key == opus));
+            assert!(
+                claim_due(&config, &catalog, at("2026-11-05T08:00:00Z"))
+                    .unwrap()
+                    .keys
+                    .iter()
+                    .all(|k| k != opus)
+            );
+        });
+    }
+
+    #[test]
+    fn a_mark_whose_run_could_not_start_is_taken_back() {
+        with_temp_home(|| {
+            let catalog = ModelCatalog::default();
+            let first = claim_due(&config(), &catalog, at("2026-10-30T08:00:00Z")).unwrap();
+            unmark(&first).unwrap();
+            // Nothing attempted: the next look finds them all due again at once.
+            let again = claim_due(&config(), &catalog, at("2026-10-30T08:05:00Z")).unwrap();
+            assert_eq!(again.keys, first.keys);
+            let asked = request(&config(), &catalog, None, at("2026-10-30T09:00:00Z")).unwrap();
+            unmark(&asked).unwrap();
+            let stored = model_tiers::load_proposals();
+            assert!(stored.wanted.is_empty());
+            assert!(
+                stored
+                    .attempts
+                    .values()
+                    .all(|at| at.starts_with("2026-10-30T08:05"))
+            );
+        });
+    }
+
+    #[test]
+    fn a_skill_run_proposes_only_for_what_waits_for_research() {
+        with_temp_home(|| {
+            let catalog = ModelCatalog::default();
+            let mut config = config();
+            config.agents.models.choices.insert(
+                "anthropic/claude-opus-5-5".into(),
+                ModelChoice {
+                    enabled: None,
+                    tier: Some(Tier::Heavy),
+                },
+            );
+            let sources = ModelSources {
+                catalog,
+                proposals: model_tiers::load_proposals(),
+            };
+            let due = |key: &str| {
+                propose_due(
+                    &config,
+                    &sources,
+                    key,
+                    Tier::Heavy,
+                    "Top.",
+                    "https://lmarena.ai",
+                )
+                .is_ok()
+            };
+            assert!(
+                !due("anthropic/claude-opus-5-5"),
+                "the owner's tier, not asked again"
+            );
+            assert!(due("anthropic/claude-sonnet-5-5"));
         });
     }
 

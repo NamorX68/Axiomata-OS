@@ -136,6 +136,11 @@ pub fn model_tiers_path() -> PathBuf {
     axiomata_home().join("model-tiers.json")
 }
 
+/// The advisory lock file beside [`model_tiers_path`]: the app and a skill run's CLI both write the proposals.
+pub fn model_tiers_lock_path() -> PathBuf {
+    axiomata_home().join("model-tiers.json.lock")
+}
+
 /// Path to the Terminal module's global preferences file
 /// (`~/.axiomata/terminal-settings.json`) — Checkpoint 5d of
 /// `docs/plans/terminal.md`. Deliberately its own file, not a section of

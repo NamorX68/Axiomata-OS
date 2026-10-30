@@ -107,6 +107,9 @@ export const listAgentChoices = (projectId: number): Promise<AgentChoice[]> =>
 export const researchModelTiers = (keys: string[] | null): Promise<string[]> =>
   invoke<string[]>("research_model_tiers", { keys });
 
+/** Whether a tier research run is under way (the Models tab's quiet note). */
+export const modelResearchRunning = (): Promise<boolean> => invoke<boolean>("model_research_running");
+
 /** The event a finished tier research run sends. Mirrors `model_research::MODEL_TIERS_UPDATED` (src-tauri). */
 export const MODEL_TIERS_UPDATED = "models:tiers-updated";
 
