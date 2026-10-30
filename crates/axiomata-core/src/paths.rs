@@ -142,6 +142,11 @@ pub fn agents_migration_path() -> PathBuf {
     axiomata_home().join("agents-migration.json")
 }
 
+/// The advisory lock file of the agents migration: the app and the CLI never run it at once.
+pub fn agents_migration_lock_path() -> PathBuf {
+    axiomata_home().join("agents-migration.lock")
+}
+
 /// The advisory lock file beside [`model_tiers_path`]: the app and a skill run's CLI both write the proposals.
 pub fn model_tiers_lock_path() -> PathBuf {
     axiomata_home().join("model-tiers.json.lock")

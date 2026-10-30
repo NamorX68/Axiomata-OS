@@ -166,7 +166,16 @@ impl AxiomataCore {
         // The Studio's roster (a2a.md, CP-A1): the `allrounder` role every existing agent plays, and an engine
         // for each agent profile that predates the catalog. Both idempotent and best-effort — a failure here
         // must not keep the app from starting; the agents simply stay unassigned until the next start.
-        match axiomata_roster::seed_default_roles(&paths::agent_roles_dir()) {
+        // Before the agents migration has run, a role folder with roles in it is left to it (agents-model.md, AM6): it
+        // makes a missing base at its variants' tier, and the app seeds after it.
+        let roles_dir = paths::agent_roles_dir();
+        let has_roles = fs::read_dir(&roles_dir).is_ok_and(|mut entries| entries.next().is_some());
+        let seed = !has_roles || agents_migration::done(&db);
+        match if seed {
+            axiomata_roster::seed_default_roles(&roles_dir)
+        } else {
+            Ok(false)
+        } {
             Ok(true) => tracing::info!("seeded the default agent role"),
             Ok(false) => {}
             Err(err) => tracing::warn!(%err, "failed to seed the default agent role"),

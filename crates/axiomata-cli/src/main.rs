@@ -1963,6 +1963,7 @@ fn migrate_agents(core: &AxiomataCore, dry_run: bool) -> Result<()> {
             .unwrap_or_else(|poison| poison.into_inner());
         live.agents.engines = config.agents.engines;
         live.agents.models = config.agents.models;
+        live.agents.favorites = config.agents.favorites;
     }
     if report.is_empty() {
         println!("nothing to migrate");

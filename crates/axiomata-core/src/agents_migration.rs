@@ -8,22 +8,26 @@
 //!   kind, creates) is moved into a backup folder, one that differs stays as an own role and is shown to the owner
 //!   ([`pending`]); the roles that stay lose `engine`/`fallback_engines` — their original files are copied into the
 //!   backup first;
-//! * **engines**: an own engine that is just an automatic one (same harness and model, no command, no environment) is
-//!   removed from the config — its model switched on if it was off — and its id mapped to the automatic one's; the
-//!   removed entries are written to the backup as `engines.toml`;
-//! * **default engine per tier**, when the owner set none: the engine the old roles of that tier used most;
-//! * **sessions**: a session of a moved variant plays its base; one on a removed engine runs on the automatic one.
-//!   Names, worktrees and branches stay; masters are not touched.
+//! * **engines**: an own engine that is just an automatic one (same harness and model, no command, no environment, no
+//!   tier or billing of its own) is removed from the config — its model switched on if it was off — and its id mapped
+//!   to the automatic one's; the removed entries are written to the backup as `engines.toml`;
+//! * **default engine per tier**, for every tier the owner set none for: the engine the old roles of that tier used
+//!   most; a default or a favorite that named a removed engine follows it to the automatic one;
+//! * **sessions**: a session of a moved variant plays its base; one on a removed engine — a master's too — runs on the
+//!   automatic one. Names, worktrees and branches stay.
 //!
-//! Nothing is deleted: the backup folder (`~/.axiomata/agents-backup-<date>/`) stays until the owner removes it in
-//! Settings → Storage. Project roles in repositories are never touched. The pass is idempotent and runs once at the
-//! app's start ([`run_once`]); `axiomata-cli ide migrate-agents [--dry-run]` runs it on the owner's word.
+//! Nothing is deleted: each pass's backup folder (`~/.axiomata/agents-backup-<date>[-n]/`, owner-only, never
+//! overwritten) stays until the owner removes it in Settings → Storage. Project roles in repositories are never
+//! touched. The pass works out its whole [`Plan`] first, stores it as "in progress", then applies it — backups, the
+//! sessions in one transaction, the config in one save, the role files last — and only then records itself as done; a
+//! pass cut off goes on from the stored plan. It runs once at the app's start ([`run_once`]);
+//! `axiomata-cli ide migrate-agents [--dry-run]` runs it on the owner's word. One pass at a time, across processes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use axiomata_roster::{Engine, Harness, Role, Source, Tier};
+use axiomata_roster::{Billing, Engine, Harness, Loaded, Role, Source, Tier};
 use chrono::NaiveDate;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -76,6 +80,9 @@ pub struct Report {
     pub defaults_seeded: BTreeMap<String, String>,
     /// Sessions whose role or engine changed.
     pub sessions_remapped: usize,
+    /// Role files that could not be read, said once; a base whose place holds one is not made.
+    #[serde(default)]
+    pub skipped: Vec<String>,
 }
 
 impl Report {
@@ -93,7 +100,7 @@ impl Report {
 
 /// The app's memory of the pass (`~/.axiomata/agents-migration.json`): its report, whether the owner saw the notice,
 /// and the kept variants the owner already decided on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct State {
     pub version: u64,
     #[serde(default)]
@@ -103,6 +110,9 @@ pub struct State {
     /// Kept variants the owner kept or folded: no longer asked about.
     #[serde(default)]
     pub decided: BTreeSet<String>,
+    /// The plan of a pass that started and has not finished: the next run goes on with it.
+    #[serde(default)]
+    pub in_progress: Option<Plan>,
 }
 
 impl Default for State {
@@ -112,6 +122,7 @@ impl Default for State {
             report: None,
             notice_seen: false,
             decided: BTreeSet::new(),
+            in_progress: None,
         }
     }
 }
@@ -191,35 +202,98 @@ fn catalog_model(engine: &Engine) -> Option<(ProviderId, String)> {
     }
 }
 
-/// What the pass will change, worked out before anything is written.
-#[derive(Debug, Default)]
-struct Plan {
-    report: Report,
+/// What the pass will change, worked out before anything is written and stored as "in progress" before the first
+/// change: a pass that was cut off goes on from this plan, never from what it left on disk.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Plan {
+    pub report: Report,
+    /// This run's backup folder (a direct child of `~/.axiomata`).
+    pub backup: PathBuf,
     /// Bases to write.
-    create: Vec<Role>,
-    /// Roles (by name) that stay and are rewritten without their engines.
-    strip: Vec<Role>,
+    pub create: Vec<Role>,
+    /// Roles that stay and are rewritten without their engines (their originals copied into the backup first).
+    pub strip: Vec<Role>,
     /// Own engines to remove, with their entries for the backup.
-    removed_engines: BTreeMap<String, Engine>,
+    pub removed_engines: BTreeMap<String, Engine>,
     /// Model keys to switch on.
-    switch_on: Vec<String>,
-    /// Default engines to seed.
-    defaults: Vec<(Tier, String)>,
+    pub switch_on: Vec<String>,
+    /// Default engines to seed for tiers the owner set none for.
+    pub defaults: Vec<(Tier, String)>,
     /// Session id → (new role, new engine id).
-    sessions: Vec<(i64, Option<String>, Option<String>)>,
+    pub sessions: Vec<(i64, Option<String>, Option<String>)>,
+}
+
+/// The steps of [`apply`], in their order; a test stops after one to check that a rerun ends the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Step {
+    /// Copies of what changes: `engines.toml`, the originals of the roles that are rewritten. Nothing changes yet.
+    Backups,
+    /// The sessions' roles and engines, in one transaction.
+    Database,
+    /// Engines, switched-on models, default engines and favorites, in one save of the file config.
+    Config,
+    /// The role files: rewritten, made, moved into the backup.
+    Files,
+}
+
+/// Whether an engine is nothing but its model on its harness: no command, no environment, no tier of the owner's, the
+/// harness's own billing.
+fn plain(engine: &Engine) -> bool {
+    let billing = if engine.harness == Harness::ClaudeCode {
+        Billing::Subscription
+    } else {
+        Billing::Metered
+    };
+    engine.command.trim().is_empty()
+        && engine.env.trim().is_empty()
+        && engine.tier.is_none()
+        && engine.billing == billing
+}
+
+/// A backup folder for a run of `today` in `home` no earlier run took: `agents-backup-<date>`, then `-2`, `-3`, ….
+fn fresh_backup_dir(home: &Path, today: NaiveDate) -> PathBuf {
+    let base = format!("{BACKUP_PREFIX}{}", today.format("%Y-%m-%d"));
+    std::iter::once(home.join(&base))
+        .chain((2..).map(|n| home.join(format!("{base}-{n}"))))
+        .find(|candidate| fs::symlink_metadata(candidate).is_err())
+        .unwrap_or_else(|| home.join(base))
+}
+
+/// Whether `path` is a backup folder's place: a direct child of `home` whose name has [`BACKUP_PREFIX`].
+fn is_backup_place(home: &Path, path: &Path) -> bool {
+    path.parent() == Some(home)
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(BACKUP_PREFIX) && !name.contains(['/', '\\']))
 }
 
 /// Works out what the pass changes for `roles` (the owner's), the file config `disk`, `sources` and the sessions in
 /// `db`.
-fn plan(db: &Connection, disk: &Config, sources: &ModelSources, roles: &[Role]) -> Result<Plan> {
-    let mut plan = Plan::default();
+fn plan(
+    db: &Connection,
+    disk: &Config,
+    sources: &ModelSources,
+    loaded: &Loaded,
+    backup: PathBuf,
+) -> Result<Plan> {
+    let roles = &loaded.roles;
+    let mut plan = Plan {
+        backup,
+        ..Plan::default()
+    };
+    let dir = paths::agent_roles_dir();
     let by_name: HashMap<&str, &Role> = roles
         .iter()
         .map(|role| (role.name.as_str(), role))
         .collect();
+    plan.report.skipped = loaded
+        .skipped
+        .iter()
+        .map(|s| format!("{}: {}", s.name, s.reason))
+        .collect();
 
     // Roles: bases, variants.
-    let mut bases: HashMap<String, Role> = HashMap::new();
     for bundled in axiomata_roster::base_roles() {
         let variants: Vec<&Role> = roles
             .iter()
@@ -227,6 +301,8 @@ fn plan(db: &Connection, disk: &Config, sources: &ModelSources, roles: &[Role]) 
             .collect();
         let base = match by_name.get(bundled.name.as_str()) {
             Some(own) => (*own).clone(),
+            // Something is there that is no readable role (a link, a broken file): it is said once, never replaced.
+            None if fs::symlink_metadata(dir.join(&bundled.name)).is_ok() => continue,
             None => {
                 let mut made = bundled.clone();
                 if let Some(tier) = most_common(variants.iter().map(|v| v.tier)) {
@@ -247,7 +323,6 @@ fn plan(db: &Connection, disk: &Config, sources: &ModelSources, roles: &[Role]) 
                 });
             }
         }
-        bases.insert(base.name.clone(), base);
     }
     let moved: BTreeSet<&str> = plan.report.moved.iter().map(String::as_str).collect();
     for role in roles {
@@ -264,9 +339,8 @@ fn plan(db: &Connection, disk: &Config, sources: &ModelSources, roles: &[Role]) 
 
     // Engines: an own engine that is an automatic one goes, its model switched on.
     let mut next = disk.clone();
-    for engine in disk.agents.engines.values() {
-        let plain = engine.command.trim().is_empty() && engine.env.trim().is_empty();
-        let Some((provider, id)) = catalog_model(engine).filter(|_| plain) else {
+    for engine in disk.agents.engines.values().filter(|engine| plain(engine)) {
+        let Some((provider, id)) = catalog_model(engine) else {
             continue;
         };
         if !model_tiers::offered(&sources.catalog, provider)
@@ -280,8 +354,12 @@ fn plan(db: &Connection, disk: &Config, sources: &ModelSources, roles: &[Role]) 
             .iter()
             .any(|m| m.id == id)
         {
-            let choice = next.agents.models.choices.entry(key.clone()).or_default();
-            choice.enabled = Some(true);
+            next.agents
+                .models
+                .choices
+                .entry(key.clone())
+                .or_default()
+                .enabled = Some(true);
             plan.switch_on.push(key);
         }
         next.agents.engines.remove(&engine.id);
@@ -305,153 +383,188 @@ fn plan(db: &Connection, disk: &Config, sources: &ModelSources, roles: &[Role]) 
     // An own engine whose automatic one did not come about after all stays where it is.
     plan.removed_engines
         .retain(|old, _| mapping.contains_key(old));
-    plan.switch_on.retain(|key| {
-        plan.removed_engines
-            .values()
-            .any(|e| catalog_model(e).is_some_and(|(p, id)| model_tiers::model_key(p, &id) == *key))
-    });
+    let kept_models: Vec<String> = plan
+        .removed_engines
+        .values()
+        .filter_map(catalog_model)
+        .map(|(provider, id)| model_tiers::model_key(provider, &id))
+        .collect();
+    plan.switch_on.retain(|key| kept_models.contains(key));
     plan.report.engines_mapped = mapping.clone();
     plan.report.models_switched_on = plan.switch_on.clone();
     let resolve = |id: &str| mapping.get(id).cloned().unwrap_or_else(|| id.to_owned());
 
-    // The default engine of each tier, when the owner set none: what the old roles of that tier used most.
-    let defaults = &disk.agents.models.default_engines;
-    if Tier::ALL.iter().all(|tier| defaults.get(*tier).is_none()) {
-        let lookup = engines::Lookup::with_sources(&next, sources.clone());
-        for tier in Tier::ALL {
-            let used = roles
-                .iter()
-                .filter(|role| role.tier == tier)
-                .filter_map(|role| role.engine.as_deref())
-                .map(resolve)
-                .filter(|id| lookup.exists(id));
-            if let Some(id) = most_common(used) {
-                plan.report
-                    .defaults_seeded
-                    .insert(tier.as_str().to_owned(), id.clone());
-                plan.defaults.push((tier, id));
-            }
+    // The default engine of every tier the owner set none for: what the old roles of that tier used most.
+    let lookup = engines::Lookup::with_sources(&next, sources.clone());
+    for tier in Tier::ALL {
+        if disk.agents.models.default_engines.get(tier).is_some() {
+            continue;
+        }
+        let used = roles
+            .iter()
+            .filter(|role| role.tier == tier)
+            .filter_map(|role| role.engine.as_deref())
+            .map(resolve)
+            .filter(|id| lookup.exists(id));
+        if let Some(id) = most_common(used) {
+            plan.report
+                .defaults_seeded
+                .insert(tier.as_str().to_owned(), id.clone());
+            plan.defaults.push((tier, id));
         }
     }
 
-    // Sessions: a moved variant plays its base; a removed engine's sessions run on its automatic one.
+    // Sessions: a moved variant's plays its base; any session on a removed engine — masters too — runs on the
+    // automatic one.
     for project in crate::ide::store::list_projects(db)? {
         for agent in agent_store::list_agents(db, project.id)? {
-            if agent.is_master() {
-                continue;
-            }
-            let role = moved
-                .contains(agent.agent_role.as_str())
+            let role = (!agent.is_master() && moved.contains(agent.agent_role.as_str()))
                 .then(|| base_of(&agent.agent_role).map(str::to_owned))
                 .flatten();
             let engine = agent
                 .engine_id
                 .as_deref()
                 .and_then(|id| mapping.get(id))
-                .filter(|new| agent.engine_id.as_deref() != Some(new.as_str()));
+                .filter(|new| agent.engine_id.as_deref() != Some(new.as_str()))
+                .cloned();
             if role.is_some() || engine.is_some() {
-                plan.sessions.push((agent.id, role, engine.cloned()));
+                plan.sessions.push((agent.id, role, engine));
             }
         }
     }
     plan.report.sessions_remapped = plan.sessions.len();
+    plan.report.backup = (plan.needs_backup()).then(|| plan.backup.clone());
     Ok(plan)
 }
 
-/// The backup folder of `today` in `home`.
-fn backup_dir(home: &Path, today: NaiveDate) -> PathBuf {
-    home.join(format!("{BACKUP_PREFIX}{}", today.format("%Y-%m-%d")))
+impl Plan {
+    fn needs_backup(&self) -> bool {
+        !self.report.moved.is_empty() || !self.strip.is_empty() || !self.removed_engines.is_empty()
+    }
 }
 
-/// Moves `from` to `to_dir/<name>`, or `<name>-2`, … when the backup already holds that name.
-fn move_into(from: &Path, to_dir: &Path, name: &str) -> Result<PathBuf> {
-    let io = |path: &Path, source| AxiomataError::Io {
-        path: path.to_path_buf(),
+/// Creates `dir` for the backup, owner-only, refusing a link at its place.
+fn ensure_private_dir(dir: &Path) -> Result<()> {
+    let io = |source| AxiomataError::Io {
+        path: dir.to_path_buf(),
         source,
     };
-    fs::create_dir_all(to_dir).map_err(|source| io(to_dir, source))?;
-    let target = std::iter::once(to_dir.join(name))
-        .chain((2..).map(|n| to_dir.join(format!("{name}-{n}"))))
-        .find(|candidate| fs::symlink_metadata(candidate).is_err())
-        .unwrap_or_else(|| to_dir.join(name));
-    fs::rename(from, &target).map_err(|source| io(from, source))?;
-    Ok(target)
+    match fs::symlink_metadata(dir) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(refusal(
+            "backup",
+            format!("{} is no folder of its own", dir.display()),
+        )),
+        Err(_) => {
+            let mut builder = fs::DirBuilder::new();
+            builder.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(PRIVATE_DIR_MODE);
+            }
+            builder.create(dir).map_err(io)
+        }
+    }
 }
 
-/// Runs the pass: works out what changes and, unless `dry_run`, does it. `config` (the live one) takes the file
-/// config's engines and models afterwards.
-///
-/// # Errors
-///
-/// A failing read of the roles, the config or the database; a failing write. A pass that fails half-way leaves
-/// what it moved in the backup and is run again by the next start (it is not recorded as done).
-pub fn run(
+/// Owner-only, for a backup's folders.
+const PRIVATE_DIR_MODE: u32 = 0o700;
+/// Owner-only, for a backup's files.
+const PRIVATE_FILE_MODE: u32 = 0o600;
+
+/// Writes `bytes` to `path` as a new owner-only file; one that is there already (an earlier try of the same run) is
+/// left as it is — a backup never overwrites.
+fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(PRIVATE_FILE_MODE);
+    }
+    match options.open(path) {
+        Ok(mut file) => file.write_all(bytes).map_err(|source| AxiomataError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(source) => Err(AxiomataError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+/// Moves role folder `name` from `dir` into `backup` — done already when it is in the backup and gone from `dir`.
+fn move_role(dir: &Path, backup: &Path, name: &str) -> Result<()> {
+    let from = dir.join(name);
+    if fs::symlink_metadata(&from).is_err() {
+        return Ok(());
+    }
+    ensure_private_dir(backup)?;
+    let target = std::iter::once(backup.join(name))
+        .chain((2..).map(|n| backup.join(format!("{name}-{n}"))))
+        .find(|candidate| fs::symlink_metadata(candidate).is_err())
+        .unwrap_or_else(|| backup.join(name));
+    fs::rename(&from, &target).map_err(|source| AxiomataError::Io { path: from, source })
+}
+
+/// Applies `plan` step by step, each step safe to run again; with `stop_after` a test stops after that step.
+fn apply(
     db: &Connection,
     config: &mut Config,
-    dry_run: bool,
-    today: NaiveDate,
-) -> Result<Report> {
-    let dir = paths::agent_roles_dir();
-    let roles = if dir.exists() {
-        axiomata_roster::load_roles(&dir, Source::User)?.roles
-    } else {
-        Vec::new()
+    plan: &Plan,
+    stop_after: Option<Step>,
+) -> Result<()> {
+    let stop = |step: Step| -> Result<()> {
+        if stop_after == Some(step) {
+            return Err(refusal("migration", format!("stopped after {step:?}")));
+        }
+        Ok(())
     };
-    let _guard = config::file_edit_lock();
-    let mut disk = Config::load()?;
-    let sources = ModelSources::load();
-    let mut plan = plan(db, &disk, &sources, &roles)?;
-    plan.report.dry_run = dry_run;
-    let needs_backup =
-        !plan.report.moved.is_empty() || !plan.strip.is_empty() || !plan.removed_engines.is_empty();
-    let backup = backup_dir(&paths::axiomata_home(), today);
-    if needs_backup {
-        plan.report.backup = Some(backup.clone());
-    }
-    if dry_run {
-        return Ok(plan.report);
-    }
+    let dir = paths::agent_roles_dir();
 
-    // Roles: the originals of what changes go into the backup first.
-    for name in &plan.report.moved {
-        move_into(&dir.join(name), &backup, name)?;
+    // Backups first: nothing changes yet.
+    if plan.needs_backup() {
+        ensure_private_dir(&plan.backup)?;
     }
-    for role in &plan.strip {
-        let original = dir.join(&role.name).join(axiomata_roster::ROLE_FILE);
-        let copy_dir = backup.join(&role.name);
-        fs::create_dir_all(&copy_dir).map_err(|source| AxiomataError::Io {
-            path: copy_dir.clone(),
-            source,
-        })?;
-        fs::copy(&original, copy_dir.join(axiomata_roster::ROLE_FILE)).map_err(|source| {
-            AxiomataError::Io {
-                path: original.clone(),
-                source,
-            }
-        })?;
-        axiomata_roster::save_role(&dir, role)?;
-    }
-    for role in &plan.create {
-        axiomata_roster::save_role(&dir, role)?;
-    }
-
-    // Engines and defaults, into the file config.
     if !plan.removed_engines.is_empty() {
         let toml = toml::to_string_pretty(&plan.removed_engines)
             .map_err(|source| AxiomataError::ConfigSerialize { source })?;
-        fs::create_dir_all(&backup).map_err(|source| AxiomataError::Io {
-            path: backup.clone(),
-            source,
-        })?;
-        let target = backup.join("engines.toml");
-        fs::write(&target, toml).map_err(|source| AxiomataError::Io {
-            path: target,
-            source,
-        })?;
+        write_new(&plan.backup.join("engines.toml"), toml.as_bytes())?;
     }
-    let config_changes =
-        !plan.removed_engines.is_empty() || !plan.switch_on.is_empty() || !plan.defaults.is_empty();
-    if config_changes {
+    for role in &plan.strip {
+        let original = dir.join(&role.name).join(axiomata_roster::ROLE_FILE);
+        // Rewritten already in an earlier try: its original was copied then.
+        let Ok(text) = fs::read(&original) else {
+            continue;
+        };
+        let copy_dir = plan.backup.join(&role.name);
+        ensure_private_dir(&copy_dir)?;
+        write_new(&copy_dir.join(axiomata_roster::ROLE_FILE), &text)?;
+    }
+    stop(Step::Backups)?;
+
+    // The sessions, in one transaction.
+    let tx = db.unchecked_transaction()?;
+    for (id, role, engine) in &plan.sessions {
+        if let Some(role) = role {
+            agent_store::set_role(&tx, *id, role)?;
+        }
+        if let Some(engine) = engine {
+            agent_store::set_engine(&tx, *id, Some(engine))?;
+        }
+    }
+    tx.commit()?;
+    stop(Step::Database)?;
+
+    // The file config, in one save under its lock: engines, models, defaults and favorites.
+    {
+        let mapping = &plan.report.engines_mapped;
+        let _guard = config::file_edit_lock();
+        let mut disk = Config::load()?;
         for id in plan.removed_engines.keys() {
             disk.agents.engines.remove(id);
         }
@@ -463,33 +576,196 @@ pub fn run(
                 .or_insert_with(ModelChoice::default)
                 .enabled = Some(true);
         }
-        for (tier, id) in &plan.defaults {
-            disk.agents
+        for tier in Tier::ALL {
+            let current = disk
+                .agents
                 .models
                 .default_engines
-                .set(*tier, Some(id.clone()));
+                .get(tier)
+                .map(str::to_owned);
+            match current {
+                Some(id) => {
+                    if let Some(new) = mapping.get(&id) {
+                        disk.agents
+                            .models
+                            .default_engines
+                            .set(tier, Some(new.clone()));
+                    }
+                }
+                None => {
+                    if let Some((_, id)) = plan.defaults.iter().find(|(t, _)| *t == tier) {
+                        disk.agents
+                            .models
+                            .default_engines
+                            .set(tier, Some(id.clone()));
+                    }
+                }
+            }
         }
+        for favorite in &mut disk.agents.favorites {
+            if let Some(new) = favorite.engine.as_ref().and_then(|id| mapping.get(id)) {
+                favorite.engine = Some(new.clone());
+            }
+        }
+        disk.agents.favorites.dedup();
         disk.validate_for_save()
             .map_err(|reason| refusal("config", reason))?;
         disk.save()?;
+        config.agents.engines = disk.agents.engines.clone();
+        config.agents.models = disk.agents.models.clone();
+        config.agents.favorites = disk.agents.favorites.clone();
     }
-    config.agents.engines = disk.agents.engines.clone();
-    config.agents.models = disk.agents.models.clone();
+    stop(Step::Config)?;
 
-    // Sessions.
-    for (id, role, engine) in &plan.sessions {
-        if let Some(role) = role {
-            agent_store::set_role(db, *id, role)?;
-        }
-        if let Some(engine) = engine {
-            agent_store::set_engine(db, *id, Some(engine))?;
+    // The role files last.
+    for role in &plan.strip {
+        if dir.join(&role.name).exists() {
+            axiomata_roster::save_role(&dir, role)?;
         }
     }
+    for role in &plan.create {
+        if fs::symlink_metadata(dir.join(&role.name)).is_err() {
+            axiomata_roster::save_role(&dir, role)?;
+        }
+    }
+    for name in &plan.report.moved {
+        move_role(&dir, &plan.backup, name)?;
+    }
+    stop(Step::Files)?;
+    Ok(())
+}
+
+/// Serialises the pass in this process; [`MigrationLock`] does it across processes (the app and the CLI).
+static MIGRATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The migration's lock across processes: an advisory lock on `agents-migration.lock`, held for a whole pass (and for
+/// the owner's keep and fold), taken while this process holds [`MIGRATION_LOCK`].
+struct MigrationLock {
+    _thread: std::sync::MutexGuard<'static, ()>,
+    file: fs::File,
+}
+
+impl MigrationLock {
+    fn take() -> Result<Self> {
+        let thread = MIGRATION_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let path = paths::agents_migration_lock_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|source| AxiomataError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let io = |source| AxiomataError::Io {
+            path: path.clone(),
+            source,
+        };
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(io)?;
+        file.lock().map_err(io)?;
+        Ok(Self {
+            _thread: thread,
+            file,
+        })
+    }
+}
+
+impl Drop for MigrationLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+/// Runs the pass: works out what changes and, unless `dry_run`, does it — or goes on with a pass that was cut off.
+/// `config` (the live one) takes the file config's engines, models and favorites afterwards. A real run records itself
+/// as done (`app_meta`) and keeps its report for the notice, the app's run and the CLI's alike.
+///
+/// # Errors
+///
+/// A failing read of the roles, the config or the database; a failing write. A pass that fails half-way stays "in
+/// progress" and the next run goes on with the same plan.
+pub fn run(
+    db: &Connection,
+    config: &mut Config,
+    dry_run: bool,
+    today: NaiveDate,
+) -> Result<Report> {
+    run_with(db, config, dry_run, today, None)
+}
+
+fn run_with(
+    db: &Connection,
+    config: &mut Config,
+    dry_run: bool,
+    today: NaiveDate,
+    stop_after: Option<Step>,
+) -> Result<Report> {
+    let _lock = MigrationLock::take()?;
+    let mut state = load_state();
+    let home = paths::axiomata_home();
+    let plan = match state
+        .in_progress
+        .clone()
+        .filter(|plan| is_backup_place(&home, &plan.backup))
+    {
+        Some(plan) => plan,
+        None => {
+            let dir = paths::agent_roles_dir();
+            let loaded = if dir.exists() {
+                axiomata_roster::load_roles(&dir, Source::User)?
+            } else {
+                axiomata_roster::Loaded::default()
+            };
+            let disk = Config::load()?;
+            plan(
+                db,
+                &disk,
+                &ModelSources::load(),
+                &loaded,
+                fresh_backup_dir(&home, today),
+            )?
+        }
+    };
+    if dry_run {
+        return Ok(Report {
+            dry_run: true,
+            ..plan.report
+        });
+    }
+    // Nothing to do: the last pass's record (and its notice) stays as it was.
+    if plan.report.is_empty() && state.in_progress.is_none() {
+        record_done(db)?;
+        return Ok(plan.report);
+    }
+    // Stored before anything changes: a pass cut off goes on from here.
+    state.in_progress = Some(plan.clone());
+    save_state(&state)?;
+    apply(db, config, &plan, stop_after)?;
+    state.in_progress = None;
+    state.notice_seen = plan.report.is_empty();
+    state.report = Some(plan.report.clone());
+    save_state(&state)?;
+    record_done(db)?;
     Ok(plan.report)
 }
 
-/// Runs the pass once — at the app's start — and records it: its report goes to `agents-migration.json` for the notice,
-/// the moment into `app_meta`. `None` when it ran before (or failed; then it is tried again at the next start).
+/// Records in `app_meta` that the pass ran.
+fn record_done(db: &Connection) -> Result<()> {
+    db.execute(
+        "INSERT INTO app_meta (key, value) VALUES (?1, ?2) \
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [DONE_KEY, &chrono::Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Runs the pass once — at the app's start — unless it is recorded as done; a pass cut off earlier is finished. `None`
+/// when there was nothing to run (or it failed; then it is tried again at the next start).
 pub fn run_once(db: &Connection, config: &mut Config, today: NaiveDate) -> Option<Report> {
     let done: Option<String> = db
         .query_row(
@@ -500,31 +776,30 @@ pub fn run_once(db: &Connection, config: &mut Config, today: NaiveDate) -> Optio
         .optional()
         .ok()
         .flatten();
-    if done.is_some() {
+    if done.is_some() && load_state().in_progress.is_none() {
         return None;
     }
     match run(db, config, false, today) {
-        Ok(report) => {
-            let mut state = load_state();
-            state.notice_seen = report.is_empty();
-            state.report = Some(report.clone());
-            if let Err(err) = save_state(&state) {
-                tracing::warn!(%err, "could not keep the result of the agents migration");
-            }
-            if let Err(err) = db.execute(
-                "INSERT INTO app_meta (key, value) VALUES (?1, ?2) \
-                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                [DONE_KEY, &chrono::Utc::now().to_rfc3339()],
-            ) {
-                tracing::warn!(%err, "could not record the agents migration");
-            }
-            Some(report)
-        }
+        Ok(report) => Some(report),
         Err(err) => {
             tracing::warn!(%err, "the agents migration did not run");
             None
         }
     }
+}
+
+/// Whether the pass is recorded as done — the app seeds the base roles only then, so a missing base is made by the pass
+/// at its variants' tier.
+pub fn done(db: &Connection) -> bool {
+    db.query_row(
+        "SELECT value FROM app_meta WHERE key = ?1",
+        [DONE_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .is_some()
 }
 
 /// A kept variant beside its base, for the owner's side-by-side look.
@@ -580,48 +855,63 @@ pub fn pending() -> Result<Vec<VariantDiff>> {
         .collect())
 }
 
+/// The kept variant `name` of the last pass and its base, if `name` is one.
+fn kept_base(state: &State, name: &str) -> Result<String> {
+    axiomata_roster::check_slug("name", name)?;
+    state
+        .report
+        .as_ref()
+        .and_then(|report| report.kept.iter().find(|kept| kept.name == name))
+        .map(|kept| kept.base.clone())
+        .ok_or_else(|| refusal("role", format!("“{name}” is no role the migration kept")))
+}
+
 /// The owner's "Keep as own role": not asked about again.
 ///
 /// # Errors
 ///
-/// A failing write of the state.
+/// A refusal for a name that is no kept variant of the pass; a failing write of the state.
 pub fn keep_variant(name: &str) -> Result<()> {
+    let _lock = MigrationLock::take()?;
     let mut state = load_state();
+    kept_base(&state, name)?;
     state.decided.insert(name.to_owned());
     save_state(&state)
 }
 
-/// The owner's "Fold into <base>": the variant's folder goes into the backup, and its sessions play the base.
+/// The owner's "Fold into <base>": its sessions play the base, then the variant's folder goes into the backup, then
+/// it is recorded — each step safe to run again, so a fold cut off is finished by the next click.
 ///
 /// # Errors
 ///
 /// A refusal for a name that is no kept variant of the pass; a failing move or write.
 pub fn fold_variant(db: &Connection, name: &str, today: NaiveDate) -> Result<()> {
+    let _lock = MigrationLock::take()?;
     let mut state = load_state();
-    let base = state
-        .report
-        .as_ref()
-        .and_then(|report| report.kept.iter().find(|kept| kept.name == name))
-        .map(|kept| kept.base.clone())
-        .ok_or_else(|| refusal("role", format!("“{name}” is no role the migration kept")))?;
+    let base = kept_base(&state, name)?;
+    let home = paths::axiomata_home();
     let backup = state
         .report
         .as_ref()
         .and_then(|report| report.backup.clone())
-        .unwrap_or_else(|| backup_dir(&paths::axiomata_home(), today));
-    let dir = paths::agent_roles_dir();
-    axiomata_roster::check_slug("name", name)?;
-    move_into(&dir.join(name), &backup, name)?;
-    for project in crate::ide::store::list_projects(db)? {
-        for agent in agent_store::list_agents(db, project.id)? {
+        .filter(|path| is_backup_place(&home, path))
+        .unwrap_or_else(|| fresh_backup_dir(&home, today));
+    let tx = db.unchecked_transaction()?;
+    for project in crate::ide::store::list_projects(&tx)? {
+        for agent in agent_store::list_agents(&tx, project.id)? {
             if agent.agent_role == name && !agent.is_master() {
-                agent_store::set_role(db, agent.id, &base)?;
+                agent_store::set_role(&tx, agent.id, &base)?;
             }
         }
     }
+    tx.commit()?;
+    move_role(&paths::agent_roles_dir(), &backup, name)?;
     state.decided.insert(name.to_owned());
     if let Some(report) = &mut state.report
-        && report.backup.is_none()
+        && report
+            .backup
+            .as_ref()
+            .is_none_or(|path| !is_backup_place(&home, path))
     {
         report.backup = Some(backup);
     }

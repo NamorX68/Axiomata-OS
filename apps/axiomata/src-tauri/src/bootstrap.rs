@@ -54,6 +54,13 @@ pub fn bootstrap() -> Services {
                 .unwrap_or_else(|poison| poison.into_inner());
             live.agents.engines = config.agents.engines;
             live.agents.models = config.agents.models;
+            live.agents.favorites = config.agents.favorites;
+        }
+        // The base roles the pass did not make (it makes a missing one at its variants' tier) are seeded now.
+        if let Err(err) =
+            axiomata_roster::seed_default_roles(&axiomata_core::paths::agent_roles_dir())
+        {
+            tracing::warn!(%err, "failed to seed the default agent roles");
         }
     }
 
