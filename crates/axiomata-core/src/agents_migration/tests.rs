@@ -666,7 +666,7 @@ fn it_runs_once_and_a_kept_variant_is_kept_or_folded_on_the_owners_word() {
     assert_eq!(haiku.differs, ["instructions"]);
 
     keep_variant("planner-mimo").unwrap();
-    fold_variant(&h.db, "planner-haiku", today()).unwrap();
+    fold_variant(&h.db, &mut h.config, "planner-haiku", today()).unwrap();
     let names: Vec<String> = pending()
         .unwrap()
         .into_iter()
@@ -696,7 +696,7 @@ fn it_runs_once_and_a_kept_variant_is_kept_or_folded_on_the_owners_word() {
         "planner"
     );
     assert!(
-        fold_variant(&h.db, "tester", today()).is_err(),
+        fold_variant(&h.db, &mut h.config, "tester", today()).is_err(),
         "only a kept variant folds"
     );
 
@@ -865,7 +865,7 @@ fn a_pass_cut_off_after_any_step_ends_like_one_that_was_not() {
     for step in [Step::Backups, Step::Database, Step::Config, Step::Files] {
         let mut h = home();
         let sessions = project_with_sessions(&h);
-        assert!(run_with(&h.db, &mut h.config, false, today(), Some(step)).is_err());
+        assert!(run_with(&h.db, &mut h.config, false, today(), Some(step), None).is_err());
         assert!(
             load_state().in_progress.is_some(),
             "{step:?}: the plan waits"
@@ -963,4 +963,276 @@ fn only_a_kept_variant_is_kept_and_only_a_backup_place_is_believed() {
     assert!(!is_backup_place(&home, &home.join("agents")));
     assert!(!is_backup_place(&home, Path::new("/tmp/agents-backup-x")));
     assert!(!is_backup_place(&home, &home.join("agents-backup-x/inner")));
+}
+
+/// The engine a role file names, read back from the disk.
+fn engine_on_disk(name: &str) -> Option<String> {
+    axiomata_roster::load_roles(&paths::agent_roles_dir(), Source::User)
+        .unwrap()
+        .roles
+        .into_iter()
+        .find(|role| role.name == name)
+        .and_then(|role| role.engine)
+}
+
+#[test]
+fn a_resumed_pass_leaves_what_changed_since_and_moves_what_came_since() {
+    let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+    let mut h = home();
+    let sessions = project_with_sessions(&h);
+    assert!(
+        run_with(
+            &h.db,
+            &mut h.config,
+            false,
+            today(),
+            Some(Step::Backups),
+            None
+        )
+        .is_err()
+    );
+
+    // While the pass waits: the owner edits a role, changes an engine, gives a session another role, starts another.
+    let mut edited = axiomata_roster::load_roles(&paths::agent_roles_dir(), Source::User)
+        .unwrap()
+        .roles
+        .into_iter()
+        .find(|role| role.name == "documenter")
+        .unwrap();
+    edited.instructions = "Instructions the owner wrote meanwhile.".into();
+    axiomata_roster::save_role(&paths::agent_roles_dir(), &edited).unwrap();
+    let mut disk = Config::load().unwrap();
+    disk.agents
+        .engines
+        .get_mut("opencode-openrouter-gpt-6-luna")
+        .unwrap()
+        .label = "Luna, renamed".into();
+    disk.save().unwrap();
+    agent_store::set_role(&h.db, sessions[0], "documenter").unwrap();
+    let project = agent_store::get_agent(&h.db, sessions[0])
+        .unwrap()
+        .unwrap()
+        .project_id;
+    let late = add_session(
+        &h.db,
+        project,
+        "late",
+        "tester",
+        "opencode-openrouter-z-ai-glm-5-3-flash",
+    );
+
+    let report = run_once(&h.db, &mut h.config, today()).unwrap();
+    assert!(load_state().in_progress.is_none());
+    assert_eq!(
+        engine_on_disk("documenter").as_deref(),
+        Some("opencode-openrouter-ling-3-1-flash"),
+        "an edited role is not rewritten"
+    );
+    let documenter = paths::agent_roles_dir().join("documenter").join(ROLE_FILE);
+    assert!(
+        fs::read_to_string(documenter)
+            .unwrap()
+            .contains("the owner wrote meanwhile")
+    );
+    assert!(!report.stripped.contains(&"documenter".to_owned()));
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|line| line.starts_with("documenter:"))
+    );
+
+    assert!(
+        h.config
+            .agents
+            .engines
+            .contains_key("opencode-openrouter-gpt-6-luna"),
+        "a changed engine stays"
+    );
+    assert!(
+        !report
+            .engines_mapped
+            .contains_key("opencode-openrouter-gpt-6-luna")
+    );
+    let master = agent_store::get_agent(&h.db, sessions[2]).unwrap().unwrap();
+    assert_eq!(
+        master.engine_id.as_deref(),
+        Some("opencode-openrouter-gpt-6-luna"),
+        "nothing moves away from it"
+    );
+
+    let a = agent_store::get_agent(&h.db, sessions[0]).unwrap().unwrap();
+    assert_eq!(
+        a.agent_role, "documenter",
+        "a session with another role by now is left alone"
+    );
+    let late = agent_store::get_agent(&h.db, late).unwrap().unwrap();
+    assert_eq!(
+        late.engine_id.as_ref(),
+        report
+            .engines_mapped
+            .get("opencode-openrouter-z-ai-glm-5-3-flash"),
+        "a session made since on a removed engine moves along"
+    );
+    assert!(late.engine_id.is_some());
+}
+
+#[test]
+fn a_state_file_of_another_version_stops_the_pass_and_is_kept() {
+    let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+    let mut h = home();
+    let path = paths::agents_migration_path();
+    let future =
+        r#"{"version":99,"report":null,"notice_seen":false,"decided":[],"something_new":true}"#;
+    fs::write(&path, future).unwrap();
+    let roles = snapshot(&paths::agent_roles_dir());
+    let refused = run(&h.db, &mut h.config, false, today())
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("version 99"), "{refused}");
+    assert!(run_once(&h.db, &mut h.config, today()).is_none());
+    assert!(!done(&h.db));
+    assert!(dismiss_notice().is_err() && keep_variant("planner-haiku").is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), future, "kept as it is");
+    assert_eq!(
+        snapshot(&paths::agent_roles_dir()),
+        roles,
+        "nothing changed"
+    );
+    // A plan and a report of an older shape read with their defaults.
+    assert_eq!(serde_json::from_str::<Plan>("{}").unwrap(), Plan::default());
+    assert_eq!(
+        serde_json::from_str::<Report>("{}").unwrap(),
+        Report::default()
+    );
+}
+
+#[test]
+fn a_role_whose_original_cannot_be_read_is_never_rewritten() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        let mut h = home();
+        let dir = paths::agent_roles_dir();
+        let loaded = axiomata_roster::load_roles(&dir, Source::User).unwrap();
+        let disk = Config::load().unwrap();
+        let backup = fresh_backup_dir(&paths::axiomata_home(), today());
+        let planned = plan(&h.db, &disk, &ModelSources::load(), &loaded, backup.clone()).unwrap();
+        assert!(planned.strip.iter().any(|role| role.name == "documenter"));
+        let file = dir.join("documenter").join(ROLE_FILE);
+        let before = fs::read(&file).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Planned again now: said, and not stripped.
+        let again = plan(&h.db, &disk, &ModelSources::load(), &loaded, backup.clone()).unwrap();
+        assert!(!again.report.stripped.contains(&"documenter".to_owned()));
+        assert!(
+            again
+                .report
+                .skipped
+                .iter()
+                .any(|line| line.starts_with("documenter:"))
+        );
+        // Refreshed after a cut-off: the same.
+        let refreshed = refresh(&h.db, &disk, planned.clone()).unwrap();
+        assert!(!refreshed.strip.iter().any(|role| role.name == "documenter"));
+        // Applied as first planned, the file unreadable in between: no copy, so no rewrite.
+        apply(&h.db, &mut h.config, &planned, None).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(fs::read(&file).unwrap(), before, "not rewritten");
+        assert!(
+            !backup.join("documenter").exists(),
+            "no copy of what could not be read"
+        );
+    }
+}
+
+#[test]
+fn the_start_waits_only_a_little_for_a_pass_elsewhere_and_skips_it() {
+    let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+    let mut h = home();
+    let roles = snapshot(&paths::agent_roles_dir());
+    // Another process's pass: its own open of the lock file, so the lock is its own.
+    let elsewhere = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(paths::agents_migration_lock_path())
+        .unwrap();
+    elsewhere.lock().unwrap();
+    let started = std::time::Instant::now();
+    assert!(run_once_within(&h.db, &mut h.config, today(), Duration::from_millis(200)).is_none());
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the window is not kept waiting"
+    );
+    assert!(!done(&h.db), "tried again at the next start");
+    assert_eq!(snapshot(&paths::agent_roles_dir()), roles);
+    elsewhere.unlock().unwrap();
+    assert!(run_once_within(&h.db, &mut h.config, today(), Duration::from_millis(200)).is_some());
+    assert!(done(&h.db));
+}
+
+#[test]
+fn a_pass_with_only_a_new_kept_variant_records_it_and_shows_the_notice() {
+    let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+    let mut h = home();
+    run(&h.db, &mut h.config, false, today()).unwrap();
+    dismiss_notice().unwrap();
+    let mut own = role("tester-special", "test", Tier::Heavy, "x", &[], "special");
+    own.engine = None;
+    axiomata_roster::save_role(&paths::agent_roles_dir(), &own).unwrap();
+    let report = run(&h.db, &mut h.config, false, today()).unwrap();
+    assert!(report.is_empty());
+    let state = load_state();
+    assert!(!state.notice_seen, "shown");
+    let stored = state.report.unwrap();
+    assert!(
+        stored
+            .kept
+            .iter()
+            .any(|kept| kept.name == "tester-special" && kept.base == "tester")
+    );
+    assert!(!stored.moved.is_empty(), "the first pass's record stays");
+    assert!(
+        pending()
+            .unwrap()
+            .iter()
+            .any(|diff| diff.variant.name == "tester-special")
+    );
+    let file = fs::read(paths::agents_migration_path()).unwrap();
+    run(&h.db, &mut h.config, false, today()).unwrap();
+    assert_eq!(
+        fs::read(paths::agents_migration_path()).unwrap(),
+        file,
+        "nothing new: untouched"
+    );
+}
+
+#[test]
+fn a_fold_moves_the_favorites_of_the_variant_to_its_base() {
+    let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+    let mut h = home();
+    let favorite = |role: &str| Favorite {
+        role: role.into(),
+        tier: Tier::Light,
+        engine: None,
+    };
+    let mut disk = Config::load().unwrap();
+    disk.agents.favorites = vec![
+        favorite("planner-haiku"),
+        favorite("planner"),
+        favorite("tester"),
+    ];
+    disk.save().unwrap();
+    run(&h.db, &mut h.config, false, today()).unwrap();
+    fold_variant(&h.db, &mut h.config, "planner-haiku", today()).unwrap();
+    let expected = vec![favorite("planner"), favorite("tester")];
+    assert_eq!(
+        Config::load().unwrap().agents.favorites,
+        expected,
+        "once each"
+    );
+    assert_eq!(h.config.agents.favorites, expected, "the live config too");
 }

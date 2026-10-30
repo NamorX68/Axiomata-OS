@@ -22,6 +22,8 @@ export interface MigrationReport {
   models_switched_on: string[];
   defaults_seeded: Record<string, string>;
   sessions_remapped: number;
+  /** What the pass left alone and why (a file it could not read, a role or engine changed while it waited). */
+  skipped: string[];
 }
 
 /** A kept role beside its base, with the fields that differ. */
@@ -35,6 +37,8 @@ export interface MigrationView {
   report: MigrationReport | null;
   notice_seen: boolean;
   pending: VariantDiff[];
+  /** Why the migration does not run: a state file this build cannot read, kept as it is. */
+  problem: string | null;
 }
 
 export interface AgentsBackup {

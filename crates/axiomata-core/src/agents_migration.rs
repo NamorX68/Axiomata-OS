@@ -26,12 +26,15 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use axiomata_roster::{Billing, Engine, Harness, Loaded, Role, Source, Tier};
+use axiomata_roster::{Billing, Engine, Harness, Loaded, ROLE_FILE, Role, Source, Tier};
 use chrono::NaiveDate;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
+use crate::agent_start::Favorite;
 use crate::config::{self, Config, ProviderId};
 use crate::engines::{self, EngineOrigin};
 use crate::error::AxiomataError;
@@ -51,6 +54,12 @@ pub const BACKUP_PREFIX: &str = "agents-backup-";
 /// On-disk schema version of `agents-migration.json`.
 const STATE_VERSION: u64 = 1;
 
+/// How long the app's start waits for a pass another process runs before it skips the pass for this start.
+pub const START_LOCK_WAIT: Duration = Duration::from_secs(3);
+
+/// How often a bounded wait for the lock looks again.
+const LOCK_POLL: Duration = Duration::from_millis(50);
+
 /// A variant that differs from its base and stays as an own role.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeptVariant {
@@ -60,6 +69,7 @@ pub struct KeptVariant {
 
 /// What the pass did — or, in a dry run, would do.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Report {
     pub dry_run: bool,
     /// Where the originals went; `None` when nothing needed a backup.
@@ -80,8 +90,8 @@ pub struct Report {
     pub defaults_seeded: BTreeMap<String, String>,
     /// Sessions whose role or engine changed.
     pub sessions_remapped: usize,
-    /// Role files that could not be read, said once; a base whose place holds one is not made.
-    #[serde(default)]
+    /// What the pass left alone and why: role files that could not be read (a base whose place holds one is not
+    /// made), a role or an engine that changed while a pass cut off waited.
     pub skipped: Vec<String>,
 }
 
@@ -95,6 +105,11 @@ impl Report {
             && self.models_switched_on.is_empty()
             && self.defaults_seeded.is_empty()
             && self.sessions_remapped == 0
+    }
+
+    /// Whether there is nothing to tell the owner either: no change and no role left for the owner to look at.
+    fn says_nothing(&self) -> bool {
+        self.is_empty() && self.kept.is_empty() && self.skipped.is_empty()
     }
 }
 
@@ -128,13 +143,42 @@ impl Default for State {
 }
 
 /// The stored state; the default when there is none.
-pub fn load_state() -> State {
-    json_state::load(&paths::agents_migration_path(), || {
+///
+/// # Errors
+///
+/// A state file this build cannot read — of another version, or not of this shape. It is never replaced: the pass and
+/// the owner's keep, fold and dismiss refuse until a build that knows it runs.
+pub fn read_state() -> Result<State> {
+    let path = paths::agents_migration_path();
+    let loaded = json_state::load(&path, || {
         serde_json::to_string(&State::default()).unwrap_or_default()
-    })
-    .ok()
-    .and_then(|state| serde_json::from_str::<State>(&state.json).ok())
-    .unwrap_or_default()
+    })?;
+    let unknown = |reason: String| {
+        refusal(
+            "migration state",
+            format!(
+                "{} {reason}; the agents migration does not run and the file is kept as it is",
+                path.display()
+            ),
+        )
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(&loaded.json).map_err(|err| unknown(err.to_string()))?;
+    match value.get("version").and_then(serde_json::Value::as_u64) {
+        Some(STATE_VERSION) => {}
+        Some(version) => {
+            return Err(unknown(format!(
+                "is of version {version}, this build knows {STATE_VERSION}"
+            )));
+        }
+        None => return Err(unknown("names no version".to_owned())),
+    }
+    serde_json::from_value(value).map_err(|err| unknown(err.to_string()))
+}
+
+/// The stored state for a view that only reads; the default when there is none or it cannot be read.
+pub fn load_state() -> State {
+    read_state().unwrap_or_default()
 }
 
 fn save_state(state: &State) -> Result<()> {
@@ -190,6 +234,31 @@ fn most_common<T: Clone + Eq>(items: impl IntoIterator<Item = T>) -> Option<T> {
         .map(|(item, _)| item)
 }
 
+/// SHA-256 of `bytes`, lower-case hex.
+fn hash(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The hash of the file at `path`; `None` when it cannot be read.
+fn file_hash(path: &Path) -> Option<String> {
+    fs::read(path).ok().map(|bytes| hash(&bytes))
+}
+
+/// `favorites` with each one only once, the first kept.
+fn unique(favorites: &mut Vec<Favorite>) {
+    let mut seen: Vec<Favorite> = Vec::new();
+    favorites.retain(|favorite| {
+        let first = !seen.contains(favorite);
+        if first {
+            seen.push(favorite.clone());
+        }
+        first
+    });
+}
+
 /// The provider and the provider's id of the model an engine runs, when it is one the catalog could offer.
 fn catalog_model(engine: &Engine) -> Option<(ProviderId, String)> {
     let model = engine.model.as_deref()?.trim();
@@ -205,6 +274,7 @@ fn catalog_model(engine: &Engine) -> Option<(ProviderId, String)> {
 /// What the pass will change, worked out before anything is written and stored as "in progress" before the first
 /// change: a pass that was cut off goes on from this plan, never from what it left on disk.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Plan {
     pub report: Report,
     /// This run's backup folder (a direct child of `~/.axiomata`).
@@ -213,6 +283,8 @@ pub struct Plan {
     pub create: Vec<Role>,
     /// Roles that stay and are rewritten without their engines (their originals copied into the backup first).
     pub strip: Vec<Role>,
+    /// The SHA-256 of each stripped role's file as the plan saw it: a file that differs is never rewritten.
+    pub originals: BTreeMap<String, String>,
     /// Own engines to remove, with their entries for the backup.
     pub removed_engines: BTreeMap<String, Engine>,
     /// Model keys to switch on.
@@ -220,7 +292,7 @@ pub struct Plan {
     /// Default engines to seed for tiers the owner set none for.
     pub defaults: Vec<(Tier, String)>,
     /// Session id → (new role, new engine id).
-    pub sessions: Vec<(i64, Option<String>, Option<String>)>,
+    pub sessions: Vec<SessionChange>,
 }
 
 /// The steps of [`apply`], in their order; a test stops after one to check that a rerun ends the same.
@@ -329,6 +401,15 @@ fn plan(
         if !moved.contains(role.name.as_str())
             && (role.engine.is_some() || !role.fallback_engines.is_empty())
         {
+            // Without its original read there is no backup copy, so the role keeps its file as it is.
+            let Some(original) = file_hash(&dir.join(&role.name).join(ROLE_FILE)) else {
+                plan.report.skipped.push(format!(
+                    "{}: its file could not be read, so it keeps its engine",
+                    role.name
+                ));
+                continue;
+            };
+            plan.originals.insert(role.name.clone(), original);
             plan.report.stripped.push(role.name.clone());
             let mut stripped = role.clone();
             stripped.engine = None;
@@ -414,8 +495,20 @@ fn plan(
         }
     }
 
-    // Sessions: a moved variant's plays its base; any session on a removed engine — masters too — runs on the
-    // automatic one.
+    plan.sessions = sessions_for(db, &moved, &mapping)?;
+    plan.report.sessions_remapped = plan.sessions.len();
+    plan.report.backup = (plan.needs_backup()).then(|| plan.backup.clone());
+    Ok(plan)
+}
+
+/// The sessions to change, from their state now: a moved variant's plays its base; any session on a removed engine —
+/// masters too — runs on the automatic one.
+fn sessions_for(
+    db: &Connection,
+    moved: &BTreeSet<&str>,
+    mapping: &BTreeMap<String, String>,
+) -> Result<Vec<SessionChange>> {
+    let mut out = Vec::new();
     for project in crate::ide::store::list_projects(db)? {
         for agent in agent_store::list_agents(db, project.id)? {
             let role = (!agent.is_master() && moved.contains(agent.agent_role.as_str()))
@@ -428,12 +521,82 @@ fn plan(
                 .filter(|new| agent.engine_id.as_deref() != Some(new.as_str()))
                 .cloned();
             if role.is_some() || engine.is_some() {
-                plan.sessions.push((agent.id, role, engine));
+                out.push((agent.id, role, engine));
             }
         }
     }
-    plan.report.sessions_remapped = plan.sessions.len();
-    plan.report.backup = (plan.needs_backup()).then(|| plan.backup.clone());
+    Ok(out)
+}
+
+/// A session's id with its new role and its new engine id, each only when it changes.
+type SessionChange = (i64, Option<String>, Option<String>);
+
+/// A stored plan checked against what is there now, before a pass cut off goes on with it: a role whose file changed
+/// since (other than by the pass's own rewrite) keeps it, an own engine whose definition changed stays, and the
+/// sessions are worked out again — a session that plays another role or runs another engine by now is left alone, one
+/// made on a removed engine since is moved along too.
+fn refresh(db: &Connection, disk: &Config, mut plan: Plan) -> Result<Plan> {
+    let dir = paths::agent_roles_dir();
+    let mut skipped = Vec::new();
+    let strip = std::mem::take(&mut plan.strip);
+    for role in strip {
+        let planned = plan.originals.get(&role.name).cloned();
+        let current = file_hash(&dir.join(&role.name).join(ROLE_FILE));
+        let copied = file_hash(&plan.backup.join(&role.name).join(ROLE_FILE));
+        // Still the original (the pass will rewrite it), or rewritten by an earlier try beside its copy.
+        let rewritten = current.as_deref() == Some(hash(role.to_markdown().as_bytes()).as_str());
+        if planned.is_some() && (current == planned || (rewritten && copied == planned)) {
+            plan.strip.push(role);
+        } else {
+            skipped.push(format!(
+                "{}: its file changed since the pass began, so it stays as it is",
+                role.name
+            ));
+            plan.report.stripped.retain(|name| *name != role.name);
+            plan.originals.remove(&role.name);
+        }
+    }
+    let changed: Vec<String> = plan
+        .removed_engines
+        .iter()
+        .filter(|(id, planned)| {
+            disk.agents
+                .engines
+                .get(*id)
+                .is_some_and(|now| now != *planned)
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &changed {
+        skipped.push(format!(
+            "engine {id}: it changed since the pass began, so it stays"
+        ));
+        plan.removed_engines.remove(id);
+        plan.report.engines_mapped.remove(id);
+    }
+    let kept_models: Vec<String> = plan
+        .removed_engines
+        .values()
+        .filter_map(catalog_model)
+        .map(|(provider, id)| model_tiers::model_key(provider, &id))
+        .collect();
+    plan.switch_on.retain(|key| kept_models.contains(key));
+    plan.report.models_switched_on = plan.switch_on.clone();
+    let moved: BTreeSet<&str> = plan.report.moved.iter().map(String::as_str).collect();
+    let sessions = sessions_for(db, &moved, &plan.report.engines_mapped)?;
+    let counted: BTreeSet<i64> = plan
+        .sessions
+        .iter()
+        .chain(&sessions)
+        .map(|(id, _, _)| *id)
+        .collect();
+    plan.report.sessions_remapped = counted.len();
+    plan.sessions = sessions;
+    for line in skipped {
+        if !plan.report.skipped.contains(&line) {
+            plan.report.skipped.push(line);
+        }
+    }
     Ok(plan)
 }
 
@@ -536,14 +699,20 @@ fn apply(
         write_new(&plan.backup.join("engines.toml"), toml.as_bytes())?;
     }
     for role in &plan.strip {
-        let original = dir.join(&role.name).join(axiomata_roster::ROLE_FILE);
-        // Rewritten already in an earlier try: its original was copied then.
-        let Ok(text) = fs::read(&original) else {
+        // Only the original the plan saw is copied: a file that cannot be read, or that changed (or was rewritten by an
+        // earlier try, whose copy is there), is not — and the files step rewrites a role only beside its copy.
+        let Some(planned) = plan.originals.get(&role.name) else {
             continue;
         };
+        let Ok(text) = fs::read(dir.join(&role.name).join(ROLE_FILE)) else {
+            continue;
+        };
+        if hash(&text) != *planned {
+            continue;
+        }
         let copy_dir = plan.backup.join(&role.name);
         ensure_private_dir(&copy_dir)?;
-        write_new(&copy_dir.join(axiomata_roster::ROLE_FILE), &text)?;
+        write_new(&copy_dir.join(ROLE_FILE), &text)?;
     }
     stop(Step::Backups)?;
 
@@ -562,12 +731,21 @@ fn apply(
 
     // The file config, in one save under its lock: engines, models, defaults and favorites.
     {
-        let mapping = &plan.report.engines_mapped;
         let _guard = config::file_edit_lock();
         let mut disk = Config::load()?;
-        for id in plan.removed_engines.keys() {
-            disk.agents.engines.remove(id);
+        // An engine is removed only as the plan saw it; one changed since stays, and nothing is remapped away from it.
+        for (id, planned) in &plan.removed_engines {
+            if disk.agents.engines.get(id) == Some(planned) {
+                disk.agents.engines.remove(id);
+            }
         }
+        let mapping: BTreeMap<String, String> = plan
+            .report
+            .engines_mapped
+            .iter()
+            .filter(|(old, _)| !disk.agents.engines.contains_key(*old))
+            .map(|(old, new)| (old.clone(), new.clone()))
+            .collect();
         for key in &plan.switch_on {
             disk.agents
                 .models
@@ -607,7 +785,7 @@ fn apply(
                 favorite.engine = Some(new.clone());
             }
         }
-        disk.agents.favorites.dedup();
+        unique(&mut disk.agents.favorites);
         disk.validate_for_save()
             .map_err(|reason| refusal("config", reason))?;
         disk.save()?;
@@ -617,9 +795,15 @@ fn apply(
     }
     stop(Step::Config)?;
 
-    // The role files last.
+    // The role files last; a role is rewritten only while its file is the plan's original and its copy is in the
+    // backup.
     for role in &plan.strip {
-        if dir.join(&role.name).exists() {
+        let Some(planned) = plan.originals.get(&role.name) else {
+            continue;
+        };
+        let current = file_hash(&dir.join(&role.name).join(ROLE_FILE));
+        let copied = file_hash(&plan.backup.join(&role.name).join(ROLE_FILE));
+        if current.as_ref() == Some(planned) && copied.as_ref() == Some(planned) {
             axiomata_roster::save_role(&dir, role)?;
         }
     }
@@ -646,10 +830,31 @@ struct MigrationLock {
 }
 
 impl MigrationLock {
-    fn take() -> Result<Self> {
-        let thread = MIGRATION_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+    /// Takes the lock — waiting for it, or with `wait` at most that long; then a refusal says another pass runs.
+    fn take(wait: Option<Duration>) -> Result<Self> {
+        let deadline = wait.map(|wait| Instant::now() + wait);
+        let busy = || {
+            refusal(
+                "migration",
+                "another Axiomata process is running the agents migration; it is left for now"
+                    .to_owned(),
+            )
+        };
+        let thread = match deadline {
+            None => MIGRATION_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()),
+            Some(deadline) => loop {
+                match MIGRATION_LOCK.try_lock() {
+                    Ok(guard) => break guard,
+                    Err(std::sync::TryLockError::Poisoned(poison)) => break poison.into_inner(),
+                    Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                        std::thread::sleep(LOCK_POLL);
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => return Err(busy()),
+                }
+            },
+        };
         let path = paths::agents_migration_lock_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|source| AxiomataError::Io {
@@ -667,7 +872,19 @@ impl MigrationLock {
             .write(true)
             .open(&path)
             .map_err(io)?;
-        file.lock().map_err(io)?;
+        match deadline {
+            None => file.lock().map_err(io)?,
+            Some(deadline) => loop {
+                match file.try_lock() {
+                    Ok(()) => break,
+                    Err(fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                        std::thread::sleep(LOCK_POLL);
+                    }
+                    Err(fs::TryLockError::WouldBlock) => return Err(busy()),
+                    Err(fs::TryLockError::Error(source)) => return Err(io(source)),
+                }
+            },
+        }
         Ok(Self {
             _thread: thread,
             file,
@@ -695,7 +912,7 @@ pub fn run(
     dry_run: bool,
     today: NaiveDate,
 ) -> Result<Report> {
-    run_with(db, config, dry_run, today, None)
+    run_with(db, config, dry_run, today, None, None)
 }
 
 fn run_with(
@@ -704,16 +921,17 @@ fn run_with(
     dry_run: bool,
     today: NaiveDate,
     stop_after: Option<Step>,
+    wait: Option<Duration>,
 ) -> Result<Report> {
-    let _lock = MigrationLock::take()?;
-    let mut state = load_state();
+    let _lock = MigrationLock::take(wait)?;
+    let mut state = read_state()?;
     let home = paths::axiomata_home();
     let plan = match state
         .in_progress
         .clone()
         .filter(|plan| is_backup_place(&home, &plan.backup))
     {
-        Some(plan) => plan,
+        Some(plan) => refresh(db, &Config::load()?, plan)?,
         None => {
             let dir = paths::agent_roles_dir();
             let loaded = if dir.exists() {
@@ -737,8 +955,12 @@ fn run_with(
             ..plan.report
         });
     }
-    // Nothing to do: the last pass's record (and its notice) stays as it was.
+    // Nothing to change: the last pass's record stays, and only a role left for the owner that it does not name yet is
+    // added to it (and shown).
     if plan.report.is_empty() && state.in_progress.is_none() {
+        if remember(&mut state, &plan.report) {
+            save_state(&state)?;
+        }
         record_done(db)?;
         return Ok(plan.report);
     }
@@ -747,11 +969,41 @@ fn run_with(
     save_state(&state)?;
     apply(db, config, &plan, stop_after)?;
     state.in_progress = None;
-    state.notice_seen = plan.report.is_empty();
+    state.notice_seen = plan.report.says_nothing();
     state.report = Some(plan.report.clone());
     save_state(&state)?;
     record_done(db)?;
     Ok(plan.report)
+}
+
+/// Adds to the stored record what `report` leaves for the owner and it does not name yet — a kept variant, a skipped
+/// file — and shows the notice again; `false` when there is nothing new.
+fn remember(state: &mut State, report: &Report) -> bool {
+    match &mut state.report {
+        None if report.says_nothing() => return false,
+        None => state.report = Some(report.clone()),
+        Some(stored) => {
+            let kept: Vec<KeptVariant> = report
+                .kept
+                .iter()
+                .filter(|kept| !stored.kept.contains(kept))
+                .cloned()
+                .collect();
+            let skipped: Vec<String> = report
+                .skipped
+                .iter()
+                .filter(|line| !stored.skipped.contains(line))
+                .cloned()
+                .collect();
+            if kept.is_empty() && skipped.is_empty() {
+                return false;
+            }
+            stored.kept.extend(kept);
+            stored.skipped.extend(skipped);
+        }
+    }
+    state.notice_seen = false;
+    true
 }
 
 /// Records in `app_meta` that the pass ran.
@@ -765,8 +1017,18 @@ fn record_done(db: &Connection) -> Result<()> {
 }
 
 /// Runs the pass once — at the app's start — unless it is recorded as done; a pass cut off earlier is finished. `None`
-/// when there was nothing to run (or it failed; then it is tried again at the next start).
+/// when there was nothing to run (or it failed, or another process held the pass longer than [`START_LOCK_WAIT`];
+/// then it is tried again at the next start). It never keeps the window waiting longer than that.
 pub fn run_once(db: &Connection, config: &mut Config, today: NaiveDate) -> Option<Report> {
+    run_once_within(db, config, today, START_LOCK_WAIT)
+}
+
+fn run_once_within(
+    db: &Connection,
+    config: &mut Config,
+    today: NaiveDate,
+    wait: Duration,
+) -> Option<Report> {
     let done: Option<String> = db
         .query_row(
             "SELECT value FROM app_meta WHERE key = ?1",
@@ -779,10 +1041,10 @@ pub fn run_once(db: &Connection, config: &mut Config, today: NaiveDate) -> Optio
     if done.is_some() && load_state().in_progress.is_none() {
         return None;
     }
-    match run(db, config, false, today) {
+    match run_with(db, config, false, today, None, Some(wait)) {
         Ok(report) => Some(report),
         Err(err) => {
-            tracing::warn!(%err, "the agents migration did not run");
+            tracing::warn!(%err, "the agents migration did not run at this start");
             None
         }
     }
@@ -872,22 +1134,28 @@ fn kept_base(state: &State, name: &str) -> Result<String> {
 ///
 /// A refusal for a name that is no kept variant of the pass; a failing write of the state.
 pub fn keep_variant(name: &str) -> Result<()> {
-    let _lock = MigrationLock::take()?;
-    let mut state = load_state();
+    let _lock = MigrationLock::take(None)?;
+    let mut state = read_state()?;
     kept_base(&state, name)?;
     state.decided.insert(name.to_owned());
     save_state(&state)
 }
 
-/// The owner's "Fold into <base>": its sessions play the base, then the variant's folder goes into the backup, then
-/// it is recorded — each step safe to run again, so a fold cut off is finished by the next click.
+/// The owner's "Fold into <base>": its sessions and the favorites naming it play the base, then the variant's folder
+/// goes into the backup, then it is recorded — each step safe to run again, so a fold cut off is finished by the next
+/// click. `config` (the live one) takes the file config's favorites.
 ///
 /// # Errors
 ///
 /// A refusal for a name that is no kept variant of the pass; a failing move or write.
-pub fn fold_variant(db: &Connection, name: &str, today: NaiveDate) -> Result<()> {
-    let _lock = MigrationLock::take()?;
-    let mut state = load_state();
+pub fn fold_variant(
+    db: &Connection,
+    config: &mut Config,
+    name: &str,
+    today: NaiveDate,
+) -> Result<()> {
+    let _lock = MigrationLock::take(None)?;
+    let mut state = read_state()?;
     let base = kept_base(&state, name)?;
     let home = paths::axiomata_home();
     let backup = state
@@ -905,6 +1173,25 @@ pub fn fold_variant(db: &Connection, name: &str, today: NaiveDate) -> Result<()>
         }
     }
     tx.commit()?;
+    {
+        let _guard = config::file_edit_lock();
+        let mut disk = Config::load()?;
+        if disk
+            .agents
+            .favorites
+            .iter()
+            .any(|favorite| favorite.role == name)
+        {
+            for favorite in &mut disk.agents.favorites {
+                if favorite.role == name {
+                    favorite.role.clone_from(&base);
+                }
+            }
+            unique(&mut disk.agents.favorites);
+            disk.save()?;
+        }
+        config.agents.favorites = disk.agents.favorites;
+    }
     move_role(&paths::agent_roles_dir(), &backup, name)?;
     state.decided.insert(name.to_owned());
     if let Some(report) = &mut state.report
@@ -922,9 +1209,10 @@ pub fn fold_variant(db: &Connection, name: &str, today: NaiveDate) -> Result<()>
 ///
 /// # Errors
 ///
-/// A failing write of the state.
+/// A state file this build cannot read; a failing write of the state.
 pub fn dismiss_notice() -> Result<()> {
-    let mut state = load_state();
+    let _lock = MigrationLock::take(None)?;
+    let mut state = read_state()?;
     state.notice_seen = true;
     save_state(&state)
 }

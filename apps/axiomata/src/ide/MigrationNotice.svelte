@@ -49,6 +49,16 @@
   onMount(() => void reload());
 </script>
 
+{#if view?.problem}
+  <div class="slot">
+    <Notice tone="bad" title="The move to roles at tiers did not run" alert>
+      {#snippet details()}
+        <p>{view?.problem}</p>
+      {/snippet}
+    </Notice>
+  </div>
+{/if}
+
 {#if view?.report && !view.notice_seen}
   {@const report = view.report}
   <div class="slot">
@@ -56,6 +66,9 @@
       {#snippet details()}
         {#if report.backup}
           <p>The originals are in <code>{report.backup}</code>; delete it in Settings → Storage.</p>
+        {/if}
+        {#if report.skipped.length > 0}
+          <p>Left as they were: {report.skipped.join("; ")}.</p>
         {/if}
         {#if Object.keys(report.defaults_seeded).length > 0}
           <p>

@@ -14,6 +14,7 @@ const report = (over: Partial<MigrationReport> = {}): MigrationReport => ({
   models_switched_on: [],
   defaults_seeded: {},
   sessions_remapped: 0,
+  skipped: [],
   ...over,
 });
 

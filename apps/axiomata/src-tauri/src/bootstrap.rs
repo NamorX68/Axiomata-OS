@@ -56,9 +56,12 @@ pub fn bootstrap() -> Services {
             live.agents.models = config.agents.models;
             live.agents.favorites = config.agents.favorites;
         }
-        // The base roles the pass did not make (it makes a missing one at its variants' tier) are seeded now.
-        if let Err(err) =
-            axiomata_roster::seed_default_roles(&axiomata_core::paths::agent_roles_dir())
+        // The base roles the pass did not make (it makes a missing one at its variants' tier) are seeded now — only
+        // after it ran: a pass skipped at this start (another process held it) makes them at the next.
+        let migrated = axiomata_core::agents_migration::done(&core.db_lock());
+        if migrated
+            && let Err(err) =
+                axiomata_roster::seed_default_roles(&axiomata_core::paths::agent_roles_dir())
         {
             tracing::warn!(%err, "failed to seed the default agent roles");
         }

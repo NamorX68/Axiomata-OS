@@ -3107,15 +3107,28 @@ pub struct AgentsMigrationView {
     report: Option<axiomata_core::agents_migration::Report>,
     notice_seen: bool,
     pending: Vec<axiomata_core::agents_migration::VariantDiff>,
+    /// Why the migration does not run: a state file this build cannot read, kept as it is.
+    problem: Option<String>,
 }
 
 #[tauri::command]
 pub fn agents_migration_state() -> Result<AgentsMigrationView, String> {
-    let state = axiomata_core::agents_migration::load_state();
+    let state = match axiomata_core::agents_migration::read_state() {
+        Ok(state) => state,
+        Err(err) => {
+            return Ok(AgentsMigrationView {
+                report: None,
+                notice_seen: false,
+                pending: Vec::new(),
+                problem: Some(err.to_string()),
+            });
+        }
+    };
     Ok(AgentsMigrationView {
         pending: axiomata_core::agents_migration::pending().map_err(|err| err.to_string())?,
         report: state.report,
         notice_seen: state.notice_seen,
+        problem: None,
     })
 }
 
@@ -3125,12 +3138,27 @@ pub fn keep_role_variant(name: String) -> Result<(), String> {
     axiomata_core::agents_migration::keep_variant(&name).map_err(|err| err.to_string())
 }
 
-/// "Fold into <base>": the role goes into the backup, its sessions play the base.
+/// "Fold into <base>": the role goes into the backup, its sessions and favorites play the base.
 #[tauri::command]
 pub fn fold_role_variant(state: State<'_, CoreState>, name: String) -> Result<(), String> {
-    let db = state.db_lock();
-    axiomata_core::agents_migration::fold_variant(&db, &name, chrono::Local::now().date_naive())
-        .map_err(|err| err.to_string())
+    let mut config = read_config(&state.config);
+    {
+        let db = state.db_lock();
+        axiomata_core::agents_migration::fold_variant(
+            &db,
+            &mut config,
+            &name,
+            chrono::Local::now().date_naive(),
+        )
+        .map_err(|err| err.to_string())?;
+    }
+    state
+        .config
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .agents
+        .favorites = config.agents.favorites;
+    Ok(())
 }
 
 #[tauri::command]

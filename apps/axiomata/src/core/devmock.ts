@@ -669,9 +669,11 @@ let mockMigration: MigrationView = {
     models_switched_on: [],
     defaults_seeded: { light: "claude-code-claude-haiku-5-5", medium: "claude-code-claude-sonnet-5-5" },
     sessions_remapped: 1,
+    skipped: [],
   },
   notice_seen: false,
   pending: [],
+  problem: null,
 };
 const mockMigrationDecided = new Set<string>();
 let mockBackups = [{ path: "/Users/demo/.axiomata/agents-backup-2026-10-30", bytes: 48_000 }];
