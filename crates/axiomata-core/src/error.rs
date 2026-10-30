@@ -225,4 +225,86 @@ pub enum AxiomataError {
     /// installed copy is the owner's own edit and replacing it was not confirmed, or its folder is a link.
     #[error("bundled skill {name:?}: {reason}")]
     BundledSkill { name: String, reason: String },
+
+    /// A refusal the app shows in the owner's language (`docs/plans/i18n.md`, Q11): a fixed `code` and the values it
+    /// names, with the English sentence the CLI, the logs and every agent read. Only the app's own boundary passes the
+    /// code on ([`AxiomataError::for_ui`]); the frontend writes the sentence from it and falls back to `message`.
+    #[error("{message}")]
+    Coded {
+        code: &'static str,
+        params: Vec<(&'static str, String)>,
+        message: String,
+    },
+}
+
+/// Opens and separates the parts of a coded error on its way to the app: the unit separator, which no sentence holds.
+pub const UI_CODE_MARK: char = '\u{1f}';
+
+/// A refusal with a code the app translates (Q11): `message` is the English sentence everything else reads, `params`
+/// the values the translation names.
+pub fn coded(
+    code: &'static str,
+    params: &[(&'static str, &str)],
+    message: impl Into<String>,
+) -> AxiomataError {
+    AxiomataError::Coded {
+        code,
+        params: params.iter().map(|(k, v)| (*k, (*v).to_owned())).collect(),
+        message: message.into(),
+    }
+}
+
+impl AxiomataError {
+    /// The error as the app's frontend receives it: a coded refusal as `␟code␟{"name":"value"}␟English sentence`
+    /// (`core/errors.ts` `messageOf` reads it), anything else as its sentence. Only the Tauri commands use this — the
+    /// CLI, the logs and the agents read [`std::fmt::Display`], which never carries the code.
+    pub fn for_ui(&self) -> String {
+        match self {
+            AxiomataError::Coded {
+                code,
+                params,
+                message,
+            } => {
+                let values: serde_json::Map<String, serde_json::Value> = params
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), serde_json::Value::String(v.clone())))
+                    .collect();
+                format!(
+                    "{UI_CODE_MARK}{code}{UI_CODE_MARK}{}{UI_CODE_MARK}{message}",
+                    serde_json::Value::Object(values)
+                )
+            }
+            other => other.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_coded_refusal_reads_english_everywhere_but_carries_its_code_to_the_app() {
+        let err = coded(
+            "role.unknown",
+            &[("name", "x\"y")],
+            "There is no role \u{201c}x\"y\u{201d}.",
+        );
+        assert_eq!(err.to_string(), "There is no role \u{201c}x\"y\u{201d}.");
+        let ui = err.for_ui();
+        let parts: Vec<&str> = ui.split(UI_CODE_MARK).collect();
+        assert_eq!(
+            parts,
+            [
+                "",
+                "role.unknown",
+                r#"{"name":"x\"y"}"#,
+                "There is no role \u{201c}x\"y\u{201d}."
+            ]
+        );
+        let plain = AxiomataError::PermissionAsk {
+            reason: "no".into(),
+        };
+        assert_eq!(plain.for_ui(), plain.to_string());
+    }
 }

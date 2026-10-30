@@ -4,6 +4,7 @@
  * building in `spotlightItems.ts`; both are pure.
  */
 
+import { messageOf } from "./errors";
 import { get } from "svelte/store";
 
 import { requestMode } from "../ide/modeRequest";
@@ -136,7 +137,7 @@ export async function runSpotlightAction(action: SpotlightAction, secondary = fa
         const run = await invokeBackend<RunSummary>("run_skill", { name: action.name });
         toast(`/${action.name}: ${run.status} (${run.duration_ms} ms)`, run.status === "success" ? "info" : "warning");
       } catch (err) {
-        toast(String(err), "danger");
+        toast(messageOf(err), "danger");
       }
       return;
     case "routines":

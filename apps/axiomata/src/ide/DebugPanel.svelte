@@ -9,6 +9,7 @@
   editor's.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
   import { get } from "svelte/store";
 
@@ -96,7 +97,7 @@
       listed = await listDebugConfigs(root);
     } catch (err) {
       listed = null;
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
   }
 
@@ -112,7 +113,7 @@
       await trustDebugFile(root, listed.project_file.hash);
       reviewing = false;
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
     await refresh();
   }
@@ -145,7 +146,7 @@
       choice = `named:${saved.name}`;
       picked = true;
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     } finally {
       saving = false;
     }
@@ -157,7 +158,7 @@
       await removeDebugConfig(root, c.name);
       await refresh();
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
   }
 

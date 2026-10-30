@@ -19,6 +19,7 @@ use crate::agent_choice;
 use crate::config::Config;
 use crate::engines::{self, EngineInfo};
 use crate::error::AxiomataError;
+use crate::error::coded;
 use crate::ide::model::Agent;
 use crate::model_tiers::ModelSources;
 use crate::roster::{self, refusal};
@@ -123,14 +124,16 @@ pub fn resolve_engine(
     match engine {
         Some(id) => {
             let info = engines::find(config, sources, id).ok_or_else(|| {
-                refusal(
-                    "engine",
+                coded(
+                    "engine.gone",
+                    &[("id", id)],
                     format!("there is no engine “{id}” any more; pick another one"),
                 )
             })?;
             if let Some(why) = &info.unusable {
-                return Err(refusal(
-                    "engine",
+                return Err(coded(
+                    "engine.unusable",
+                    &[("id", id), ("why", why)],
                     format!("the engine “{id}” cannot run now: {why}"),
                 ));
             }
@@ -140,8 +143,9 @@ pub fn resolve_engine(
             .into_iter()
             .next()
             .ok_or_else(|| {
-                refusal(
-                    "engine",
+                coded(
+                    "engine.noneForTier",
+                    &[("tier", tier.as_str())],
                     format!(
                         "no engine of the tier {} can run now; switch a model of that tier on in the Studio's \
                          Models tab",
@@ -188,8 +192,9 @@ pub fn session_name(
         .map(|n| format!("{name} #{n}"))
         .find(|candidate| free(candidate))
         .ok_or_else(|| {
-            refusal(
-                "name",
+            coded(
+                "agent.nameExhausted",
+                &[("name", &name), ("n", &MAX_NAME_TRIES.to_string())],
                 format!("“{name}” has been started {MAX_NAME_TRIES} times; remove its old sessions first"),
             )
         })
@@ -309,8 +314,9 @@ pub fn toggle_favorite(config: &mut Config, favorite: Favorite) -> Result<bool> 
         false
     } else {
         if disk.agents.favorites.len() >= MAX_FAVORITES {
-            return Err(refusal(
-                "favorite",
+            return Err(coded(
+                "favorite.full",
+                &[("n", &MAX_FAVORITES.to_string())],
                 format!("at most {MAX_FAVORITES} favorites; remove one first"),
             ));
         }

@@ -17,35 +17,36 @@ Axiomata schreibt Tags und Links **wie Obsidian**, damit der Vault auch ohne die
 
 ## Wo die Knöpfe sind
 
-- **Settings → Workspace → „Tags“:** „Proposed by agents“ mit „Accept“ / „Turn down“; „On the list (…)“ mit einer
-  Beschreibungszeile je Tag, dem Stift („Rename …“: erst „Count uses“, dann „Rename“) und dem Papierkorb („Take …
-  off the list“); darunter eine Zeile zum Hinzufügen („Add“). Ein Sechseck mit Zahl am Reiter „Workspace“ und im
-  Dock zeigt wartende Vorschläge.
-- **Darunter „Tag the whole vault“:** „1 · Propose a tag list“ („Propose“) und „2 · Plan tags and links for every
-  note“ („Plan“, später „Plan the rest“), dann „Preview (… notes)“ mit „Write into … notes“ oder „Discard“.
+- **Einstellungen → Workspace → „Tags“:** „Von Agenten vorgeschlagen“ mit „Annehmen“ / „Ablehnen“; „Auf der Liste (…)“
+  mit einer Beschreibungszeile je Tag, dem Stift („… umbenennen“: erst „Stellen zählen“, dann „Umbenennen“) und dem
+  Papierkorb („… von der Liste nehmen“); darunter eine Zeile zum Hinzufügen („Hinzufügen“). Ein Sechseck mit Zahl am
+  Reiter „Workspace“ und im Dock zeigt wartende Vorschläge.
+- **Darunter „Den ganzen Vault taggen“:** „1 · Eine Tag-Liste vorschlagen“ („Vorschlagen“) und „2 · Tags und Links für
+  jede Notiz planen“ („Planen“, später „Den Rest planen“), dann „Vorschau (… Notizen)“ mit „In … Notizen schreiben“ oder
+  „Verwerfen“.
 - **Im Editor:** nach `[[` Notizen vervollständigen, nach `#` Tags. ⌘-Klick (oder Vi `gd`, oder Klick in der
   Leseansicht) folgt dem Link; ⌃- springt zurück.
 - **In der Leseansicht** stehen die Tags aus dem Frontmatter als Chips oben; ein Klick zeigt die Notizen mit diesem
   Tag im Second Brain. Dasselbe tun die Tag-Chips im Detailfeld des Second Brain, die Tag-Gruppe in ⌘K und das
-  Suchfeld „Find notes or #tag“.
+  Suchfeld „Notizen oder #Tag finden“.
 
 ## Häufige Handgriffe
 
-1. **Vorschlag annehmen:** Settings → Workspace → „Proposed by agents“ → „Accept“. Der Tag kommt auf die Liste und
-   auf die Notizen, die ihn wollten.
-2. **Tag umbenennen oder zusammenlegen:** beim Tag den Stift → neuen Namen → „Count uses“ → „Rename“. Ein Name, der
-   schon auf der Liste steht, legt beide zusammen. Alle Notizen werden mit umgeschrieben.
-3. **Den ganzen Vault taggen:** „Tag the whole vault“ → Schritt 1 „Propose“, Vorschläge annehmen → Schritt 2 „Plan“
-   → „Preview“ prüfen → „Write into … notes“.
+1. **Vorschlag annehmen:** Einstellungen → Workspace → „Von Agenten vorgeschlagen“ → „Annehmen“. Der Tag kommt auf die
+   Liste und auf die Notizen, die ihn wollten.
+2. **Tag umbenennen oder zusammenlegen:** beim Tag den Stift → neuen Namen → „Stellen zählen“ → „Umbenennen“. Ein Name,
+   der schon auf der Liste steht, legt beide zusammen. Alle Notizen werden mit umgeschrieben.
+3. **Den ganzen Vault taggen:** „Den ganzen Vault taggen“ → Schritt 1 „Vorschlagen“, Vorschläge annehmen → Schritt 2
+   „Planen“ → „Vorschau“ prüfen → „In … Notizen schreiben“.
 
 ## Fallen
 
 - Der Vault-Lauf kostet Geld (jeder Schritt nennt vorher, was er liest und kostet) und schreibt **nichts**, bevor
-  du „Write into … notes“ klickst.
-- „Take … off the list“ nimmt den Tag nur von der Liste; die Notizen behalten ihn.
+  du „In … Notizen schreiben“ klickst.
+- „… von der Liste nehmen“ nimmt den Tag nur von der Liste; die Notizen behalten ihn.
 - Ein Link auf eine Notiz, die es nicht gibt, wird gedämpft gezeigt; ⌘-Klick **legt sie an** (neben der aktuellen
   Notiz). Passt ein Name auf mehrere Notizen, nenne den Ordner mit.
-- Benennst du eine Notiz in der App um, fragt sie „Update … links in … notes?“ — mit „Update“ ziehen die
+- Benennst du eine Notiz in der App um, fragt sie „… Links in … Notizen anpassen?“ — mit „Anpassen“ ziehen die
   `[[Links]]` mit.
 - `TAGS.md` nicht von Hand bearbeiten; dafür sind die Einstellungen da. Im Terminal gibt es für den Owner
   `axiomata-cli notes tags rename <alt> <neu>`, `notes tags describe <tag> "<Text>"` und `notes tags lift-inline`

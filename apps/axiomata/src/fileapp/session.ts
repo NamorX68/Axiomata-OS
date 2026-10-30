@@ -25,6 +25,7 @@
  * a fake one (`session.test.ts`).
  */
 
+import { messageOf } from "../core/errors";
 import type { EditorRecovery, FileChange, FileVersion, TextFile } from "../core/backend";
 import { EditorDocument } from "../editor/document";
 import type { Indent } from "../editor/detect";
@@ -76,8 +77,7 @@ function errorKind(err: unknown): string | undefined {
 }
 
 function errorText(err: unknown): string {
-  if (typeof err === "object" && err !== null && "message" in err) return String((err as FileErrorShape).message);
-  return String(err);
+  return messageOf(err);
 }
 
 export class FileSession {

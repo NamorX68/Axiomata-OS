@@ -5,6 +5,7 @@
   is only replaced after the question under its row.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount, tick } from "svelte";
 
   import type { BundledSkill } from "../core/backend";
@@ -39,7 +40,7 @@
       bundledSkills.set(await ctx.invoke<BundledSkill[]>(cmd, args));
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       busy = false;
     }

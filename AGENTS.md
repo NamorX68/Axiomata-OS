@@ -148,8 +148,9 @@ from the code itself:
   component draws no text of its own (`coverage.test.ts` checks every one); dates and numbers only
   through `core/format.ts`. What a model reads (roles, prompts, skills, `APP_GUIDE`) and the CLI stay English.
 - **The handbook is part of the build** (`docs/handbook/`, `docs/plans/chat-knows-app.md`): one page per area of the
-  app, embedded by `axiomata_core::handbook` and replaced in `~/.axiomata/handbook/` at start. A change the owner can
-  see updates its page in the same commit — a new ring entry, view or Settings tab also gets its row in
+  app, in German and in English (`docs/handbook/en/`, same file names — a page missing in either fails the build),
+  embedded by `axiomata_core::handbook` and replaced in `~/.axiomata/handbook/` at start. A change the owner can
+  see updates its page in both languages in the same commit — a new ring entry, view or Settings tab also gets its row in
   `core/handbook.ts` `PAGE_FOR_PLACE`; the Rust and vitest coverage tests fail otherwise. The round is not done before.
 - **Skills live in one place only**, `~/.axiomata/skills/<name>/SKILL.md` — there is no
   workspace-local skill location (dropped deliberately; `docs/architecture.md` §4 explains

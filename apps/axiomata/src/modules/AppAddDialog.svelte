@@ -37,6 +37,7 @@
   helpful. Chrome is the shared `Window.svelte`.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import {
     addUserApp,
     hiddenBuiltins,
@@ -91,7 +92,7 @@
       apps = result.apps;
       truncated = result.truncated;
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       loading = false;
     }

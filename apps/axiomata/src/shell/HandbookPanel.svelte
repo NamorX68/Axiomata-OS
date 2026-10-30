@@ -7,6 +7,8 @@
   Markdown is rendered by `core/markdown.ts`, which sanitises it, so `{@html}` only ever shows what DOMPurify kept.
 -->
 <script lang="ts">
+  import { lang } from "../i18n/lang.svelte";
+  import { messageOf } from "../core/errors";
   import { renderMarkdown } from "../core/markdown";
   import { listHandbook, pageOfLink, readHandbookPage, withPageLinks, type HandbookEntry } from "../core/handbook";
   import { registerShellView } from "../core/openViews";
@@ -45,11 +47,18 @@
       : undefined,
   );
 
+  /** The language the table of contents was read in: a switch reads it again (titles differ by language). */
+  let entriesLang = $state<string | null>(null);
+
   $effect(() => {
-    if (!open || entries.length > 0) return;
+    const language = lang();
+    if (!open || entriesLang === language) return;
     listHandbook()
-      .then((list) => (entries = list))
-      .catch((err) => (failure = String(err)));
+      .then((list) => {
+        entries = list;
+        entriesLang = language;
+      })
+      .catch((err) => (failure = messageOf(err)));
   });
 
   // A page asked for from outside wins over the one last shown.
@@ -68,7 +77,7 @@
         article?.scrollTo({ top: 0 });
       })
       .catch((err) => {
-        if (name === current) failure = String(err);
+        if (name === current) failure = messageOf(err);
       });
   });
 

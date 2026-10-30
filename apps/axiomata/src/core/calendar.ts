@@ -12,6 +12,7 @@
  * button), it never triggers one on a timer.
  */
 
+import { messageOf } from "./errors";
 import { tModules } from "../i18n/modules";
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
@@ -158,7 +159,7 @@ export async function loadLatestCalendarDigest(invoke: Invoke, skillName: string
   try {
     return { run, digest: parseCalendarDigest(stdout), error: null, skipped };
   } catch (err) {
-    return { run, digest: EMPTY_DIGEST, error: err instanceof Error ? err.message : String(err), skipped };
+    return { run, digest: EMPTY_DIGEST, error: messageOf(err), skipped };
   }
 }
 

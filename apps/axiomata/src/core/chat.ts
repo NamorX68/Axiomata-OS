@@ -7,6 +7,7 @@
 import { get, writable } from "svelte/store";
 
 import { type ChatMode, type ChatReply, type EffortLevel, invokeBackend } from "./backend";
+import { messageOf } from "./errors";
 
 export type TurnRole = "user" | "assistant" | "instruction" | "error";
 
@@ -169,7 +170,7 @@ export async function send(
     );
     return reply;
   } catch (err) {
-    push("error", String(err));
+    push("error", messageOf(err));
     return null;
   } finally {
     busy.set(false);

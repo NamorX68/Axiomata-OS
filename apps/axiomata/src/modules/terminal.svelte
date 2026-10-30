@@ -109,6 +109,7 @@
   longer reach this component at all.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onDestroy, onMount } from "svelte";
   import { Channel } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -915,7 +916,7 @@
           });
       }
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 

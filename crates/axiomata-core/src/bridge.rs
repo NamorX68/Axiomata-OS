@@ -94,7 +94,7 @@ Axiomata — a view, a button, a setting, a skill, how something works — only 
 below. If neither says it, say so plainly and offer to note it as a gap in the handbook; never guess a name, a menu \
 or a step.
 
-**The handbook** (German, one page per area). Read a page with `{cli} app handbook <name>`; \
+**The handbook** (one page per area, in the owner's language). Read a page with `{cli} app handbook <name>`; \
 `{cli} app handbook` lists them. The pages:
 
 {contents}
@@ -147,7 +147,7 @@ pub fn render_manifest(entries: &[ManifestEntry], cli: &str, language: OwnerLang
     out.push('\n');
     out.push_str(
         &APP_GUIDE
-            .replace("{contents}", &handbook::contents())
+            .replace("{contents}", &handbook::contents_in(language))
             .replace("{cli}", cli),
     );
     out.push_str(language.line());
@@ -468,15 +468,22 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_is_told_the_owners_language_and_nothing_else_changes() {
+    fn the_chat_is_told_the_owners_language_and_reads_the_handbook_in_it() {
         let english = render_manifest(&[], "axiomata-cli", OwnerLanguage::En);
         let german = render_manifest(&[], "axiomata-cli", OwnerLanguage::De);
         assert!(english.contains("The owner's language is English; answer in it."));
         assert!(german.contains("The owner's language is German; answer in it."));
+        assert!(english.contains(&handbook::contents_in(OwnerLanguage::En)));
+        assert!(german.contains(&handbook::contents_in(OwnerLanguage::De)));
         assert_eq!(
-            german.replace(OwnerLanguage::De.line(), OwnerLanguage::En.line()),
+            german
+                .replace(OwnerLanguage::De.line(), OwnerLanguage::En.line())
+                .replace(
+                    &handbook::contents_in(OwnerLanguage::De),
+                    &handbook::contents_in(OwnerLanguage::En)
+                ),
             english,
-            "only the language line differs: the guide itself stays English (i18n.md, Q1)"
+            "the language line and the table of contents differ; the guide itself stays English (i18n.md, Q1)"
         );
     }
 
@@ -496,7 +503,7 @@ mod tests {
     #[test]
     fn the_guide_carries_the_handbooks_contents_and_the_rule_to_answer_from_it() {
         let text = render_manifest(&[], "/opt/axiomata-cli", OwnerLanguage::En);
-        assert!(text.contains(&handbook::contents()));
+        assert!(text.contains(&handbook::contents_in(OwnerLanguage::En)));
         assert!(text.contains("/opt/axiomata-cli app handbook <name>"));
         assert!(text.contains(
             "/opt/axiomata-cli app studio|spend|runs|routines|board|storage|settings|tags"

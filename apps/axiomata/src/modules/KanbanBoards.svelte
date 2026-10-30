@@ -10,6 +10,7 @@
    * The card treatment is here for the same reason — it is set once and then left alone — and applies to the whole
    * application (`kanbanPrefs.ts`).
    */
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { invokeBackend as invoke, type Board } from "../core/backend";
@@ -51,7 +52,7 @@
       boards = await invoke<Board[]>("list_boards");
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -68,7 +69,7 @@
       await load();
       onChanged();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       busy = false;
     }
@@ -82,7 +83,7 @@
       await Promise.all([load(), refreshBoard(board.id)]);
       onChanged();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -92,7 +93,7 @@
       const cards = await invoke<number>("count_board_cards", { boardId: board.id });
       confirming = { id: board.id, cards };
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -110,7 +111,7 @@
       onChanged();
       if (current === id) onDeleted();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       busy = false;
     }

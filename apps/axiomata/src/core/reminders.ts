@@ -12,6 +12,7 @@
  * `reminders-digest` run, never a timer.
  */
 
+import { messageOf } from "./errors";
 import { tModules } from "../i18n/modules";
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
@@ -141,7 +142,7 @@ export async function loadLatestReminderDigest(invoke: Invoke, skillName: string
   try {
     return { run, digest: parseReminderDigest(stdout), error: null, skipped };
   } catch (err) {
-    return { run, digest: EMPTY_REMINDER_DIGEST, error: err instanceof Error ? err.message : String(err), skipped };
+    return { run, digest: EMPTY_REMINDER_DIGEST, error: messageOf(err), skipped };
   }
 }
 

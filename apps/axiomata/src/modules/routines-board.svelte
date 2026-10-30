@@ -18,6 +18,7 @@
   mark, not an orange pill, and the times are plain figures — the fuse is the one thing here that glows.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import type { NewRoutine, Routine } from "../core/backend";
@@ -93,7 +94,7 @@
       routines = await ctx.invoke<Routine[]>("list_routines");
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -103,7 +104,7 @@
     try {
       await ctx.invoke<boolean>("set_routine_enabled", { id: r.id, enabled: !r.enabled });
     } catch (err) {
-      error = tModules("toggleFailed", { id: r.id, error: String(err) });
+      error = tModules("toggleFailed", { id: r.id, error: messageOf(err) });
     } finally {
       toggling = toggling.filter((id) => id !== r.id);
       await refresh();
@@ -116,7 +117,7 @@
     try {
       await ctx.invoke<boolean>("delete_routine", { id: r.id });
     } catch (err) {
-      error = tModules("deleteFailed", { id: r.id, error: String(err) });
+      error = tModules("deleteFailed", { id: r.id, error: messageOf(err) });
     } finally {
       deleting = deleting.filter((id) => id !== r.id);
       await refresh();
@@ -138,7 +139,7 @@
       await ctx.invoke("update_routine", { id: r.id, new: updated });
       editingId = null;
     } catch (err) {
-      error = tModules("editFailed", { id: r.id, error: String(err) });
+      error = tModules("editFailed", { id: r.id, error: messageOf(err) });
     } finally {
       saving = false;
       await refresh();

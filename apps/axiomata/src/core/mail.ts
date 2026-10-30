@@ -12,6 +12,7 @@
  * can reach, so every refresh is a real `mail-digest` run, never a timer.
  */
 
+import { messageOf } from "./errors";
 import { tModules } from "../i18n/modules";
 import type { RunSummary } from "./backend";
 import { cut } from "./markdown";
@@ -186,7 +187,7 @@ export async function loadLatestMailDigest(invoke: Invoke, skillName: string = M
   try {
     return { run, digest: parseMailDigest(stdout), error: null, skipped };
   } catch (err) {
-    return { run, digest: EMPTY_MAIL_DIGEST, error: err instanceof Error ? err.message : String(err), skipped };
+    return { run, digest: EMPTY_MAIL_DIGEST, error: messageOf(err), skipped };
   }
 }
 

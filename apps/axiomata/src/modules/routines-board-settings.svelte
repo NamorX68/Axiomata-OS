@@ -1,5 +1,6 @@
 <!-- Flip side of routines-board: display options + the add-routine form. -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import type { NewRoutine, Routine } from "../core/backend";
   import type { ModuleContext } from "../core/types";
   import { tModules } from "../i18n/modules";
@@ -41,7 +42,7 @@
       result = tModules("added", { id: created.id });
       formKey += 1;
     } catch (err) {
-      result = tModules("addFailed", { error: String(err) });
+      result = tModules("addFailed", { error: messageOf(err) });
     } finally {
       adding = false;
     }

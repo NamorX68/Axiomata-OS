@@ -104,19 +104,21 @@ pub fn run(core: &AxiomataCore, action: AppAction) -> Result<()> {
 }
 
 fn handbook_cmd(name: Option<&str>, json: bool) -> Result<()> {
+    // The owner's language, as the app stored it: the chat reads the pages with this command (`docs/plans/i18n.md`, Q4).
+    let language = handbook::owner_language();
     let Some(name) = name else {
         if json {
-            let pages: Vec<_> = handbook::PAGES
+            let pages: Vec<_> = handbook::pages(language)
                 .iter()
                 .map(|page| json!({"name": page.name, "title": page.title(), "summary": page.summary()}))
                 .collect();
             println!("{}", serde_json::to_string_pretty(&pages)?);
         } else {
-            print!("{}", handbook::contents());
+            print!("{}", handbook::contents_in(language));
         }
         return Ok(());
     };
-    let Some(page) = handbook::page(name) else {
+    let Some(page) = handbook::page_in(name, language) else {
         let known: Vec<&str> = handbook::PAGES.iter().map(|page| page.name).collect();
         bail!(
             "the handbook has no page {name:?}; its pages: {}",

@@ -25,6 +25,7 @@
   wo ich auf den Hintergrund klicke ich im Brain lande"). The speed and the labels come from `core/brainView.ts`, whether it moves from `core/motion.ts`.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import { openPath } from "@tauri-apps/plugin-opener";
@@ -204,7 +205,7 @@
       error = "";
       rebuild();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -335,7 +336,7 @@
    *  toast, same as `ModulePicker`'s own failed-create path. */
   function handleAppClick(n: GraphNode): void {
     if (n.userApp) {
-      if (n.appPath) void openPath(n.appPath).catch((err) => toast(String(err), "warning"));
+      if (n.appPath) void openPath(n.appPath).catch((err) => toast(messageOf(err), "warning"));
       return;
     }
     if (!n.appType) return;

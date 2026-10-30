@@ -10,6 +10,7 @@
  *   `complete_module_action`.
  */
 
+import { englishOf } from "./errors";
 import { get } from "svelte/store";
 
 import { languageSetting, lang } from "../i18n/lang.svelte";
@@ -113,7 +114,8 @@ async function pollOnce(): Promise<void> {
       response.result = result ?? null;
       response.ok = true;
     } catch (err) {
-      response.error = String(err);
+      // The chat agent reads it: English, as everything a model reads (i18n.md, Q1).
+      response.error = englishOf(err);
     }
     response.completed_at = new Date().toISOString();
     noteToolCall(label, response.ok);

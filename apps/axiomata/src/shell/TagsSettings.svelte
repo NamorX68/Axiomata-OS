@@ -6,6 +6,7 @@
   over the whole vault (`VaultTagging.svelte`, TL6).
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { invokeBackend, type RenameCount, type TagAnswer, type TagEntry, type TagProposal } from "../core/backend";
@@ -47,7 +48,7 @@
       descriptions = Object.fromEntries(list.map((entry) => [entry.tag, entry.description]));
       loadError = null;
     } catch (err) {
-      loadError = String(err);
+      loadError = messageOf(err);
     } finally {
       loading = false;
     }
@@ -62,7 +63,7 @@
       toast(done, "info");
       return true;
     } catch (err) {
-      toast(tTags("saveFailed", { error: String(err) }), "danger");
+      toast(tTags("saveFailed", { error: messageOf(err) }), "danger");
       return false;
     } finally {
       busy = false;
@@ -107,7 +108,7 @@
       });
       renaming = { ...renaming, count };
     } catch (err) {
-      toast(tTags("countFailed", { error: String(err) }), "danger");
+      toast(tTags("countFailed", { error: messageOf(err) }), "danger");
     } finally {
       busy = false;
     }
@@ -123,7 +124,7 @@
       renaming = null;
       await load();
     } catch (err) {
-      toast(tTags("renameFailed", { error: String(err) }), "danger");
+      toast(tTags("renameFailed", { error: messageOf(err) }), "danger");
     } finally {
       busy = false;
     }
@@ -145,7 +146,7 @@
       }
       await load();
     } catch (err) {
-      toast(tTags("answerFailed", { error: String(err) }), "danger");
+      toast(tTags("answerFailed", { error: messageOf(err) }), "danger");
     } finally {
       busy = false;
     }

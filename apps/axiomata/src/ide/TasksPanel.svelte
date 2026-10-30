@@ -7,6 +7,7 @@
   "Review" that lists exactly what they run; confirming it holds for that exact file content only.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import EmptyState from "../ui/EmptyState.svelte";
@@ -60,7 +61,7 @@
       listed = await listTasks(root);
     } catch (err) {
       listed = null;
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
   }
 
@@ -78,7 +79,7 @@
       reviewing = false;
       await refresh();
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
       await refresh();
     }
   }
@@ -124,7 +125,7 @@
       editing = null;
       await refresh();
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     } finally {
       saving = false;
     }
@@ -138,7 +139,7 @@
       await removeTask(root, task.source === "personal" ? "personal" : "project", task.label);
       await refresh();
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
   }
 

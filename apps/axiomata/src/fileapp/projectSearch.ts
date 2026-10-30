@@ -9,6 +9,7 @@
  * * **The backend is injected**, so the rules are tested without Tauri.
  */
 
+import { messageOf } from "../core/errors";
 import type { FileMatches, SearchQuery, SearchSummary } from "./backend";
 import { formatNumber } from "../core/format";
 import { tEditor } from "../i18n/editor";
@@ -77,7 +78,7 @@ export function toQuery(pattern: string, options: SearchOptions): SearchQuery {
 /** A failed search as a sentence, in the language of the moment it failed: a bad pattern (or glob) says what. */
 function errorText(err: unknown): string {
   const e = err as { kind?: string; message?: string } | null;
-  if (e?.kind !== "BadPattern") return e?.message ?? String(err);
+  if (e?.kind !== "BadPattern") return messageOf(err);
   const detail = (e.message ?? "").replace(/^bad search pattern: /, "");
   return tEditor(detail.startsWith("include/exclude") ? "invalidGlob" : "invalidPattern", { detail });
 }

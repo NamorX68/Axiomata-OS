@@ -11,6 +11,7 @@
  * is refused with the nearest names (S3) — a typo never costs a turn.
  */
 
+import { messageOf } from "./errors";
 import { get, writable } from "svelte/store";
 
 import { tChat } from "../i18n/chat";
@@ -296,7 +297,7 @@ async function helpTopic(topic: string): Promise<CommandResult> {
   try {
     entries = await listHandbook();
   } catch (err) {
-    return { ok: false, message: tChat("handbookUnreadable", { error: String(err) }) };
+    return { ok: false, message: tChat("handbookUnreadable", { error: messageOf(err) }) };
   }
   const page = pageForTopic(topic, entries);
   if (page) {
@@ -385,7 +386,7 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
       try {
         await invokeBackend("write_workspace_file", { rel: path, content: "" });
       } catch (err) {
-        return { ok: false, message: String(err) };
+        return { ok: false, message: messageOf(err) };
       }
       openFilePanel(path, "edit");
       return { ok: true, message: tChat("created", { path }) };
@@ -417,7 +418,7 @@ async function model(args: string[]): Promise<CommandResult> {
   try {
     config = await invokeBackend<ConfigView>("get_config");
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
   const provider = config.agents.chat_provider;
   const configured = config.agents.providers[provider]?.chat_model ?? "";
@@ -458,7 +459,7 @@ async function effort(args: string[]): Promise<CommandResult> {
   try {
     config = await invokeBackend<ConfigView>("get_config");
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
   if (config.agents.chat_harness !== "axh") {
     return { ok: false, message: tChat("effortGlutOnly") };
@@ -531,7 +532,7 @@ async function resume(args: string[]): Promise<CommandResult> {
   try {
     list = await invokeBackend<ChatSessionWire[]>("chat_sessions");
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
   const wanted = args[0];
   if (!wanted) {
@@ -554,7 +555,7 @@ async function undo(): Promise<CommandResult> {
     const done = await invokeBackend<string>("chat_undo", { sessionId: id });
     return { ok: true, message: tChat("undone"), panel: textPanel(tChat("panelUndo"), done) };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
 }
 
@@ -579,7 +580,7 @@ async function skills(args: string[]): Promise<CommandResult> {
         message: tChat("skillRan", { name: args[1], status: run.status, ms: run.duration_ms }),
       };
     } catch (err) {
-      return { ok: false, message: String(err) };
+      return { ok: false, message: messageOf(err) };
     }
   }
   if (args.length > 0) return { ok: false, message: tChat("usage", { usage: "/skills [run <name>]" }) };
@@ -588,7 +589,7 @@ async function skills(args: string[]): Promise<CommandResult> {
     if (list.length === 0) return { ok: true, message: tChat("noSkills") };
     return { ok: true, message: "", panel: skillsPanel(list) };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
 }
 
@@ -650,6 +651,6 @@ async function moduleAction(type: string, args: string[]): Promise<CommandResult
     const title = tChat("panelTile", { type, action });
     return { ok: true, message, panel: textPanel(title, JSON.stringify(out, null, 2), true) };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
 }

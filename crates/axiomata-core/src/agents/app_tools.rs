@@ -189,8 +189,9 @@ fn topic_names() -> Vec<&'static str> {
 /// The answer to `query`: the handbook from the build, a view from the database and the config.
 fn answer(config: &Config, query: Query) -> Result<String, String> {
     match query {
-        Query::Handbook(None) => Ok(handbook::contents()),
-        Query::Handbook(Some(name)) => handbook::page(&name)
+        // In the owner's language, as the chat answers in it (`docs/plans/i18n.md`, Q4, Q16).
+        Query::Handbook(None) => Ok(handbook::contents_in(handbook::owner_language())),
+        Query::Handbook(Some(name)) => handbook::page_in(&name, handbook::owner_language())
             .map(|page| page.text.to_owned())
             .ok_or_else(|| {
                 let known: Vec<&str> = handbook::PAGES.iter().map(|page| page.name).collect();
@@ -294,13 +295,18 @@ mod tests {
     #[test]
     fn the_handbook_is_answered_from_the_build() {
         let config = Config::default();
+        // In the owner's language, whatever this machine's is; the lock keeps another test's AXIOMATA_HOME out.
+        let _guard = crate::test_support::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let language = handbook::owner_language();
         assert_eq!(
             answer(&config, Query::Handbook(None)).unwrap(),
-            handbook::contents()
+            handbook::contents_in(language)
         );
         assert_eq!(
             answer(&config, Query::Handbook(Some("kanban".into()))).unwrap(),
-            handbook::page("kanban").unwrap().text
+            handbook::page_in("kanban", language).unwrap().text
         );
         assert!(answer(&config, Query::Handbook(Some("../config.toml".into()))).is_err());
     }

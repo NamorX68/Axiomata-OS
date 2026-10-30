@@ -11,6 +11,7 @@
   button turns into a quiet "busy" mark; the last outcome is a hex mark.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { type BundledSkill, type RunSummary, type Skill, type SkippedSkill, runFailed } from "../core/backend";
@@ -66,7 +67,7 @@
       ]);
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -76,7 +77,7 @@
     try {
       await ctx.invoke<RunSummary>("run_skill", { name });
     } catch (err) {
-      error = tCanvas("errRun", { name, error: String(err) });
+      error = tCanvas("errRun", { name, error: messageOf(err) });
     } finally {
       running = running.filter((n) => n !== name);
       await refresh();
@@ -90,7 +91,7 @@
     try {
       await ctx.invoke<RunSummary>("resume_run", { id });
     } catch (err) {
-      error = tCanvas("errResume", { name, error: String(err) });
+      error = tCanvas("errResume", { name, error: messageOf(err) });
     } finally {
       running = running.filter((n) => n !== name);
       await refresh();
@@ -102,7 +103,7 @@
     try {
       await ctx.invoke("discard_run", { id });
     } catch (err) {
-      error = tCanvas("errDrop", { name, error: String(err) });
+      error = tCanvas("errDrop", { name, error: messageOf(err) });
     }
     await refresh();
   }

@@ -15,6 +15,7 @@
  * layout the user just arranged in a timer that is about to be replaced.
  */
 
+import { messageOf } from "../core/errors";
 import { invokeBackend as invoke, type IdeProject } from "../core/backend";
 import { toast } from "../core/toast";
 import { tStudio } from "../i18n/studio";
@@ -83,7 +84,7 @@ export async function flushLayout(): Promise<void> {
   } catch (err) {
     if (!failing) {
       failing = true;
-      toast(tStudio("layoutNotSaved", { error: err instanceof Error ? err.message : String(err) }), "danger");
+      toast(tStudio("layoutNotSaved", { error: messageOf(err) }), "danger");
     }
   }
 }

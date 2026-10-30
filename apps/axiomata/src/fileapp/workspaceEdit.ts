@@ -15,6 +15,7 @@
  * text as sent (`textForSave`), a closed file's text on disk.
  */
 
+import { messageOf } from "../core/errors";
 import { writable } from "svelte/store";
 
 import { run, UNWRAPPED } from "../editor/commands";
@@ -105,7 +106,7 @@ export async function applyWorkspaceEdit(edits: Map<string, TextEdit[]>, ports: 
       outcome.changed++;
     } catch (err) {
       const kind = (err as { kind?: string } | null)?.kind;
-      const reason = kind === "Conflict" ? tEditor("editChangedOnDisk") : String(err);
+      const reason = kind === "Conflict" ? tEditor("editChangedOnDisk") : messageOf(err);
       outcome.skipped.push({ file: file.rel, reason });
     }
   }

@@ -9,6 +9,7 @@
  * rest, so a hand-edit or an older file never breaks the editor.
  */
 
+import { messageOf } from "../core/errors";
 import { writable, type Writable } from "svelte/store";
 
 import { invokeBackend, type LoadedJsonState } from "../core/backend";
@@ -223,7 +224,7 @@ export function ensureEditorSettingsLoaded(): Promise<void> {
       }
       editorSettings.set(parseEditorSettings(parsed));
     })
-    .catch((err) => toast(tEditor("settingsReadFailed", { error: String(err) }), "danger"));
+    .catch((err) => toast(tEditor("settingsReadFailed", { error: messageOf(err) }), "danger"));
   return loaded;
 }
 
@@ -234,7 +235,7 @@ export function updateEditorSettings(patch: Partial<EditorSettings>): void {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       invokeBackend("save_editor_settings", { json: JSON.stringify({ version: SETTINGS_VERSION, ...next }) }).catch(
-        (err) => toast(tEditor("settingsSaveFailed", { error: String(err) }), "danger"),
+        (err) => toast(tEditor("settingsSaveFailed", { error: messageOf(err) }), "danger"),
       );
     }, SAVE_DEBOUNCE_MS);
     return next;

@@ -14,22 +14,23 @@ ausgeblendet) und **Review** (fertige Arbeit wartet auf Prüfung und Übernahme)
 
 ## Wo die Knöpfe sind
 
-- **Öffnen:** App-Ring oder Dock „Kanban“, ⌘K „Open Kanban“; es öffnet das zuletzt benutzte Board.
-- **Werkzeugleiste:** „Choose a board“, „Filter cards …“, Label-Chips, „Show/Hide archived cards“, „Reload the
-  board“, „Add a column“, „Boards & view“ („New board …“, Name direkt umbenennen, ✕ „Delete the board“, „Colour
-  stripe by the first label“).
-- **Spalte:** Menü mit Rolle („open“ / „in progress“ / „done“), „Rename“, „Remove“; unten „+ Card“.
-- **Karte öffnen:** Felder Titel, Text, Labels, „Due“, „Assigned to“; der Abschnitt „Ablauf“ (Art, Level, Rolle,
-  Abhängigkeiten „Braucht zuerst“); „Verlauf“ mit „Write a note …“; bei Studio-Arbeit „Verbrauch“.
-- **Knöpfe einer Karte** (je nach Zustand): „Start …“, „Start review …“, „Take over …“, „Open in the Flow“ bzw.
-  „Take over in the Flow …“, „Release“, „Accept proposal“, „Reopen“, „Absagen“, „Archive“ / „Restore“, „Delete“.
+- **Öffnen:** App-Ring oder Dock „Kanban“, ⌘K „Kanban öffnen“; es öffnet das zuletzt benutzte Board.
+- **Werkzeugleiste:** „Wähle ein Board“, „Karten filtern…“, Label-Chips, „Archivierte Karten zeigen“ / „… ausblenden“,
+  „Board neu laden“, „Spalte hinzufügen“, „Boards & Ansicht“ („Neues Board…“, Name direkt umbenennen, ✕ „Board löschen“,
+  „Farbstreifen nach dem ersten Label“).
+- **Spalte:** Menü mit Rolle („offen“ / „in Arbeit“ / „erledigt“), „Umbenennen“, „Entfernen“; unten „+ Karte“.
+- **Karte öffnen:** Felder Titel, Text, Labels, „Fällig“, „Zugewiesen an“; der Abschnitt „Agenten-Flow“ (Art, Level,
+  Rolle, Abhängigkeiten „Braucht zuerst“); „Verlauf“ mit „Schreibe eine Notiz…“; bei Studio-Arbeit „Verbrauch“.
+- **Knöpfe einer Karte** (je nach Zustand): „Starten…“, „Prüfung starten…“, „Übernehmen…“, „Im Flow öffnen“ bzw. „Im
+  Flow übernehmen…“, „Freigeben“, „Vorschlag annehmen“, „Wieder öffnen“, „Absagen“, „Archivieren“ / „Wiederherstellen“,
+  „Löschen“.
 
 ## Häufige Handgriffe
 
-1. **Karte anlegen:** in der Spalte „+ Card“ → Titel → Enter.
-2. **Karte von Agenten erledigen lassen:** Karte öffnen → „Start …“ → Projekt → „Start as plan“ (wird ein Plan im
-   [Flow](flow.md), bis 5 $). Eine Karte, die schon Schritt eines Plans ist, startet mit „Start …“ auf einer Engine.
-3. **Vorschlag eines Agenten annehmen:** Karte in „Proposal“ öffnen → „Accept proposal“ (oder „Absagen“).
+1. **Karte anlegen:** in der Spalte „+ Karte“ → Titel → Enter.
+2. **Karte von Agenten erledigen lassen:** Karte öffnen → „Starten…“ → Projekt → „Als Plan starten“ (wird ein Plan im
+   [Flow](flow.md), bis 5 $). Eine Karte, die schon Schritt eines Plans ist, startet mit „Starten…“ auf einer Engine.
+3. **Vorschlag eines Agenten annehmen:** Karte in „Proposal“ öffnen → „Vorschlag annehmen“ (oder „Absagen“).
 
 ## Fallen
 
@@ -39,8 +40,8 @@ ausgeblendet) und **Review** (fertige Arbeit wartet auf Prüfung und Übernahme)
   Freigabe, mit der niemand rechnet.
 - Die Notizen in `Kanban/` sind nur ein Spiegel: was du dort änderst, liest die App **nie** zurück und überschreibt
   es bei der nächsten Änderung am Board.
-- „Take over …“ übernimmt die Arbeit in den Branch des Projekts, pusht aber nichts.
-- „Release“ gibt eine laufende Karte frei: sie wartet wieder offen, die Sitzung verliert ihren Zugang.
+- „Übernehmen…“ übernimmt die Arbeit in den Branch des Projekts, pusht aber nichts.
+- „Freigeben“ gibt eine laufende Karte frei: sie wartet wieder offen, die Sitzung verliert ihren Zugang.
 - Eine Spalte mit Karten fragt beim Entfernen, wohin die Karten sollen.
 
 ## Siehe auch

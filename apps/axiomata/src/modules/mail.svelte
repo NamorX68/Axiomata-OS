@@ -27,6 +27,7 @@
   shows a short, truncated preview of the same text.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
@@ -100,7 +101,7 @@
       staleNote = staleDigestNote(result);
       void writeAllMailSummaries(ctx.invoke, digest.emails);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
       staleNote = "";
     } finally {
       loading = false;
@@ -114,7 +115,7 @@
       const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       await applyFreshRun(full);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       running = false;
     }
@@ -126,7 +127,7 @@
     try {
       await openMailSummary(ctx.invoke, item);
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       openingId = null;
     }

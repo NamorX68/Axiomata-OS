@@ -5,6 +5,7 @@
   answer it is simply not there. Nothing here touches projects, the vault or `~/.glut` directly.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { invokeBackend } from "../core/backend";
@@ -60,7 +61,7 @@
       if (!draft || !changed) draft = { ...loaded.settings };
       loadError = null;
     } catch (err) {
-      loadError = String(err);
+      loadError = messageOf(err);
     } finally {
       loading = false;
     }
@@ -75,7 +76,7 @@
       toast(tStorage("rulesSaved"), "info");
       await load();
     } catch (err) {
-      toast(tStorage("saveRulesFailed", { error: String(err) }), "danger");
+      toast(tStorage("saveRulesFailed", { error: messageOf(err) }), "danger");
     } finally {
       saving = false;
     }
@@ -95,7 +96,7 @@
       if (outcome.glut_note) toast(outcome.glut_note, "warning");
       view = outcome.view;
     } catch (err) {
-      toast(tStorage("cleanFailed", { error: String(err) }), "danger");
+      toast(tStorage("cleanFailed", { error: messageOf(err) }), "danger");
     } finally {
       cleaning = false;
     }
@@ -110,7 +111,7 @@
       toast(tStorage("worktreeDeleted"), "info");
       await load();
     } catch (err) {
-      toast(tStorage("worktreeDeleteFailed", { error: String(err) }), "danger");
+      toast(tStorage("worktreeDeleteFailed", { error: messageOf(err) }), "danger");
     } finally {
       removing = null;
     }
@@ -124,7 +125,7 @@
       toast(tStorage("backupDeleted"), "info");
       await load();
     } catch (err) {
-      toast(tStorage("backupDeleteFailed", { error: String(err) }), "danger");
+      toast(tStorage("backupDeleteFailed", { error: messageOf(err) }), "danger");
     } finally {
       removing = null;
     }

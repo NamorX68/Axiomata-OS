@@ -24,10 +24,11 @@ use crate::AxiomataError;
 use crate::board::{PlanStatus, flow};
 use crate::card_session::{choose_engine, lock, remove_sessions, session_name};
 use crate::config::Config;
+use crate::error::coded;
 use crate::ide::agent_store;
 use crate::ide::model::Agent;
 use crate::ide::{store as project_store, worktree};
-use crate::roster::{self, refusal};
+use crate::roster::{self, no_plan, no_project, refusal};
 
 /// The role kind of a planner.
 const KIND_PLAN: &str = "plan";
@@ -78,8 +79,9 @@ fn pick_planner<'a>(roles: &'a [Role], grill: bool, asked: Option<&str>) -> Resu
             .iter()
             .find(|role| role.name == name && role.kind == kind)
             .ok_or_else(|| {
-                refusal(
-                    "role",
+                coded(
+                    "role.unknownOfKind",
+                    &[("name", name), ("kind", kind)],
                     format!("there is no role “{name}” of kind {kind} for this project"),
                 )
             });
@@ -89,8 +91,9 @@ fn pick_planner<'a>(roles: &'a [Role], grill: bool, asked: Option<&str>) -> Resu
         .find(|role| role.kind == kind && role.name == default)
         .or_else(|| roles.iter().find(|role| role.kind == kind))
         .ok_or_else(|| {
-            refusal(
-                "role",
+            coded(
+                "role.noneOfKind",
+                &[("kind", kind), ("default", default)],
                 format!(
                     "there is no role of kind {kind} for this project; the {default} role is seeded at the next start of \
                      the app, or add one in Models & roles"
@@ -118,8 +121,9 @@ fn refuse_second_planner(
         .into_iter()
         .find(|agent| agent.plan_id == Some(plan_id) && kind_of(agent) == wanted.kind)
     {
-        Some(existing) => Err(refusal(
-            "plan",
+        Some(existing) => Err(coded(
+            "plan.sessionExists",
+            &[("plan", &plan_id.to_string()), ("name", &existing.name)],
             format!(
                 "plan #{plan_id} has such a session already, {}; open its pane in the Studio",
                 existing.name
@@ -193,11 +197,14 @@ fn prepare(
     request: &PlanStartRequest,
     cli_available: bool,
 ) -> Result<Plan> {
-    let plan = flow::get_plan(db, request.plan_id)?
-        .ok_or_else(|| refusal("plan", format!("no plan {}", request.plan_id)))?;
+    let plan = flow::get_plan(db, request.plan_id)?.ok_or_else(|| no_plan(request.plan_id))?;
     if plan.status != PlanStatus::Draft {
-        return Err(refusal(
-            "plan",
+        return Err(coded(
+            "plan.notDraft",
+            &[
+                ("plan", &plan.id.to_string()),
+                ("status", plan.status.as_str()),
+            ],
             format!(
                 "plan #{} is {}: only a draft is planned",
                 plan.id,
@@ -206,20 +213,20 @@ fn prepare(
         ));
     }
     let project = project_store::get_project(db, request.project_id)?
-        .ok_or_else(|| refusal("project", format!("no project {}", request.project_id)))?;
+        .ok_or_else(|| no_project(request.project_id))?;
     if !worktree::is_repo(&project.repo_root) {
-        return Err(refusal(
-            "project",
-            "a planner needs a worktree of its own, and this project is not a git repository"
-                .to_string(),
+        return Err(coded(
+            "planner.projectNotRepo",
+            &[],
+            "a planner needs a worktree of its own, and this project is not a git repository",
         ));
     }
     if !cli_available {
-        return Err(refusal(
-            "axiomata-cli",
+        return Err(coded(
+            "planner.noCli",
+            &[],
             "a planner needs the team tools, and no `axiomata-cli` was found next to the app (build the workspace, or \
-             set AXIOMATA_CLI)"
-                .to_string(),
+             set AXIOMATA_CLI)",
         ));
     }
     let sessions = agent_store::list_agents(db, request.project_id)?;
@@ -246,11 +253,11 @@ fn finish(
     plan: &Plan,
     commit: &str,
 ) -> Result<PlanSession> {
-    let current = flow::get_plan(db, request.plan_id)?
-        .ok_or_else(|| refusal("plan", format!("no plan {}", request.plan_id)))?;
+    let current = flow::get_plan(db, request.plan_id)?.ok_or_else(|| no_plan(request.plan_id))?;
     if current.status != PlanStatus::Draft {
-        return Err(refusal(
-            "plan",
+        return Err(coded(
+            "plan.noLongerDraft",
+            &[("plan", &current.id.to_string())],
             format!("plan #{} is not a draft any more", current.id),
         ));
     }

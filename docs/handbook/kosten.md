@@ -5,8 +5,8 @@ Was Agenten-Läufe kosten, woher die Preise kommen und welche Grenzen Chat, Skil
 ## Was es ist
 
 Axiomata misst Geld nur bei **bezahlten Providern** (OpenRouter; Ollama zählt nichts). Anthropic läuft über das Abo
-und den Claude-Code-Login — dafür gibt es keine Kostenzählung, die Zeile heißt dann „billed through the subscription
-— no cost tracking“. Gemessen wird nicht die Schätzung des Werkzeugs, sondern **Tokens × Preis je Modell**; der
+und den Claude-Code-Login — dafür gibt es keine Kostenzählung, die Zeile heißt dann „wird über das Abo abgerechnet —
+keine Kostenerfassung“. Gemessen wird nicht die Schätzung des Werkzeugs, sondern **Tokens × Preis je Modell**; der
 Teil der Eingabe, der aus dem Cache kommt, wird zum günstigeren Cache-Preis gezählt, wenn einer bekannt ist.
 
 **Die Preise** kommen aus OpenRouters Preisliste: bei jedem Auffrischen des Modell-Katalogs (beim App-Start, einmal
@@ -18,7 +18,7 @@ ersetzt. Beim Start rechnet die App schon erfasste Läufe gegen die Tabelle nach
 
 | Grenze | gilt für | Vorgabe |
 |---|---|---|
-| „Daily limit (USD, paid providers)“ | Chat und Skills/Routinen zusammen | 2 $ am Tag |
+| „Tagesgrenze (USD, bezahlte Anbieter)“ | Chat und Skills/Routinen zusammen | 2 $ am Tag |
 | Grenze eines Plans | alle Sitzungen eines Studio-Plans | 15 $ und 6 Mio. Tokens |
 | Grenze eines Karten-Plans | ein mit „Start“ gestarteter Karten-Plan | 5 $ |
 | Tagesgrenze des Studios | alle Plan- und Kartensitzungen eines Tages | 20 $ |
@@ -26,23 +26,23 @@ ersetzt. Beim Start rechnet die App schon erfasste Läufe gegen die Tabelle nach
 
 ## Wo die Knöpfe sind
 
-- **Settings → AI providers**, unten im Abschnitt „Harness & provider assignment“: je Rolle die Zeile „Spend chat →
-  …“ mit heute / Grenze / diesen Monat, darunter das Feld „Daily limit (USD, paid providers)“ (leer = keine Grenze),
-  dann „Save assignment“.
-- **Studio → Flow**, im Plan: das Feld „Cost limit (USD)“ über dem Ziel (leer = keine eigene Grenze) und die Zeile
-  „Verbrauch: …“ mit dem Tagesstand des Studios.
-- **Studio → Agents-Bereich → „Models & roles…“ → „Roles“**, eine Rolle öffnen → „Advanced“: „Cost limit (USD)“,
-  „Token limit“, „Step limit“ (leer = die Vorgabe der Stufe).
+- **Einstellungen → KI-Anbieter**, unten im Abschnitt „Harness & Anbieter zuordnen“: je Rolle die Zeile „Ausgaben Chat →
+  …“ mit heute / Grenze / diesen Monat, darunter das Feld „Tagesgrenze (USD, bezahlte Anbieter)“ (leer = keine Grenze),
+  dann „Zuordnung speichern“.
+- **Studio → Flow**, im Plan: das Feld „Kostengrenze (USD)“ über dem Ziel (leer = keine eigene Grenze) und die Zeile
+  „Ausgaben: …“ mit dem Tagesstand des Studios.
+- **Studio → Agenten-Bereich → „Modelle & Rollen…“ → „Rollen“**, eine Rolle öffnen → „Erweitert“: „Kostengrenze (USD)“,
+  „Token-Grenze“, „Schrittgrenze“ (leer = die Vorgabe der Stufe).
 - Im Terminal: `axiomata-cli board usage` zeigt Schritte, Tokens und Geld einer Sitzung gegen ihre Grenzen.
 
 ## Häufige Handgriffe
 
-1. **Tagesgrenze für Chat und Skills ändern:** Settings → AI providers → „Daily limit (USD, paid providers)“ →
-   „Save assignment“.
-2. **Ein pausierter Plan soll weiterlaufen:** im Flow beim Plan „Continue“ — das setzt seine Grenze auf den
+1. **Tagesgrenze für Chat und Skills ändern:** Einstellungen → KI-Anbieter → „Tagesgrenze (USD, bezahlte Anbieter)“ →
+   „Zuordnung speichern“.
+2. **Ein pausierter Plan soll weiterlaufen:** im Flow beim Plan „Weiter“ — das setzt seine Grenze auf den
    bisherigen Verbrauch plus einen neuen Spielraum.
-3. **Prüfen, was heute ausgegeben wurde:** Settings → AI providers, die „Spend …“-Zeilen; für das Studio die
-   „Verbrauch“-Zeile im Flow.
+3. **Prüfen, was heute ausgegeben wurde:** Einstellungen → KI-Anbieter, die „Ausgaben …“-Zeilen; für das Studio die
+   „Ausgaben“-Zeile im Flow.
 
 ## Fallen
 

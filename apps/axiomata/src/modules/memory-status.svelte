@@ -4,6 +4,7 @@
   mounted. `config.compact` (flip side) collapses it to a single badge line.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import type { MemoryStatus, SyncReport } from "../core/backend";
@@ -44,7 +45,7 @@
       status = await ctx.invoke<MemoryStatus>("get_memory_status");
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -61,7 +62,7 @@
         failed: r.failed.length,
       };
     } catch (err) {
-      lastReport = { ok: false, error: String(err) };
+      lastReport = { ok: false, error: messageOf(err) };
     } finally {
       syncing = false;
       await refresh();

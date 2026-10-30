@@ -24,6 +24,7 @@
     to connect it — `launch_command` / `launch_env`, never the profile's own.
 -->
 <script lang="ts">
+  import { messageOf } from "../../core/errors";
   import type { IdeAgent, ProvisionedAgent } from "../../core/backend";
   import AgentTeamEntry from "../AgentTeamEntry.svelte";
   import SessionMail from "../SessionMail.svelte";
@@ -89,7 +90,7 @@
         if (agent.id === id) ready = provisioned;
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = messageOf(err);
         if (agent.id === id) failure = message;
         toast(`${agent.name}: ${message}`, "danger");
       });

@@ -33,6 +33,12 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
 
+/// A core error as the frontend receives it: a coded refusal keeps its code so the app can say it in the owner's
+/// language (`docs/plans/i18n.md`, Q11; `core/errors.ts` `messageOf`), everything else is its sentence.
+pub(crate) fn ui(err: axiomata_core::AxiomataError) -> String {
+    err.for_ui()
+}
+
 /// The Tauri-managed core engine.
 pub type CoreState = AxiomataCore;
 
@@ -328,7 +334,7 @@ pub fn get_config(state: State<'_, CoreState>) -> ConfigView {
 pub fn get_spend_summary(state: State<'_, CoreState>) -> Result<Vec<spend::SpendSummary>, String> {
     let config = read_config(&state.config);
     let db = state.db_lock();
-    spend::role_spend_summaries_now(&db, &config).map_err(|err| err.to_string())
+    spend::role_spend_summaries_now(&db, &config).map_err(ui)
 }
 
 /// The stored model catalog of every provider (board card #17) — what the model pickers offer.
@@ -414,7 +420,7 @@ fn apply_config_update(config: &RwLock<Config>, mut new_config: Config) -> Resul
         .unwrap_or(current.workspace_root.as_path());
     let workspace_changed = new_config.workspace_root.as_path() != baseline_root;
 
-    new_config.save().map_err(|err| err.to_string())?;
+    new_config.save().map_err(ui)?;
     // The live workspace root is frozen for the process's lifetime — a live
     // swap has too wide a blast radius (see `save_config`'s doc). Whatever
     // was just written to disk, the in-memory copy keeps its root until
@@ -1301,14 +1307,14 @@ mod tests {
 /// file is moved to `.bak` and reported in `recovered_backup`.
 #[tauri::command]
 pub fn get_dashboard_state() -> Result<LoadedState, String> {
-    dashboard::load_state().map_err(|err| err.to_string())
+    dashboard::load_state().map_err(ui)
 }
 
 /// Validates and atomically writes the dashboard state handed in by the
 /// frontend. The core only checks "object with numeric `version`".
 #[tauri::command]
 pub fn save_dashboard_state(json: String) -> Result<(), String> {
-    dashboard::save_state(&json).map_err(|err| err.to_string())
+    dashboard::save_state(&json).map_err(ui)
 }
 
 /// Reads `~/.axiomata/terminal-settings.json` (raw text) or the defaults —
@@ -1319,7 +1325,7 @@ pub fn save_dashboard_state(json: String) -> Result<(), String> {
 /// contract as `axiomata_core::json_state::load`.
 #[tauri::command]
 pub fn get_terminal_settings() -> Result<LoadedTerminalSettings, String> {
-    terminal_settings::load_settings().map_err(|err| err.to_string())
+    terminal_settings::load_settings().map_err(ui)
 }
 
 /// Validates and atomically writes the Terminal module's global preferences
@@ -1327,35 +1333,35 @@ pub fn get_terminal_settings() -> Result<LoadedTerminalSettings, String> {
 /// `version`", same as `save_dashboard_state`.
 #[tauri::command]
 pub fn save_terminal_settings(json: String) -> Result<(), String> {
-    terminal_settings::save_settings(&json).map_err(|err| err.to_string())
+    terminal_settings::save_settings(&json).map_err(ui)
 }
 
 /// Reads the editor's preferences (`editor-settings.json`), or the defaults.
 /// Same contract as [`get_terminal_settings`].
 #[tauri::command]
 pub fn get_editor_settings() -> Result<LoadedEditorSettings, String> {
-    editor_settings::load_settings().map_err(|err| err.to_string())
+    editor_settings::load_settings().map_err(ui)
 }
 
 /// Validates and atomically writes the editor's preferences; the core only
 /// checks "object with numeric `version`".
 #[tauri::command]
 pub fn save_editor_settings(json: String) -> Result<(), String> {
-    editor_settings::save_settings(&json).map_err(|err| err.to_string())
+    editor_settings::save_settings(&json).map_err(ui)
 }
 
 /// Reads what Vi remembers across restarts (`editor-vi.json`), or an empty
 /// default. Same contract as [`get_editor_settings`].
 #[tauri::command]
 pub fn get_editor_vi_state() -> Result<LoadedJsonState, String> {
-    editor_vi::load_vi_state().map_err(|err| err.to_string())
+    editor_vi::load_vi_state().map_err(ui)
 }
 
 /// Validates and atomically writes Vi's remembered state (0600); the core
 /// only checks "object with numeric `version`".
 #[tauri::command]
 pub fn save_editor_vi_state(json: String) -> Result<(), String> {
-    editor_vi::save_vi_state(&json).map_err(|err| err.to_string())
+    editor_vi::save_vi_state(&json).map_err(ui)
 }
 
 /// One `*.app` bundle found by [`list_installed_apps`]'s scan.
@@ -1466,7 +1472,7 @@ pub async fn get_workspace_graph(state: State<'_, CoreState>) -> Result<Workspac
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(|err| err.to_string())
+    .map_err(ui)
 }
 
 /// Renders the mounted-module manifest into `~/.axiomata/module-context.md`
@@ -1476,7 +1482,7 @@ pub fn write_module_manifest(
     entries: Vec<ManifestEntry>,
     language: Option<bridge::OwnerLanguage>,
 ) -> Result<bool, String> {
-    bridge::write_manifest(&entries, language.unwrap_or_default()).map_err(|err| err.to_string())
+    bridge::write_manifest(&entries, language.unwrap_or_default()).map_err(ui)
 }
 
 /// Takes every pending agent → module action request out of the inbox queue
@@ -1484,13 +1490,13 @@ pub fn write_module_manifest(
 /// with `complete_module_action`.
 #[tauri::command]
 pub fn poll_module_actions() -> Result<Vec<ActionRequest>, String> {
-    bridge::drain_inbox().map_err(|err| err.to_string())
+    bridge::drain_inbox().map_err(ui)
 }
 
 /// Writes the frontend's answer to a polled request into the outbox queue.
 #[tauri::command]
 pub fn complete_module_action(response: ActionResponse) -> Result<(), String> {
-    bridge::complete(&response).map_err(|err| err.to_string())
+    bridge::complete(&response).map_err(ui)
 }
 
 /// One assistant turn. `mode` is `"chat"` (never asks, read-mostly) or
@@ -1546,7 +1552,7 @@ pub async fn assistant_send(
         extras,
     )
     .await
-    .map_err(|err| err.to_string())
+    .map_err(ui)
 }
 
 /// The `command` of [`assistant_send`], as the webview sends it.
@@ -1563,13 +1569,13 @@ pub async fn resume_run(state: State<'_, CoreState>, id: i64) -> Result<RunRecor
     let config = read_config(&state.config);
     axiomata_core::durable::resume_run(&state.db, &config, id)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// Gives an interrupted run up: its journal goes, the row stays `interrupted`.
 #[tauri::command]
 pub fn discard_run(state: State<'_, CoreState>, id: i64) -> Result<(), String> {
-    axiomata_core::durable::discard(&state.db, id).map_err(|err| err.to_string())
+    axiomata_core::durable::discard(&state.db, id).map_err(ui)
 }
 
 /// The Glut chat turns the app lost before they answered (durable runs, CP4).
@@ -1581,7 +1587,7 @@ pub fn interrupted_chat_turns() -> Vec<agents::axh::InterruptedTurn> {
 /// Gives an interrupted chat turn up.
 #[tauri::command]
 pub fn discard_chat_turn(run: String) -> Result<(), String> {
-    agents::axh::discard_chat_turn(&run).map_err(|err| err.to_string())
+    agents::axh::discard_chat_turn(&run).map_err(ui)
 }
 
 /// The chat's earlier conversations on its harness, newest first (#108, `/resume`).
@@ -1590,7 +1596,7 @@ pub async fn chat_sessions(
     state: State<'_, CoreState>,
 ) -> Result<Vec<agents::ChatSession>, String> {
     let config = read_config(&state.config);
-    agents::chat_sessions(&config, &state.db).map_err(|err| err.to_string())
+    agents::chat_sessions(&config, &state.db).map_err(ui)
 }
 
 /// `/undo` (#108): the file changes of the conversation's latest turn undone, as its harness can.
@@ -1599,7 +1605,7 @@ pub async fn chat_undo(state: State<'_, CoreState>, session_id: String) -> Resul
     let config = read_config(&state.config);
     agents::chat_undo(&config, &state.db, &session_id)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// The commands the chat's harness offers (#108, S7), for the bar's suggestion list and `/help`. Claude Code's list
@@ -1609,9 +1615,7 @@ pub async fn chat_commands(
     state: State<'_, CoreState>,
 ) -> Result<Vec<agents::EngineCommand>, String> {
     let config = read_config(&state.config);
-    agents::chat_commands(&config)
-        .await
-        .map_err(|err| err.to_string())
+    agents::chat_commands(&config).await.map_err(ui)
 }
 
 /// Reads the user's custom theme CSS (`~/.axiomata/theme.css`, or the
@@ -1619,8 +1623,7 @@ pub async fn chat_commands(
 /// frontend validates it before injecting.
 #[tauri::command]
 pub fn load_custom_css(path: Option<String>) -> Result<Option<String>, String> {
-    dashboard::load_custom_css(path.as_deref().map(std::path::Path::new))
-        .map_err(|err| err.to_string())
+    dashboard::load_custom_css(path.as_deref().map(std::path::Path::new)).map_err(ui)
 }
 
 /// Case-insensitive full-text search over the workspace's text files; every
@@ -1631,8 +1634,7 @@ pub fn search_workspace(
     query: String,
     limit: usize,
 ) -> Result<Vec<SearchHit>, String> {
-    workspace::search(&read_config(&state.config), &query, limit.clamp(1, 200))
-        .map_err(|err| err.to_string())
+    workspace::search(&read_config(&state.config), &query, limit.clamp(1, 200)).map_err(ui)
 }
 
 /// Reads a UTF-8 file by workspace-relative path (≤ 1 MiB, no `..`, no
@@ -1642,7 +1644,7 @@ pub fn read_workspace_file(
     state: State<'_, CoreState>,
     rel: String,
 ) -> Result<WorkspaceFile, String> {
-    workspace::read_file(&read_config(&state.config), &rel).map_err(|err| err.to_string())
+    workspace::read_file(&read_config(&state.config), &rel).map_err(ui)
 }
 
 /// Reads a raster image (png/jpeg/gif/webp, ≤ 8 MiB) by workspace-relative
@@ -1655,7 +1657,7 @@ pub fn read_workspace_image(
     state: State<'_, CoreState>,
     rel: String,
 ) -> Result<WorkspaceImage, String> {
-    workspace::read_image(&read_config(&state.config), &rel).map_err(|err| err.to_string())
+    workspace::read_image(&read_config(&state.config), &rel).map_err(ui)
 }
 
 /// Atomically writes a workspace file under the same guard as
@@ -1668,8 +1670,7 @@ pub fn write_workspace_file(
     rel: String,
     content: String,
 ) -> Result<(), String> {
-    workspace::write_file(&read_config(&state.config), &rel, &content)
-        .map_err(|err| err.to_string())
+    workspace::write_file(&read_config(&state.config), &rel, &content).map_err(ui)
 }
 
 /// Deletes a workspace file under the same path guard as
@@ -1678,7 +1679,7 @@ pub fn write_workspace_file(
 /// panel's "Delete" action.
 #[tauri::command]
 pub fn delete_workspace_file(state: State<'_, CoreState>, rel: String) -> Result<(), String> {
-    workspace::delete_file(&read_config(&state.config), &rel).map_err(|err| err.to_string())
+    workspace::delete_file(&read_config(&state.config), &rel).map_err(ui)
 }
 
 /// Creates a new Markdown note from `content` alone — no separate title:
@@ -1721,8 +1722,8 @@ pub async fn create_note(state: State<'_, CoreState>, content: String) -> Result
         Some(PLACEMENT_TOOLS.to_owned()),
     )
     .await
-    .map_err(|err| err.to_string())?;
-    let placement = notes::parse_placement(&reply.reply_markdown).map_err(|err| err.to_string())?;
+    .map_err(ui)?;
+    let placement = notes::parse_placement(&reply.reply_markdown).map_err(ui)?;
     let rel = notes::write_placed_note(
         &config.workspace_root,
         &content,
@@ -1730,7 +1731,7 @@ pub async fn create_note(state: State<'_, CoreState>, content: String) -> Result
         &placement.file_name,
         placement.title.as_deref(),
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(ui)?;
     // Tags and related links are the placement's second half (tags-links.md TL5): the note is saved either way, so a
     // tag that cannot be set is logged, never a failed save.
     let db = std::sync::Arc::clone(&state.db);
@@ -1764,7 +1765,7 @@ pub struct SkillView {
 #[tauri::command]
 pub fn list_skills(state: State<'_, CoreState>) -> Result<Vec<SkillView>, String> {
     let config = read_config(&state.config);
-    let skills = skills::list_skills().map_err(|err| err.to_string())?;
+    let skills = skills::list_skills().map_err(ui)?;
     Ok(skills
         .into_iter()
         .map(|skill| SkillView {
@@ -1779,7 +1780,7 @@ pub fn list_skills(state: State<'_, CoreState>) -> Result<Vec<SkillView>, String
 /// warning instead of a broken skill just quietly not being there.
 #[tauri::command]
 pub fn list_skipped_skills() -> Result<Vec<SkippedSkill>, String> {
-    skills::list_skipped_skills().map_err(|err| err.to_string())
+    skills::list_skipped_skills().map_err(ui)
 }
 
 /// Every bundled skill with its state against the installed copy (`skills::bundled`) — the Skills Deck's
@@ -1817,7 +1818,7 @@ async fn bundled_off_main<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(work)
         .await
         .map_err(|err| format!("bundled skills task failed: {err}"))?
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// Returns the most recent skill runs as slim summaries, newest first. `limit`
@@ -1825,14 +1826,14 @@ async fn bundled_off_main<T: Send + 'static>(
 #[tauri::command]
 pub fn list_runs(state: State<'_, CoreState>, limit: usize) -> Result<Vec<RunSummary>, String> {
     let db = state.db_lock();
-    skills::list_runs(&db, limit).map_err(|err| err.to_string())
+    skills::list_runs(&db, limit).map_err(ui)
 }
 
 /// Returns one full run (with captured output) by id, or `null` if unknown.
 #[tauri::command]
 pub fn get_run(state: State<'_, CoreState>, id: i64) -> Result<Option<RunRecord>, String> {
     let db = state.db_lock();
-    skills::get_run(&db, id).map_err(|err| err.to_string())
+    skills::get_run(&db, id).map_err(ui)
 }
 
 /// Runs a skill by name and returns the persisted run record.
@@ -1841,26 +1842,26 @@ pub async fn run_skill(state: State<'_, CoreState>, name: String) -> Result<RunR
     let config = read_config(&state.config);
     skills::execute_and_record_skill(&name, &config, &state.db)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// Regenerates the workspace router `CLAUDE.md` blocks. Reads no database.
 #[tauri::command]
 pub fn sync_memory(state: State<'_, CoreState>) -> Result<SyncReport, String> {
-    memory::sync(&read_config(&state.config)).map_err(|err| err.to_string())
+    memory::sync(&read_config(&state.config)).map_err(ui)
 }
 
 /// Reports whether the memory router is stale — a plain walk-and-compare.
 #[tauri::command]
 pub fn get_memory_status(state: State<'_, CoreState>) -> Result<MemoryStatus, String> {
-    memory::status(&read_config(&state.config)).map_err(|err| err.to_string())
+    memory::status(&read_config(&state.config)).map_err(ui)
 }
 
 /// Lists every routine, soonest next-fire first.
 #[tauri::command]
 pub fn list_routines(state: State<'_, CoreState>) -> Result<Vec<Routine>, String> {
     let db = state.db_lock();
-    routines::store::list(&db).map_err(|err| err.to_string())
+    routines::store::list(&db).map_err(ui)
 }
 
 /// Creates a routine. `new.target` arrives as `{ "type": "skill" | "prompt",
@@ -1868,7 +1869,7 @@ pub fn list_routines(state: State<'_, CoreState>) -> Result<Vec<Routine>, String
 #[tauri::command]
 pub fn add_routine(state: State<'_, CoreState>, new: NewRoutine) -> Result<Routine, String> {
     let db = state.db_lock();
-    routines::store::add(&db, new).map_err(|err| err.to_string())
+    routines::store::add(&db, new).map_err(ui)
 }
 
 /// Enables or disables a routine by id. Returns `false` if there is no such
@@ -1880,7 +1881,7 @@ pub fn set_routine_enabled(
     enabled: bool,
 ) -> Result<bool, String> {
     let db = state.db_lock();
-    routines::store::set_enabled(&db, id, enabled).map_err(|err| err.to_string())
+    routines::store::set_enabled(&db, id, enabled).map_err(ui)
 }
 
 /// Replaces a routine's name, cron expression, target, backend, and enabled
@@ -1893,7 +1894,7 @@ pub fn update_routine(
     new: NewRoutine,
 ) -> Result<Option<Routine>, String> {
     let db = state.db_lock();
-    routines::store::update(&db, id, new).map_err(|err| err.to_string())
+    routines::store::update(&db, id, new).map_err(ui)
 }
 
 /// Permanently deletes a routine and its firing history. Returns `false` if
@@ -1901,7 +1902,7 @@ pub fn update_routine(
 #[tauri::command]
 pub fn delete_routine(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
     let db = state.db_lock();
-    routines::store::delete(&db, id).map_err(|err| err.to_string())
+    routines::store::delete(&db, id).map_err(ui)
 }
 
 /// Returns a routine's firing history, newest first. `limit` is clamped in the
@@ -1913,7 +1914,7 @@ pub fn routine_history(
     limit: usize,
 ) -> Result<Vec<RoutineRun>, String> {
     let db = state.db_lock();
-    routines::store::list_runs(&db, id, limit).map_err(|err| err.to_string())
+    routines::store::list_runs(&db, id, limit).map_err(ui)
 }
 
 // ----------------------------------------------------------------- board ---
@@ -2133,8 +2134,8 @@ pub fn start_card_plan(
     card_id: i64,
     project_id: i64,
 ) -> Result<board::Plan, String> {
-    let plan = axiomata_core::card_session::start_card_plan(&state, card_id, project_id)
-        .map_err(|err| err.to_string())?;
+    let plan =
+        axiomata_core::card_session::start_card_plan(&state, card_id, project_id).map_err(ui)?;
     board_mirror::after_change(&state.db_lock(), &read_config(&state.config), plan.board_id);
     Ok(plan)
 }
@@ -2287,7 +2288,7 @@ pub async fn close_board_plan(
 ) -> Result<axiomata_core::card_session::PlanClosed, String> {
     let outcome = axiomata_core::card_session::close_plan(&state, id)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(ui)?;
     if outcome.closed {
         {
             let db = state.db_lock();
@@ -2346,7 +2347,7 @@ pub async fn start_plan_session(
         },
     )
     .await
-    .map_err(|err| err.to_string())
+    .map_err(ui)
 }
 
 /// Every "needs first" edge on a board, as `[card, needs]` pairs.
@@ -2411,7 +2412,7 @@ pub fn start_card_session(
             engine_id,
         },
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(ui)?;
     let db = state.db_lock();
     board_mirror::after_card_change(&db, &config, card_id);
     Ok(session)
@@ -2422,8 +2423,8 @@ pub fn start_card_session(
 #[tauri::command]
 pub fn release_card(state: State<'_, CoreState>, card_id: i64) -> Result<bool, String> {
     let config = read_config(&state.config);
-    let released = axiomata_core::card_session::release_card_session(&state, card_id)
-        .map_err(|err| err.to_string())?;
+    let released =
+        axiomata_core::card_session::release_card_session(&state, card_id).map_err(ui)?;
     if released {
         let db = state.db_lock();
         board_mirror::after_card_change(&db, &config, card_id);
@@ -2451,7 +2452,7 @@ pub async fn start_review_session(
         },
     )
     .await
-    .map_err(|err| err.to_string())?;
+    .map_err(ui)?;
     let db = state.db_lock();
     board_mirror::after_card_change(&db, &config, card_id);
     Ok(session)
@@ -2463,7 +2464,7 @@ pub async fn start_review_session(
 pub fn open_card_sessions(
     state: State<'_, CoreState>,
 ) -> Result<Vec<axiomata_core::card_session::OpenCardSession>, String> {
-    axiomata_core::card_session::open_card_sessions(&state).map_err(|err| err.to_string())
+    axiomata_core::card_session::open_card_sessions(&state).map_err(ui)
 }
 
 /// Every agent of every project that waits for the owner, for a page that has just loaded; afterwards the
@@ -2479,7 +2480,7 @@ pub async fn waiting_agents(
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(|err| err.to_string())
+    .map_err(ui)
 }
 
 /// The owner answers an agent's permission request from the app (`docs/plans/permission-asks.md`, card #88): `allow`,
@@ -2492,11 +2493,10 @@ pub async fn answer_permission(
     request_id: String,
     decision: String,
 ) -> Result<(), String> {
-    let decision =
-        axiomata_core::permission_ask::Decision::parse(&decision).map_err(|err| err.to_string())?;
+    let decision = axiomata_core::permission_ask::Decision::parse(&decision).map_err(ui)?;
     axiomata_core::ide_status::answer_permission(&state.db, agent_id, &request_id, decision)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// The owner takes a reviewed card over (A3, A22): the work lands in the project's main line as one commit, the card is
@@ -2510,7 +2510,7 @@ pub async fn take_over_card(
     let config = read_config(&state.config);
     let outcome = axiomata_core::card_session::take_over_card(&state, card_id, message.as_deref())
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(ui)?;
     let db = state.db_lock();
     board_mirror::after_card_change(&db, &config, card_id);
     Ok(outcome)
@@ -2526,7 +2526,7 @@ pub async fn take_over_plan(
     let config = read_config(&state.config);
     let outcome = axiomata_core::card_session::take_over_plan(&state, id)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(ui)?;
     if let axiomata_core::card_session::PlanTakeOver::Done { card_ids, .. } = &outcome {
         let db = state.db_lock();
         for card in card_ids {
@@ -2547,7 +2547,7 @@ pub async fn integrate_card(
     let config = read_config(&state.config);
     let outcome = axiomata_core::card_session::integrate_card_with(&state, card_id, true)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(ui)?;
     let db = state.db_lock();
     board_mirror::after_card_change(&db, &config, card_id);
     Ok(outcome)
@@ -2558,14 +2558,14 @@ pub async fn integrate_card(
 pub async fn redo_card(state: State<'_, CoreState>, card_id: i64) -> Result<Vec<i64>, String> {
     axiomata_core::card_session::redo_card(&state, card_id)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// The cards of a plan the studio gave up integrating, which wait for the owner (CP-A8c).
 #[tauri::command]
 pub fn plan_cards_left_for_owner(state: State<'_, CoreState>, id: i64) -> Result<Vec<i64>, String> {
     let db = state.db_lock();
-    axiomata_core::card_session::cards_left_for_owner(&db, id).map_err(|err| err.to_string())
+    axiomata_core::card_session::cards_left_for_owner(&db, id).map_err(ui)
 }
 
 /// The sharper goal a grilling session proposed for a plan, if one waits for the owner.
@@ -2634,7 +2634,7 @@ pub fn plan_spend(
 ) -> Result<axiomata_core::studio_spend::PlanSpend, String> {
     let config = read_config(&state.config);
     let db = state.db_lock();
-    axiomata_core::studio_spend::plan_spend(&db, &config, id).map_err(|err| err.to_string())
+    axiomata_core::studio_spend::plan_spend(&db, &config, id).map_err(ui)
 }
 
 /// The owner's "go on" for a plan that reached its limit: a fresh allowance on top of what it spent (CP-A8c).
@@ -2642,7 +2642,7 @@ pub fn plan_spend(
 pub fn resume_plan(state: State<'_, CoreState>, id: i64) -> Result<board::Plan, String> {
     let config = read_config(&state.config);
     let db = state.db_lock();
-    axiomata_core::studio_spend::resume_plan(&db, &config, id).map_err(|err| err.to_string())
+    axiomata_core::studio_spend::resume_plan(&db, &config, id).map_err(ui)
 }
 
 /// The latest `limit` lines of a card's history, oldest first.
@@ -2664,7 +2664,7 @@ pub async fn card_usage(
 ) -> Result<Vec<axiomata_core::session_limits::SessionUsage>, String> {
     axiomata_core::session_limits::card_usage(&state, card_id)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// The owner writes a line into a card's history.
@@ -2905,7 +2905,7 @@ pub fn create_ide_agent_on_engine(
         &spec.engine_id,
         &spec.role,
     )
-    .map_err(|err| err.to_string())
+    .map_err(ui)
 }
 
 /// A master session of the project on `harness` (`claude_code`, `opencode` or `glut`,
@@ -2922,8 +2922,7 @@ pub fn ide_master_session(
     let harness =
         ide::Harness::parse(&harness).ok_or_else(|| format!("no harness called {harness:?}"))?;
     let db = state.db_lock();
-    axiomata_core::roster::master_session(&db, project_id, harness, &open)
-        .map_err(|err| err.to_string())
+    axiomata_core::roster::master_session(&db, project_id, harness, &open).map_err(ui)
 }
 
 /// The command line of a pane that follows Glut session `id` read-only (Glut TUI8d), resolved here so the webview
@@ -2961,7 +2960,7 @@ pub fn update_ide_agent_on_engine(
         &spec.engine_id,
         &spec.role,
     )
-    .map_err(|err| err.to_string())
+    .map_err(ui)
 }
 
 // ---- Engines and roles (a2a.md, CP-A1) ----
@@ -2977,7 +2976,7 @@ pub fn list_engines(
     // Read before the database lock: the catalog and the proposals are files, and nobody needs to wait on them.
     let sources = axiomata_core::model_tiers::ModelSources::load();
     let db = state.db_lock();
-    axiomata_core::roster::engine_overview(&db, &config, &sources).map_err(|err| err.to_string())
+    axiomata_core::roster::engine_overview(&db, &config, &sources).map_err(ui)
 }
 
 /// Adds or replaces an engine (the whole object; the id is the key). Only the engines of the live config change.
@@ -2987,7 +2986,7 @@ pub fn save_engine(
     engine: axiomata_roster::Engine,
 ) -> Result<(), String> {
     let mut config = read_config(&state.config);
-    axiomata_core::roster::save_engine(&mut config, engine).map_err(|err| err.to_string())?;
+    axiomata_core::roster::save_engine(&mut config, engine).map_err(ui)?;
     state
         .config
         .write()
@@ -3003,8 +3002,7 @@ pub fn delete_engine(state: State<'_, CoreState>, id: String) -> Result<bool, St
     let mut config = read_config(&state.config);
     let removed = {
         let db = state.db_lock();
-        axiomata_core::roster::delete_engine(&db, &mut config, &id)
-            .map_err(|err| err.to_string())?
+        axiomata_core::roster::delete_engine(&db, &mut config, &id).map_err(ui)?
     };
     if removed.is_some() {
         let mut live = state
@@ -3047,8 +3045,7 @@ pub fn set_model_choice(
     choice: axiomata_core::model_tiers::ModelChoice,
 ) -> Result<(), String> {
     let mut config = read_config(&state.config);
-    axiomata_core::model_tiers::save_choice(&mut config, &key, choice)
-        .map_err(|err| err.to_string())?;
+    axiomata_core::model_tiers::save_choice(&mut config, &key, choice).map_err(ui)?;
     adopt_models(&state, config);
     Ok(())
 }
@@ -3060,8 +3057,7 @@ pub fn set_tier_limits(
     limits: axiomata_core::model_tiers::TierLimits,
 ) -> Result<(), String> {
     let mut config = read_config(&state.config);
-    axiomata_core::model_tiers::save_tier_limits(&mut config, limits)
-        .map_err(|err| err.to_string())?;
+    axiomata_core::model_tiers::save_tier_limits(&mut config, limits).map_err(ui)?;
     adopt_models(&state, config);
     Ok(())
 }
@@ -3074,8 +3070,7 @@ pub fn set_default_engine(
     engine: Option<String>,
 ) -> Result<(), String> {
     let mut config = read_config(&state.config);
-    axiomata_core::model_tiers::save_default_engine(&mut config, tier, engine)
-        .map_err(|err| err.to_string())?;
+    axiomata_core::model_tiers::save_default_engine(&mut config, tier, engine).map_err(ui)?;
     adopt_models(&state, config);
     Ok(())
 }
@@ -3134,7 +3129,7 @@ pub fn agents_migration_state() -> Result<AgentsMigrationView, String> {
 
 #[tauri::command]
 pub fn dismiss_agents_migration_notice() -> Result<(), String> {
-    axiomata_core::agents_migration::dismiss_notice().map_err(|err| err.to_string())
+    axiomata_core::agents_migration::dismiss_notice().map_err(ui)
 }
 
 /// The migration's backup folders, for Settings → Storage.
@@ -3146,7 +3141,7 @@ pub fn list_agents_backups() -> Vec<axiomata_core::agents_migration::Backup> {
 /// Deletes one of them — the owner's click, after the app asked; only a listed backup folder is accepted.
 #[tauri::command]
 pub fn delete_agents_backup(path: PathBuf) -> Result<(), String> {
-    axiomata_core::agents_migration::delete_backup(&path).map_err(|err| err.to_string())
+    axiomata_core::agents_migration::delete_backup(&path).map_err(ui)
 }
 
 // ---- Starting agents and favorites (agents-model.md, AM4) ----
@@ -3198,8 +3193,7 @@ pub fn toggle_favorite(
     favorite: axiomata_core::agent_start::Favorite,
 ) -> Result<bool, String> {
     let mut config = read_config(&state.config);
-    let now = axiomata_core::agent_start::toggle_favorite(&mut config, favorite)
-        .map_err(|err| err.to_string())?;
+    let now = axiomata_core::agent_start::toggle_favorite(&mut config, favorite).map_err(ui)?;
     state
         .config
         .write()
@@ -3233,7 +3227,7 @@ pub fn start_agent_choice(
         tier,
         engine_id.as_deref(),
     )
-    .map_err(|err| err.to_string())
+    .map_err(ui)
 }
 
 /// The sessions of `project_id` that hold work not taken over (uncommitted changes, or commits beyond their base) —
@@ -3271,20 +3265,20 @@ pub async fn ide_agents_with_work(
 
 #[tauri::command]
 pub fn list_roles() -> Result<axiomata_roster::Loaded, String> {
-    axiomata_core::roster::list_roles().map_err(|err| err.to_string())
+    axiomata_core::roster::list_roles().map_err(ui)
 }
 
 /// Saves one of the owner's roles; an engine it still names is kept, not checked (agents-model.md, Q6).
 #[tauri::command]
 pub fn save_role(role: axiomata_roster::Role) -> Result<(), String> {
-    axiomata_core::roster::save_role(role).map_err(|err| err.to_string())
+    axiomata_core::roster::save_role(role).map_err(ui)
 }
 
 /// Deletes one of the owner's roles unless an agent session plays it.
 #[tauri::command]
 pub fn delete_role(state: State<'_, CoreState>, name: String) -> Result<bool, String> {
     let db = state.db_lock();
-    axiomata_core::roster::delete_role(&db, &name).map_err(|err| err.to_string())
+    axiomata_core::roster::delete_role(&db, &name).map_err(ui)
 }
 
 fn project_folder(state: &CoreState, project_id: i64) -> Result<PathBuf, String> {
@@ -3302,8 +3296,7 @@ pub fn project_roles(
     project_id: i64,
 ) -> Result<axiomata_core::roster::ProjectRoles, String> {
     let folder = project_folder(&state, project_id)?;
-    axiomata_core::roster::project_roles(&folder, &read_config(&state.config))
-        .map_err(|err| err.to_string())
+    axiomata_core::roster::project_roles(&folder, &read_config(&state.config)).map_err(ui)
 }
 
 /// The owner confirmed the project's role files as shown; accepted only if they still have that content.
@@ -3314,7 +3307,7 @@ pub fn confirm_project_roles(
     hash: String,
 ) -> Result<(), String> {
     let folder = project_folder(&state, project_id)?;
-    axiomata_core::roster::confirm_project_roles(&folder, &hash).map_err(|err| err.to_string())
+    axiomata_core::roster::confirm_project_roles(&folder, &hash).map_err(ui)
 }
 
 /// Deletes the agent: its worktree and branch first (A3c, `docs/plans/maintenance.md`), then the profile, then its
@@ -3366,7 +3359,7 @@ pub async fn prepare_ide_agent(
 ) -> Result<axiomata_core::ide_start::Started, String> {
     axiomata_core::ide_start::start_agent(&state, id)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(ui)
 }
 
 /// The "you have mail" line to type into session `id`'s terminal, or `None` when there is nothing to announce
@@ -3395,7 +3388,7 @@ pub fn ide_mailbox_messages(
     id: i64,
 ) -> Result<Vec<axiomata_core::session_mail::MailLine>, String> {
     let db = state.db_lock();
-    axiomata_core::session_mail::conversation(&db, id).map_err(|err| err.to_string())
+    axiomata_core::session_mail::conversation(&db, id).map_err(ui)
 }
 
 /// How many messages wait unread in each of the sessions' inboxes (CP-A9).
@@ -3409,7 +3402,7 @@ pub fn ide_mailbox_unread(
         .map(|id| {
             axiomata_core::session_mail::unread(&db, id)
                 .map(|count| (id, count))
-                .map_err(|err| err.to_string())
+                .map_err(ui)
         })
         .collect()
 }
@@ -3421,7 +3414,7 @@ pub fn ide_mailbox_send(
     id: i64,
     message: String,
 ) -> Result<axiomata_core::session_mail::OwnerSend, String> {
-    axiomata_core::session_mail::send_as_owner(&state, id, &message).map_err(|err| err.to_string())
+    axiomata_core::session_mail::send_as_owner(&state, id, &message).map_err(ui)
 }
 
 /// Notes that the nudge for session `id` was typed, so a message is announced a limited number of times.

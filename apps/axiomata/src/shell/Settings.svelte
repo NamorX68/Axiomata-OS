@@ -6,6 +6,7 @@
   body before this — split into tabs once it grew past ~9 sections. Every text comes from `i18n/settings.ts`.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import {
@@ -138,7 +139,7 @@
   ];
 
   /** The text of a caught error, for a toast. */
-  const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+  const errorText = (err: unknown): string => messageOf(err);
 
   /** Which provider's settings the form below edits. The provider list is now
    *  an edit selector, not the role picker — the two `<select>`s above it map
@@ -260,7 +261,7 @@
       claudeLoginError = null;
     } catch (e) {
       claudeLogin = null;
-      claudeLoginError = String(e);
+      claudeLoginError = messageOf(e);
     }
   }
 
@@ -272,7 +273,7 @@
       claudeLoginError = null;
       toast(claudeLogin.logged_in ? tSettings("signedIn") : tSettings("signInIncomplete"), "info");
     } catch (e) {
-      toast(tSettings("signInFailed", { error: String(e) }), "warning");
+      toast(tSettings("signInFailed", { error: messageOf(e) }), "warning");
     } finally {
       signingIn = false;
     }
@@ -285,7 +286,7 @@
       await invokeBackend<void>("claude_sign_in_code", { code });
       signInCode = "";
     } catch (e) {
-      toast(tSettings("codeNotTaken", { error: String(e) }), "warning");
+      toast(tSettings("codeNotTaken", { error: messageOf(e) }), "warning");
     }
   }
 
@@ -294,7 +295,7 @@
       claudeLogin = await invokeBackend<ClaudeLoginStatus>("claude_sign_out");
       toast(tSettings("signedOut"), "info");
     } catch (e) {
-      toast(tSettings("signOutFailed", { error: String(e) }), "warning");
+      toast(tSettings("signOutFailed", { error: messageOf(e) }), "warning");
     }
   }
 
@@ -317,7 +318,7 @@
       const restartNeeded = await persist();
       toast(restartNeeded ? tSettings("vaultSavedRestart") : tSettings("vaultSaved"), "info");
     } catch (e) {
-      toast(tSettings("savingFailed", { error: String(e) }), "warning");
+      toast(tSettings("savingFailed", { error: messageOf(e) }), "warning");
     } finally {
       savingVault = false;
     }
@@ -384,7 +385,7 @@
       await loadConfig();
       await refreshSpend();
     } catch (e) {
-      toast(tSettings("savingFailed", { error: String(e) }), "warning");
+      toast(tSettings("savingFailed", { error: messageOf(e) }), "warning");
     } finally {
       savingProvider = false;
     }
@@ -412,7 +413,7 @@
         toast(tSettings("pricesUpdated", { models: outcome.repriced.join(", ") }), "info");
       }
     } catch (err) {
-      toast(tSettings("modelListFailed", { error: String(err) }), "danger");
+      toast(tSettings("modelListFailed", { error: messageOf(err) }), "danger");
     } finally {
       refreshingModels = null;
     }

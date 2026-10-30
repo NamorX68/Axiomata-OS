@@ -15,6 +15,7 @@ use rusqlite::Connection;
 
 use crate::AxiomataError;
 use crate::config::Config;
+use crate::error::coded;
 use crate::ide::agent_store;
 use crate::ide::model::{Agent, AgentFields, Harness as AgentHarness};
 use crate::paths;
@@ -24,6 +25,51 @@ type Result<T> = std::result::Result<T, AxiomataError>;
 /// A refusal for the owner to read: `field` names what was asked for, `reason` why not.
 pub fn refusal(field: &'static str, reason: String) -> AxiomataError {
     RosterError::Invalid { field, reason }.into()
+}
+
+/// The refusal for a project id that names none (`project.missing`, `docs/plans/i18n.md` Q11).
+pub fn no_project(id: i64) -> AxiomataError {
+    coded(
+        "project.missing",
+        &[("id", &id.to_string())],
+        format!("no project {id}"),
+    )
+}
+
+/// The refusal for a card id that names none (`card.missing`).
+pub fn no_card(id: i64) -> AxiomataError {
+    coded(
+        "card.missing",
+        &[("id", &id.to_string())],
+        format!("no card {id}"),
+    )
+}
+
+/// The refusal for a plan id that names none (`plan.missing`).
+pub fn no_plan(id: i64) -> AxiomataError {
+    coded(
+        "plan.missing",
+        &[("id", &id.to_string())],
+        format!("no plan {id}"),
+    )
+}
+
+/// The refusal for a role the project does not have (`role.unknown`).
+pub fn no_role(name: &str) -> AxiomataError {
+    coded(
+        "role.unknown",
+        &[("name", name)],
+        format!("there is no role “{name}” for this project"),
+    )
+}
+
+/// The refusal for an engine id that names none (`engine.unknown`).
+pub fn no_engine(id: &str) -> AxiomataError {
+    coded(
+        "engine.unknown",
+        &[("id", id)],
+        format!("there is no engine “{id}”"),
+    )
 }
 
 /// Lower-case slug of free text: letters and digits, single dashes between them.
@@ -255,8 +301,9 @@ pub fn engine_overview(
 
 /// The refusal for changing automatic engine `id`.
 fn auto_refusal(id: &str) -> AxiomataError {
-    refusal(
-        "id",
+    coded(
+        "engine.automatic",
+        &[("id", id)],
         format!(
             "“{id}” is an automatic engine, made from a model of the catalog; it cannot be edited or removed — switch \
              its model on or off in the Studio's Models settings, or give an own engine another id"
@@ -268,8 +315,8 @@ fn auto_refusal(id: &str) -> AxiomataError {
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] if the engine is not valid or takes the id of an automatic engine; a failing read or save
-/// (then `config` is unchanged).
+/// [`RosterError::Invalid`] if the engine is not valid, a coded refusal if it takes the id of an automatic engine; a
+/// failing read or save (then `config` is unchanged).
 pub fn save_engine(config: &mut Config, engine: Engine) -> Result<()> {
     engine.validate()?;
     let _guard = crate::config::file_edit_lock();
@@ -284,23 +331,36 @@ pub fn save_engine(config: &mut Config, engine: Engine) -> Result<()> {
     Ok(())
 }
 
-/// Who still uses engine `id`: sessions, then roles. `None` if nobody.
+/// Who still uses engine `id` — sessions, then roles — as the refusal to remove it. `None` if nobody.
 ///
 /// Roles are the owner's that parsed; a role file that is currently broken, and the roles of projects that are not
 /// open, cannot be asked.
-fn engine_user(db: &Connection, roles: &[Role], id: &str) -> Result<Option<String>> {
+fn engine_user(db: &Connection, roles: &[Role], id: &str) -> Result<Option<AxiomataError>> {
     let sessions: i64 = db.query_row(
         "SELECT COUNT(*) FROM ide_agents WHERE engine_id = ?1",
         [id],
         |row| row.get(0),
     )?;
     if sessions > 0 {
-        return Ok(Some(format!("{sessions} agent session(s) run on it")));
+        return Ok(Some(coded(
+            "engine.inUseBySessions",
+            &[("id", id), ("n", &sessions.to_string())],
+            format!("engine “{id}” cannot be removed: {sessions} agent session(s) run on it"),
+        )));
     }
     let role = roles
         .iter()
         .find(|r| r.engine.as_deref() == Some(id) || r.fallback_engines.iter().any(|f| f == id));
-    Ok(role.map(|r| format!("the role “{}” uses it", r.name)))
+    Ok(role.map(|r| {
+        coded(
+            "engine.inUseByRole",
+            &[("id", id), ("role", &r.name)],
+            format!(
+                "engine “{id}” cannot be removed: the role “{}” uses it",
+                r.name
+            ),
+        )
+    }))
 }
 
 /// The roles in force for `project_id`: the owner's, with the project's own once the owner confirmed them
@@ -334,36 +394,32 @@ fn known_engine(config: &Config, id: &str) -> Result<Engine> {
     crate::engines::Lookup::new(config)
         .engine(id)
         .ok_or_else(|| {
-            RosterError::Invalid {
-                field: "engine",
-                reason: format!(
+            coded(
+                "engine.unknownSwitchOn",
+                &[("id", id)],
+                format!(
                     "there is no engine “{id}”; switch its model on in the Studio's Models settings, or add an own \
                      engine"
                 ),
-            }
-            .into()
+            )
         })
 }
 
 fn known_role(roles: &[Role], name: &str) -> Result<()> {
     // Reserved: a role file of that name would turn an ordinary session into a project's master, in its real folder.
     if name == crate::ide::model::MASTER_ROLE {
-        return Err(RosterError::Invalid {
-            field: "role",
-            reason: format!(
+        return Err(coded(
+            "role.isMaster",
+            &[("name", name)],
+            format!(
                 "“{name}” is the project's master session, opened from the Agents panel, not a role"
             ),
-        }
-        .into());
+        ));
     }
     if roles.iter().any(|role| role.name == name) {
         return Ok(());
     }
-    Err(RosterError::Invalid {
-        field: "role",
-        reason: format!("there is no role “{name}” for this project"),
-    }
-    .into())
+    Err(no_role(name))
 }
 
 /// A master session of `project_id` on `harness` (`docs/plans/agent-isolation.md`, D4, CP3): Claude Code, Opencode or
@@ -436,7 +492,7 @@ pub fn master_session(
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] for an engine or role that does not exist; the agent store's refusals (name clash, bad
+/// A coded refusal for an engine or role that does not exist; the agent store's refusals (name clash, bad
 /// name); a failing database write. Nothing is created then.
 pub fn create_agent_on_engine(
     db: &Connection,
@@ -486,11 +542,11 @@ pub fn update_agent_on_engine(
 ) -> Result<Option<Agent>> {
     // A master is the engine as the owner uses it, not a session on a catalog engine: it is not turned into one.
     if agent_store::get_agent(db, id)?.is_some_and(|agent| agent.is_master()) {
-        return Err(RosterError::Invalid {
-            field: "role",
-            reason: "the project's master session keeps its engine and role".into(),
-        }
-        .into());
+        return Err(coded(
+            "agent.masterKeepsEngine",
+            &[],
+            "the project's master session keeps its engine and role",
+        ));
     }
     let engine = known_engine(config, engine_id)?;
     known_role(roles, role)?;
@@ -520,8 +576,7 @@ pub struct Removed {
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] while a session or a role still uses it, or for an automatic engine; a failing read or
-/// save.
+/// A coded refusal while a session or a role still uses it, or for an automatic engine; a failing read or save.
 pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<Option<Removed>> {
     let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
@@ -534,12 +589,8 @@ pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<O
         return Ok(None);
     }
     let roles = list_roles()?.roles;
-    if let Some(user) = engine_user(db, &roles, id)? {
-        return Err(RosterError::Invalid {
-            field: "id",
-            reason: format!("engine “{id}” cannot be removed: {user}"),
-        }
-        .into());
+    if let Some(refused) = engine_user(db, &roles, id)? {
+        return Err(refused);
     }
     disk.agents.engines.remove(id);
     let defaults = &mut disk.agents.models.default_engines;
@@ -572,18 +623,18 @@ pub fn list_roles() -> Result<Loaded> {
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] for a bad role.
+/// [`RosterError::Invalid`] for a bad role, a coded refusal for the master's reserved name.
 pub fn save_role(role: Role) -> Result<()> {
     // Reserved (see `known_role`): a role file of that name is refused where it is made, not only where it is used.
     if role.name == crate::ide::model::MASTER_ROLE {
-        return Err(RosterError::Invalid {
-            field: "name",
-            reason: format!(
+        return Err(coded(
+            "role.reservedForMaster",
+            &[("name", &role.name)],
+            format!(
                 "“{}” is reserved for the project's master session",
                 role.name
             ),
-        }
-        .into());
+        ));
     }
     role.validate()?;
     // A role no longer chooses its engine (agents-model.md, Q6): an `engine` or `fallback_engines` it still names is
@@ -601,22 +652,24 @@ pub fn save_role(role: Role) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] for the default role, or while a session still plays the role.
+/// A coded refusal for the default role, or while a session still plays the role.
 pub fn delete_role(db: &Connection, name: &str) -> Result<bool> {
     if name == axiomata_roster::default_role().name {
-        return Err(RosterError::Invalid {
-            field: "name",
-            reason: format!("the default role “{name}” cannot be deleted (new sessions start as it); edit it instead"),
-        }
-        .into());
+        return Err(coded(
+            "role.defaultUndeletable",
+            &[("name", name)],
+            format!(
+                "the default role “{name}” cannot be deleted (new sessions start as it); edit it instead"
+            ),
+        ));
     }
     let playing = agent_store::count_with_role(db, name)?;
     if playing > 0 {
-        return Err(RosterError::Invalid {
-            field: "name",
-            reason: format!("role “{name}” cannot be deleted: {playing} agent session(s) play it"),
-        }
-        .into());
+        return Err(coded(
+            "role.inUse",
+            &[("name", name), ("n", &playing.to_string())],
+            format!("role “{name}” cannot be deleted: {playing} agent session(s) play it"),
+        ));
     }
     Ok(axiomata_roster::delete_role(
         &paths::agent_roles_dir(),
@@ -925,7 +978,7 @@ mod tests {
         let agent = add(&conn, project, "a", Harness::Glut, None, "");
         agent_store::set_engine(&conn, agent.id, Some("glut")).unwrap();
         let user = engine_user(&conn, &[], "glut").unwrap();
-        assert!(user.unwrap().contains("session"));
+        assert!(user.unwrap().to_string().contains("session"));
         assert!(engine_user(&conn, &[], "unused").unwrap().is_none());
     }
 
@@ -935,7 +988,7 @@ mod tests {
         let mut role = axiomata_roster::default_role();
         role.fallback_engines = vec!["spare".into()];
         let user = engine_user(&conn, &[role], "spare").unwrap();
-        assert!(user.unwrap().contains("allrounder"));
+        assert!(user.unwrap().to_string().contains("allrounder"));
     }
 
     #[test]
@@ -1137,7 +1190,10 @@ mod tests {
 
             assert!(matches!(
                 delete_engine(&conn, &mut live, "used"),
-                Err(AxiomataError::Roster(_))
+                Err(AxiomataError::Coded {
+                    code: "engine.inUseBySessions",
+                    ..
+                })
             ));
             assert!(live.agents.engines.contains_key("used"));
             assert!(delete_engine(&conn, &mut live, "free").unwrap().is_some());
@@ -1194,7 +1250,10 @@ mod tests {
             agent_store::set_role(&conn, agent.id, "reviewer").unwrap();
             assert!(matches!(
                 delete_role(&conn, "reviewer"),
-                Err(AxiomataError::Roster(_))
+                Err(AxiomataError::Coded {
+                    code: "role.inUse",
+                    ..
+                })
             ));
             agent_store::set_role(&conn, agent.id, "allrounder").unwrap();
             assert!(delete_role(&conn, "reviewer").unwrap());
@@ -1392,7 +1451,10 @@ mod tests {
 
             assert!(matches!(
                 delete_engine(&conn, &mut config, "named"),
-                Err(AxiomataError::Roster(_))
+                Err(AxiomataError::Coded {
+                    code: "engine.inUseByRole",
+                    ..
+                })
             ));
             assert!(Config::load().unwrap().agents.engines.contains_key("named"));
         });
@@ -1405,7 +1467,10 @@ mod tests {
             axiomata_roster::seed_default_roles(&paths::agent_roles_dir()).unwrap();
             assert!(matches!(
                 delete_role(&conn, "allrounder"),
-                Err(AxiomataError::Roster(_))
+                Err(AxiomataError::Coded {
+                    code: "role.defaultUndeletable",
+                    ..
+                })
             ));
             // The reviewer (CP-A6b) and the planner (CP-A7) are seeded beside it; like the bundled skills, a missing
             // one
@@ -1523,7 +1588,13 @@ mod tests {
                 create_agent_on_engine(&conn, &config, &roles, project, "x", engine_id, role_name)
                     .unwrap_err();
             assert!(
-                matches!(err, AxiomataError::Roster(RosterError::Invalid { .. })),
+                matches!(
+                    err,
+                    AxiomataError::Coded {
+                        code: "engine.unknownSwitchOn" | "role.unknown",
+                        ..
+                    }
+                ),
                 "{err:?}"
             );
         }

@@ -9,34 +9,34 @@ an Modellen von OpenRouter oder Ollama. Es ist eine eigene Anwendung (`glut`) mi
 (Einstellungen, MCP-Server in `~/.glut/mcp.json`, Sitzungen); Axiomata gibt ihm nur Werte obendrauf mit. In
 Axiomata arbeitet Glut an drei Stellen:
 
-- **Chat und Skills:** wenn unter Settings → AI providers „Glut“ als Harness einer Rolle gewählt ist. Dann gibt es
+- **Chat und Skills:** wenn unter Einstellungen → KI-Anbieter „Glut“ als Harness einer Rolle gewählt ist. Dann gibt es
   den „Effort“-Schalter und Gluts Websuche. Die Digests erreichen Mail, Kalender und Erinnerungen über Gluts
   MCP-Server.
 - **Karten im Studio:** eine Engine der Art Glut führt eine Karte in ihrem Pane mit Gluts eigener Oberfläche (TUI).
   Das Modell steht fest (kein `/model` im Pane), die Rechte kommen aus der Rolle, das Restbudget der Sitzung geht
   als Grenze des Laufs mit. Ein vom Reviewer zurückgegebener Auftrag läuft im selben Gespräch weiter.
-- **Glut-Master:** die erste Master-Kachel im Agents-Bereich des Studios — dein eigenes Glut im echten Projektordner,
+- **Glut-Master:** die erste Master-Kachel im Agenten-Bereich des Studios — dein eigenes Glut im echten Projektordner,
   mit den Team-Werkzeugen, ohne Karte und ohne Worktree.
 
 ## Wo die Knöpfe sind
 
-- **Harness wählen:** Settings → AI providers → „Harness for chat“ / „Harness for skills & routines“ → „Glut“.
+- **Harness wählen:** Einstellungen → KI-Anbieter → „Harness für Chat“ / „Harness für Skills & Routines“ → „Glut“.
 - **Engine für Karten:** jedes eingeschaltete OpenRouter- oder Ollama-Modell ist von selbst eine Glut-Engine (Studio →
-  Agents → „Models & roles…“ → „Models“, [Modelle und Rollen](modelle-rollen.md)). Eine eigene: dort unter „Own
-  engines“ → „Add engine…“ → Harness Glut; im Feld „Model“ wählt `openrouter/…` oder `ollama/…` den Provider.
-- **Master öffnen:** Studio → Agents → oben die Master-Kachel „Glut“.
-- **Zuschauen:** auf einer Live-Kachel im Flow „Watch“ — folgt der Sitzung nur lesend in einem eigenen Pane.
-- **Fragen beantworten:** im Dialog im Pane **oder** in der App („Allow“ / „Deny“ / „In terminal“); die erste
+  Agenten → „Modelle & Rollen…“ → „Modelle“, [Modelle und Rollen](modelle-rollen.md)). Eine eigene: dort unter „Eigene
+  Engines“ → „Engine hinzufügen…“ → Harness Glut; im Feld „Modell“ wählt `openrouter/…` oder `ollama/…` den Provider.
+- **Master öffnen:** Studio → Agenten → oben die Master-Kachel „Glut“.
+- **Zuschauen:** auf einer Live-Kachel im Flow „Zusehen“ — folgt der Sitzung nur lesend in einem eigenen Pane.
+- **Fragen beantworten:** im Dialog im Pane **oder** in der App („Erlauben“ / „Ablehnen“ / „Im Terminal“); die erste
   Antwort gilt.
-- **Platz:** Settings → Storage zeigt Gluts Bedarf; Glut räumt `~/.glut` selbst.
+- **Platz:** Einstellungen → Speicher zeigt Gluts Bedarf; Glut räumt `~/.glut` selbst.
 
 ## Häufige Handgriffe
 
-1. **Digests auf Glut + Ollama:** Settings → AI providers → Skills: Harness „Glut“, Provider „Ollama“ → „Save
-   assignment“.
-2. **Eine Glut-Frage beantworten:** dem Abzeichen „… is waiting for you“ folgen → „Allow“ oder „Deny“ — oder im
+1. **Digests auf Glut + Ollama:** Einstellungen → KI-Anbieter → Skills: Harness „Glut“, Provider „Ollama“ → „Zuordnung
+   speichern“.
+2. **Eine Glut-Frage beantworten:** dem Abzeichen „… wartet auf dich“ folgen → „Erlauben“ oder „Ablehnen“ — oder im
    Pane antworten.
-3. **Einen abgebrochenen Lauf fortsetzen:** im Skills Deck „resume“ (oder „drop“); im Chat „Resume“; ein
+3. **Einen abgebrochenen Lauf fortsetzen:** im Skills Deck „fortsetzen“ (oder „verwerfen“); im Chat „Fortsetzen“; ein
    Karten-Pane bietet beim Wiederöffnen die Fortsetzung an.
 
 ## Fallen

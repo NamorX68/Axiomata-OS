@@ -20,8 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{self, Config, ModelCost, ProviderId};
 use crate::error::AxiomataError;
+use crate::error::coded;
 use crate::model_catalog::{self, CatalogModel, ModelCatalog};
-use crate::roster::refusal;
+use crate::roster::{no_engine, refusal};
 use crate::{json_state, paths};
 
 type Result<T> = std::result::Result<T, AxiomataError>;
@@ -837,8 +838,9 @@ pub fn edit_choice(
     change: impl FnOnce(&mut ModelChoice),
 ) -> Result<()> {
     if parse_model_key(key).is_none() {
-        return Err(refusal(
-            "model",
+        return Err(coded(
+            "model.badKey",
+            &[("key", key)],
             format!("“{key}” is no model key (anthropic/…, openrouter/… or ollama/…)"),
         ));
     }
@@ -879,7 +881,7 @@ pub fn save_default_engine(config: &mut Config, tier: Tier, engine: Option<Strin
         if let Some(id) = engine.as_deref()
             && !crate::engines::Lookup::new(disk).exists(id)
         {
-            return Err(refusal("engine", format!("there is no engine “{id}”")));
+            return Err(no_engine(id));
         }
         models.default_engines.set(tier, engine);
         Ok(())

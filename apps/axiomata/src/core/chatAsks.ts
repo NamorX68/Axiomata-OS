@@ -10,6 +10,7 @@
  * asked once however often it comes.
  */
 
+import { messageOf } from "./errors";
 import { get, writable, type Writable } from "svelte/store";
 
 import { toast } from "./toast";
@@ -127,6 +128,6 @@ export async function answerChatAsk(id: number, allow: boolean, now = Date.now()
     await ask.run();
     toast(`Done: ${ask.what}`, "info");
   } catch (err) {
-    toast(`${ask.what} failed: ${String(err)}`, "warning");
+    toast(`${ask.what} failed: ${messageOf(err)}`, "warning");
   }
 }

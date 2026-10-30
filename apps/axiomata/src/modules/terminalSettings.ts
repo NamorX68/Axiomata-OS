@@ -21,6 +21,7 @@
  * write after that load debounce-saves back to disk.
  */
 
+import { messageOf } from "../core/errors";
 import { get, writable, type Writable } from "svelte/store";
 
 import { invokeBackend as invoke, type LoadedTerminalSettings } from "../core/backend";
@@ -73,7 +74,7 @@ export async function ensureTerminalSettingsLoaded(): Promise<void> {
         loaded = true;
       })
       .catch((err) => {
-        toast(`Could not read terminal-settings.json: ${String(err)}`, "danger");
+        toast(`Could not read terminal-settings.json: ${messageOf(err)}`, "danger");
         // Marked loaded anyway (not retried) — the store just stays at its
         // empty default, same "degrade, don't wedge the UI" convention
         // `core/persist.ts`'s own `initPersistence` failure path uses.
@@ -93,7 +94,7 @@ async function flush(): Promise<void> {
   try {
     await invoke("save_terminal_settings", { json });
   } catch (err) {
-    toast(`Could not save terminal-settings.json: ${String(err)}`, "danger");
+    toast(`Could not save terminal-settings.json: ${messageOf(err)}`, "danger");
   }
 }
 

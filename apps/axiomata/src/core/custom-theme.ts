@@ -3,6 +3,7 @@
  * validates it, injects it, and exposes the outcome for the Settings dialog.
  */
 
+import { messageOf } from "./errors";
 import { writable } from "svelte/store";
 
 import { invokeBackend } from "./backend";
@@ -40,7 +41,7 @@ export async function loadCustomTheme(): Promise<CustomThemeState> {
     }
   } catch (err) {
     applyCustomCss(null);
-    const reason = String(err);
+    const reason = messageOf(err);
     state = { status: "error", errors: [], message: () => reason };
   }
   customTheme.set(state);

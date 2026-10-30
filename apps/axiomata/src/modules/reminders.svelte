@@ -27,6 +27,7 @@
   app (or by another device) won't show until the next ↻.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
@@ -113,7 +114,7 @@
       digest = { ...digest, tasks: [...digest.tasks, task] };
       showCreate = false;
     } catch (err) {
-      createError = String(err instanceof Error ? err.message : err);
+      createError = messageOf(err);
     } finally {
       creating = false;
     }
@@ -129,7 +130,7 @@
       await completeReminderTask(ctx.invoke, t.id);
       digest = { ...digest, tasks: digest.tasks.filter((x) => x.id !== t.id) };
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       busyId = null;
     }
@@ -142,7 +143,7 @@
       await deleteReminderTask(ctx.invoke, t.id);
       digest = { ...digest, tasks: digest.tasks.filter((x) => x.id !== t.id) };
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       busyId = null;
     }
@@ -197,7 +198,7 @@
       staleNote = staleDigestNote(result);
       settleSelection();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
       staleNote = "";
     } finally {
       loading = false;
@@ -211,7 +212,7 @@
       const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       await applyFreshRun(full);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       running = false;
     }

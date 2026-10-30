@@ -24,6 +24,7 @@
  *   `paneCwd.ts`; a stored `cwd` outlives the fact it was copied from.
  */
 
+import { messageOf } from "../core/errors";
 import { get, writable, type Readable } from "svelte/store";
 
 import type { AgentSpec, IdeAgent, IdeProject } from "../core/backend";
@@ -87,7 +88,7 @@ export const session: Readable<ProjectSession> = { subscribe: state.subscribe };
 let sequence = 0;
 
 function report(err: unknown): void {
-  toast(err instanceof Error ? err.message : String(err), "danger");
+  toast(messageOf(err), "danger");
 }
 
 /** A fresh terminal pane. Its id is the module's `instanceId` for its lifetime. */

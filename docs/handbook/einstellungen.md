@@ -4,51 +4,53 @@ Was in den Einstellungen steht und wie man das Aussehen anpasst: Theme, Schrift,
 
 ## Was es ist
 
-Das Fenster „Settings“ hat fünf Reiter: **„Appearance“** (alles zum Aussehen), **„Workspace“** (Vault-Pfad und
-Tags), **„AI providers“** (siehe [Provider](provider.md)), **„Storage“** (siehe [Storage](storage.md)) und
-**„About“** (Owner, Workspace, Version). Änderungen unter „Appearance“ gelten sofort.
+Das Fenster „Einstellungen“ hat fünf Reiter: **„Darstellung“** (alles zum Aussehen), **„Workspace“** (Vault-Pfad und
+Tags), **„KI-Anbieter“** (siehe [Provider](provider.md)), **„Speicher“** (siehe [Storage](storage.md)) und
+**„Über“** (Owner, Workspace, Version). Änderungen unter „Darstellung“ gelten sofort.
 
 Seit der Glas-Umstellung liegen alle Flächen als halbdurchsichtiges Glas über einem ruhigen, einmal verwischten
 **Grund** — dem des Themes oder einem eigenen Bild. Es gibt keinen Schalter dafür; drei Regler stellen es ein.
 
 ## Wo die Knöpfe sind
 
-**Settings** öffnet das Zahnrad im Dock oder ⌘, (Windows/Linux: Ctrl+,). Unter „Appearance“:
+**Einstellungen** öffnet das Zahnrad im Dock oder ⌘, (Windows/Linux: Ctrl+,). Unter „Darstellung“:
 
 - **„Theme“:** Graphite, Paper, Steampunk, Forest, Ocean, fünf Catppuccin-Varianten, Tokyo Night, GitHub Dark und
   GitHub Light. Dasselbe schnell über „Theme“ im Dock.
-- **„Typeface“:** Geist, Inter oder IBM Plex Sans (nicht für Editor und Terminal).
-- **„Language“ / „Sprache“:** „System“ (die erste Sprache von macOS, die die App kann), „Deutsch“ oder „English“;
+- **„Schrift“:** Geist, Inter oder IBM Plex Sans (nicht für Editor und Terminal).
+- **„Sprache“:** „System“ (die erste Sprache von macOS, die die App kann), „Deutsch“ oder „English“;
   gilt sofort. Namen wie Studio, Canvas, Flow oder Skills bleiben in beiden Sprachen gleich, und der Chat antwortet
   in der gewählten Sprache. Noch nicht jede Ansicht ist übersetzt — was fehlt, steht vorerst auf Englisch.
-- **„Motion“ → „Movement“:** „Full“, „Calm“ oder „Off“. macOS „Bewegung reduzieren“ stellt auf „Off“.
-- **„Light“:** „Light under the pointer“, „Time-of-day light“, „Start ignition“.
-- **„Sound“:** „Sounds“ (nur, solange Axiomata im Hintergrund ist), mit Hörproben.
-- **„Canvas“:** „Show dot grid“, „Magnetic edges“.
-- **„Orbit & Second Brain“:** „Speed“, „Labels“, „File names“, „Shimmer“, „Layout“.
-- **„UI size“:** „Auto“ (folgt der Pixeldichte des Bildschirms) oder der Regler „Text and controls“ in Prozent.
-- **„Keyboard“ → „Shortcuts follow“:** „Auto“, „Mac“ oder „Windows & Linux“.
-- **„Glass“:** „Transparency“ (0 % dicht, 100 % klar, 50 % der Look des Themes), „Blur“ (wie weich der Grund ist),
-  „Background image“ mit „Choose image…“ / „Remove“ und, mit Bild, „Image dim“ (wie stark das Theme das Bild
+- **„Bewegung“:** „Voll“, „Ruhig“ oder „Aus“. macOS „Bewegung reduzieren“ stellt auf „Aus“.
+- **„Licht“:** „Licht unter dem Zeiger“, „Tageszeit-Licht“, „Zündung beim Start“.
+- **„Ton“:** „Töne“ (nur, solange Axiomata im Hintergrund ist), mit Hörproben.
+- **„Canvas“:** „Punktraster zeigen“, „Magnetische Kanten“.
+- **„Orbit & Second Brain“:** „Tempo“, „Beschriftungen“, „Dateinamen“, „Schimmer“, „Anordnung“.
+- **„UI-Größe“:** „Auto“ (folgt der Pixeldichte des Bildschirms) oder der Regler „Text und Bedienelemente“ in Prozent.
+- **„Tastatur“ → „Tastenkürzel nach“:** „Auto“, „Mac“ oder „Windows & Linux“.
+- **„Glas“:** „Transparenz“ (0 % dicht, 100 % klar, 50 % der Look des Themes), „Unschärfe“ (wie weich der Grund ist),
+  „Hintergrundbild“ mit „Bild wählen…“ / „Entfernen“ und, mit Bild, „Bild abdunkeln“ (wie stark das Theme das Bild
   abdunkelt bzw. aufhellt, damit Text lesbar bleibt).
-- **„Custom CSS“:** „Reload custom CSS“ und „Copy template“ für eine eigene `~/.axiomata/theme.css`.
+- **„Eigenes CSS“:** „Eigenes CSS neu laden“ und „Vorlage kopieren“ für eine eigene `~/.axiomata/theme.css`.
 
-Unter „Workspace“: „Vault“ → „Path“ → „Save & restart“; darunter „Tags“ (siehe [Tags und Links](tags-links.md)).
+Unter „Workspace“: „Vault“ → „Pfad“ → „Speichern & neu starten“; darunter „Tags“ (siehe [Tags und
+Links](tags-links.md)).
 
 ## Häufige Handgriffe
 
-1. **Eigenes Hintergrundbild:** Appearance → „Glass“ → „Choose image…“ → Bild wählen; mit „Image dim“ und „Blur“
-   lesbar machen.
-2. **Ruhiger arbeiten:** „Movement“ auf „Calm“ (Glimmen steht still, der Orbit dreht weiter) oder „Off“.
-3. **Alles größer:** „UI size“ → „Auto“ abwählen → „Text and controls“ hochziehen (wird beim Loslassen übernommen).
+1. **Eigenes Hintergrundbild:** „Darstellung“ → „Glas“ → „Bild wählen…“ → Bild wählen; mit „Bild abdunkeln“ und
+   „Unschärfe“ lesbar machen.
+2. **Ruhiger arbeiten:** „Bewegung“ auf „Ruhig“ (Glimmen steht still, der Orbit dreht weiter) oder „Aus“.
+3. **Alles größer:** „UI-Größe“ → „Auto“ abwählen → „Text und Bedienelemente“ hochziehen (wird beim Loslassen
+   übernommen).
 
 ## Fallen
 
 - Ist macOS „Transparenz reduzieren“ an, ist alles dicht und die Glasregler sind gesperrt.
-- Menüs und Text über anderen Flächen bleiben immer dicht, auch bei 100 % „Transparency“.
-- Ein neuer Vault-Pfad gilt erst nach dem Neustart („Save & restart“).
-- „UI size“ ändert nicht die Schrift von Editor und Terminal; die haben eigene Einstellungen.
-- `theme.css` darf nur `:root { --ax-…: … }` enthalten; anderes wird abgelehnt und unter „Custom CSS“ als Fehler
+- Menüs und Text über anderen Flächen bleiben immer dicht, auch bei 100 % „Transparenz“.
+- Ein neuer Vault-Pfad gilt erst nach dem Neustart („Speichern & neu starten“).
+- „UI-Größe“ ändert nicht die Schrift von Editor und Terminal; die haben eigene Einstellungen.
+- `theme.css` darf nur `:root { --ax-…: … }` enthalten; anderes wird abgelehnt und unter „Eigenes CSS“ als Fehler
   gezeigt.
 
 ## Siehe auch

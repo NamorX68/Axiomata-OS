@@ -26,6 +26,7 @@
   device) won't show until the next ↻.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
@@ -178,7 +179,7 @@
       digest = { ...digest, events: [...digest.events, event].sort((a, b) => a.start.localeCompare(b.start)) };
       showCreate = false;
     } catch (err) {
-      createError = String(err instanceof Error ? err.message : err);
+      createError = messageOf(err);
     } finally {
       creating = false;
     }
@@ -194,7 +195,7 @@
       await deleteCalendarEvent(ctx.invoke, ev.id);
       digest = { ...digest, events: digest.events.filter((e) => e.id !== ev.id) };
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       deletingId = null;
     }
@@ -242,7 +243,7 @@
       error = result.error ?? "";
       staleNote = staleDigestNote(result);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
       staleNote = "";
     } finally {
       loading = false;
@@ -256,7 +257,7 @@
       const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       await applyFreshRun(full);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       running = false;
     }

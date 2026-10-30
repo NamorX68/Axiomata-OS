@@ -28,6 +28,7 @@
   one terminal and lives only as long as the app does.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount, tick, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
@@ -467,7 +468,7 @@
     try {
       line = await taskCommandLine(projectRoot(project.id), task.id);
     } catch (err) {
-      toast((err as { message?: string }).message ?? String(err), "danger");
+      toast(messageOf(err), "danger");
       return;
     }
     const existing = allTabs(layout).find((t) => taskIdOf(t) === task.id);
@@ -501,7 +502,7 @@
     try {
       openLineTerminal(`watch:${agentId}`, `Watch ${name}`, await watchLine(agentId));
     } catch (err) {
-      toast(tStudio("watchFailed", { error: err instanceof Error ? err.message : String(err) }), "danger");
+      toast(tStudio("watchFailed", { error: messageOf(err) }), "danger");
     }
   }
 
@@ -544,7 +545,7 @@
       const picked = await pickFile();
       if (picked && !picked.folder) openFromQuickOpen({ root: picked.root, rel: picked.rel }, null);
     } catch (err) {
-      toast(tStudio("dialogFailed", { error: (err as { message?: string }).message ?? String(err) }), "danger");
+      toast(tStudio("dialogFailed", { error: messageOf(err) }), "danger");
     }
   }
 
@@ -659,7 +660,7 @@
       await projectSession.refreshAgents();
       openAgent(projectSession.agentById(master.id) ?? master);
     } catch (err) {
-      const why = err instanceof Error ? err.message : String(err);
+      const why = messageOf(err);
       toast(tStudio("masterFailed", { error: why }), "danger");
     }
   }
@@ -694,7 +695,7 @@
         // Anything made for the board goes beside its tiles in the Flow; only a session of the owner's own stays.
         openAgent(agent, modeForAgent(agent), background === true);
       } catch (err) {
-        const why = err instanceof Error ? err.message : String(err);
+        const why = messageOf(err);
         toast(tStudio("sessionFailed", { error: why }), "danger");
       }
     }

@@ -9,6 +9,7 @@
  * through untouched.
  */
 
+import { messageOf } from "./errors";
 import { brainView, legacyMotionLevel, readBrainView } from "./brainView";
 import { isMotionLevel, motionSetting } from "./motion";
 import { isUiFont, uiFont } from "./uiFont";
@@ -245,7 +246,7 @@ export async function initPersistence(): Promise<void> {
   try {
     loaded = await invoke<LoadedState>("get_dashboard_state");
   } catch (err) {
-    toast(`Could not read dashboard.json: ${String(err)}`, "danger");
+    toast(`Could not read dashboard.json: ${messageOf(err)}`, "danger");
     dashboardRead.set(true);
     return;
   }
@@ -384,6 +385,6 @@ export async function flush(): Promise<void> {
   try {
     await invoke("save_dashboard_state", { json });
   } catch (err) {
-    toast(`Could not save dashboard.json: ${String(err)}`, "danger");
+    toast(`Could not save dashboard.json: ${messageOf(err)}`, "danger");
   }
 }

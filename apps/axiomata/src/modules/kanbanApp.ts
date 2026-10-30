@@ -3,6 +3,7 @@
  * on the board that was open last.
  */
 
+import { messageOf } from "../core/errors";
 import { invokeBackend as invoke } from "../core/backend";
 import { emit } from "../core/bus";
 import { openStaged } from "../core/staging";
@@ -49,7 +50,7 @@ export async function openKanban(target: { boardId?: number; cardId?: number } =
     boards = await invoke<{ id: number }[]>("list_boards");
   } catch (err) {
     // Opening on "no board" because the list failed would offer to create a board that probably exists.
-    toast(tKanban("loadBoardsFailed", { error: String(err) }), "warning");
+    toast(tKanban("loadBoardsFailed", { error: messageOf(err) }), "warning");
     return;
   }
   const boardId = target.boardId ?? boardToOpen(boards, lastBoard());

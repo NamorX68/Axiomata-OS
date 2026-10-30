@@ -4,34 +4,34 @@ Wie man mit ⌘K alles in Axiomata findet und startet: Befehle, Kacheln, Skills,
 
 ## Was es ist
 
-Spotlight ist das Suchfeld über allem, das „Search, or ask Axiomata …“ anbietet. Es sucht in der ganzen App
-gleichzeitig und führt mit Enter direkt aus, was es gefunden hat. Ohne Eingabe zeigt es „Jump to“: „New note“,
-„Open Kanban“, „Open Studio“, „Open Second Brain“, „Settings“.
+Spotlight ist das Suchfeld über allem, das „Suchen oder Axiomata fragen…“ anbietet. Es sucht in der ganzen App
+gleichzeitig und führt mit Enter direkt aus, was es gefunden hat. Ohne Eingabe zeigt es „Gehe zu“: „Neue Notiz“,
+„Kanban öffnen“, „Studio öffnen“, „Second Brain öffnen“, „Einstellungen“.
 
 ## Wo die Knöpfe sind
 
-- **Öffnen:** ⌘K (Windows/Linux: Ctrl+K) oder im Dock die Lupe „Search or run“. Nochmal ⌘K, Esc oder ein Klick
+- **Öffnen:** ⌘K (Windows/Linux: Ctrl+K) oder im Dock die Lupe „Suchen oder ausführen“. Nochmal ⌘K, Esc oder ein Klick
   daneben schließt.
 - **Die Gruppen und was Enter tut:**
-  - **Commands** — „New note“, „Settings“, „Open Kanban“, „Open Studio“, „Add module“, „Open Second Brain“: führt
-    den Befehl aus.
-  - **Modules** — legt die Kachel auf die Fläche (schon platzierte Einzelkacheln fehlen hier).
+  - **Befehle** — „Neue Notiz“, „Einstellungen“, „Kanban öffnen“, „Studio öffnen“, „Modul hinzufügen“, „Second Brain
+    öffnen“: führt den Befehl aus.
+  - **Module** — legt die Kachel auf die Fläche (schon platzierte Einzelkacheln fehlen hier).
   - **Skills** — startet den Skill; das Ergebnis kommt als Meldung unten rechts.
   - **Routines** — zeigt bzw. platziert die Kachel „Routines“.
-  - **Cards** — öffnet die Karte im Kanban.
-  - **Plans** — öffnet das Studio im Modus „Flow“.
-  - **Projects** — öffnet das Studio auf diesem Projekt.
+  - **Karten** — öffnet die Karte im Kanban.
+  - **Pläne** — öffnet das Studio im Modus „Flow“.
+  - **Projekte** — öffnet das Studio auf diesem Projekt.
   - **Tags** — öffnet das Second Brain, gefiltert auf den Tag.
-  - **Files** — nach Namen und, ab zwei Zeichen, im Volltext; Enter öffnet die Datei im Dateifenster, ⌘Enter zeigt
+  - **Dateien** — nach Namen und, ab zwei Zeichen, im Volltext; Enter öffnet die Datei im Dateifenster, ⌘Enter zeigt
     sie stattdessen im Second Brain.
-  - **Ask** — „Ask Axiomata“ steht immer zuletzt und schickt die Eingabe an den Chat.
+  - **Fragen** — „Axiomata fragen“ steht immer zuletzt und schickt die Eingabe an den Chat.
 - ↑/↓ wählen, Enter oder Doppelklick führt aus.
 
 ## Häufige Handgriffe
 
 1. **Datei öffnen:** ⌘K → ein paar Buchstaben des Namens → Enter.
 2. **Skill starten:** ⌘K → Skillname → Enter.
-3. **Etwas fragen:** ⌘K → Frage tippen → ganz unten „Ask Axiomata“ → Enter.
+3. **Etwas fragen:** ⌘K → Frage tippen → ganz unten „Axiomata fragen“ → Enter.
 
 ## Fallen
 

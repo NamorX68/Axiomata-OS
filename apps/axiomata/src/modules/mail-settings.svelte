@@ -9,6 +9,7 @@
   source of truth for it.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { loadTopics, MAIL_SKILL_NAME, saveTopics } from "../core/mail";
@@ -34,7 +35,7 @@
       const topics = await loadTopics(ctx.invoke);
       text = topics.join("\n");
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       loading = false;
     }
@@ -53,7 +54,7 @@
       await saveTopics(ctx.invoke, topics);
       saved = true;
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       saving = false;
     }

@@ -12,6 +12,7 @@
     listenBackend,
     type PlanRunEvent,
   } from "./core/backend";
+  import { messageOf } from "./core/errors";
   import { claudeSignInNotice } from "./core/harness";
   import { AGENTS_WAITING, watchWaiting } from "./core/agentWaiting";
   import { brainActive } from "./core/brainView";
@@ -204,7 +205,7 @@ import { emit, on } from "./core/bus";
         toast(tCanvas("reviewStarted", { id: started.cardId }), "info");
       }),
       listenBackend<{ cardId: number; reason: string }>("card:review-blocked", (blocked) => {
-        toast(tCanvas("reviewBlocked", { id: blocked.cardId, reason: blocked.reason }), "warning");
+        toast(tCanvas("reviewBlocked", { id: blocked.cardId, reason: messageOf(blocked.reason) }), "warning");
       }),
       // A plan that runs by itself did something (A2A CP-A8): a started card's pane opens in the background — opening it
       // is what starts the harness —, the panes of integrated cards close, and what needs the owner is said.

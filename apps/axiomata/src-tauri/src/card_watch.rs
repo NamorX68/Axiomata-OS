@@ -112,12 +112,18 @@ async fn tick(app: &AppHandle, tried: &mut HashSet<AwaitingReview>) -> Vec<Event
                 }));
             }
             Err(err) => {
-                let reason = err.to_string();
                 // The owner started it a moment ago: nothing to say.
-                if !reason.contains("being reviewed already") {
+                let already = matches!(
+                    err,
+                    axiomata_core::AxiomataError::Coded {
+                        code: "review.alreadyRunning",
+                        ..
+                    }
+                );
+                if !already {
                     events.push(Event::Blocked(ReviewBlocked {
                         card_id: entry.card_id,
-                        reason,
+                        reason: crate::commands::ui(err),
                     }));
                 }
             }

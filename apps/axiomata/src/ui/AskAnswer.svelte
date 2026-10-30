@@ -5,6 +5,7 @@
   agent's pane in the Studio. The answer goes through `answer_permission`, the app's only door for it.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { askDecisions, waitingAgents, withoutAsk, type AskDecision, type WaitingAsk } from "../core/agentWaiting";
   import { invokeBackend } from "../core/backend";
   import { toast } from "../core/toast";
@@ -42,7 +43,7 @@
       await invokeBackend("answer_permission", { agentId, requestId: ask.id, decision });
       waitingAgents.update((list) => withoutAsk(list, agentId));
     } catch (err) {
-      toast(tCanvas("couldNotAnswer", { error: String(err) }), "warning");
+      toast(tCanvas("couldNotAnswer", { error: messageOf(err) }), "warning");
     } finally {
       busy = false;
     }

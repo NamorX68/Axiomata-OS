@@ -22,11 +22,12 @@ use crate::AxiomataError;
 use crate::agent_mcp::Capabilities;
 use crate::board::{flow, store as board_store};
 use crate::config::Config;
+use crate::error::coded;
 use crate::ide::agent_store;
 use crate::ide::model::Agent;
 use crate::ide::{store as project_store, worktree};
 use crate::model_tiers::ModelSources;
-use crate::roster::{self, refusal};
+use crate::roster::{self, no_card, no_engine, no_plan, no_project, no_role, refusal};
 use crate::session::actor_from;
 
 /// The role a card without one is given (the one every install has).
@@ -82,16 +83,18 @@ pub(crate) fn choose_engine(
         let engine = crate::engines::Lookup::new(config)
             .engine(asked)
             .ok_or_else(|| {
-                refusal(
-                    "engine",
+                coded(
+                    "engine.unknownAddInStudio",
+                    &[("id", asked)],
                     format!(
                         "there is no engine “{asked}”; engines are added in the Studio settings"
                     ),
                 )
             })?;
         if !engine.command.trim().is_empty() {
-            return Err(refusal(
-                "engine",
+            return Err(coded(
+                "engine.ownCommand",
+                &[("id", asked)],
                 format!(
                     "the engine “{asked}” runs a command of its own, which Axiomata does not touch; an unattended \
                      session needs the generated command"
@@ -105,8 +108,9 @@ pub(crate) fn choose_engine(
         .next()
         .map(|info| (info.engine.id.clone(), info.engine))
         .ok_or_else(|| {
-            refusal(
-                "engine",
+            coded(
+                "engine.noneForTierUnattended",
+                &[("tier", tier.as_str())],
                 format!(
                     "no engine of the tier {} can run an unattended session; switch a model of that tier on or set \
                      the tier's default engine in the Studio's Models tab, or pick an engine when you start it",
@@ -140,7 +144,7 @@ pub(crate) fn session_name(
     role: &str,
 ) -> Result<String> {
     let info = crate::engines::find(config, &ModelSources::load(), engine_id)
-        .ok_or_else(|| refusal("engine", format!("there is no engine “{engine_id}”")))?;
+        .ok_or_else(|| no_engine(engine_id))?;
     let names: Vec<String> = taken.iter().map(|agent| agent.name.clone()).collect();
     crate::agent_start::session_name(&info, tier, role, &names)
 }
@@ -160,19 +164,20 @@ pub fn start_card_session(core: &AxiomataCore, request: &StartRequest) -> Result
     let line = line_for_start(core, request)?;
     let mut db = core.db_lock();
     let project = project_store::get_project(&db, request.project_id)?
-        .ok_or_else(|| refusal("project", format!("no project {}", request.project_id)))?;
+        .ok_or_else(|| no_project(request.project_id))?;
     if !worktree::is_repo(&project.repo_root) {
-        return Err(refusal(
-            "project",
-            "an unattended session needs its own worktree, and this project is not a git repository".to_string(),
+        return Err(coded(
+            "card.projectNotRepo",
+            &[],
+            "an unattended session needs its own worktree, and this project is not a git repository",
         ));
     }
     if crate::agent_entry::cli_path().is_none() {
-        return Err(refusal(
-            "axiomata-cli",
+        return Err(coded(
+            "card.noCli",
+            &[],
             "a session working on a card needs the team tools, and no `axiomata-cli` was found next to the app \
-             (build the workspace, or set AXIOMATA_CLI)"
-                .to_string(),
+             (build the workspace, or set AXIOMATA_CLI)",
         ));
     }
     let roles = roster::roles_for_project(&db, &config, request.project_id);
@@ -206,13 +211,13 @@ fn start_card_plan_in(
     card_id: i64,
     project_id: i64,
 ) -> Result<crate::board::Plan> {
-    let project = project_store::get_project(db, project_id)?
-        .ok_or_else(|| refusal("project", format!("no project {project_id}")))?;
+    let project =
+        project_store::get_project(db, project_id)?.ok_or_else(|| no_project(project_id))?;
     if !worktree::is_repo(&project.repo_root) {
-        return Err(refusal(
-            "project",
-            "a plan's steps run unattended in worktrees of their own, and this project is not a git repository"
-                .to_string(),
+        return Err(coded(
+            "plan.projectNotRepo",
+            &[],
+            "a plan's steps run unattended in worktrees of their own, and this project is not a git repository",
         ));
     }
     Ok(flow::start_card_as_plan(db, card_id, project_id, OWNER)?)
@@ -250,18 +255,22 @@ fn line_for_start(
             return Ok(None);
         }
         if plan.project_id != Some(request.project_id) {
-            return Err(refusal(
-                "project",
+            let project = plan.project_id.unwrap_or_default();
+            return Err(coded(
+                "card.otherProject",
+                &[
+                    ("card", &card.id.to_string()),
+                    ("plan", &plan.id.to_string()),
+                    ("project", &project.to_string()),
+                ],
                 format!(
-                    "card #{} belongs to plan #{}, which runs in project {}; start it there",
-                    card.id,
-                    plan.id,
-                    plan.project_id.unwrap_or_default()
+                    "card #{} belongs to plan #{}, which runs in project {project}; start it there",
+                    card.id, plan.id
                 ),
             ));
         }
         let project = project_store::get_project(&db, request.project_id)?
-            .ok_or_else(|| refusal("project", format!("no project {}", request.project_id)))?;
+            .ok_or_else(|| no_project(request.project_id))?;
         (plan, project)
     };
     make_line(core, &plan, &project).map(Some)
@@ -313,16 +322,20 @@ fn start_in(
     request: &StartRequest,
     line_base: Option<&str>,
 ) -> Result<CardSession> {
-    let card = board_store::get_card(db, request.card_id)?
-        .ok_or_else(|| refusal("card", format!("no card {}", request.card_id)))?;
+    let card =
+        board_store::get_card(db, request.card_id)?.ok_or_else(|| no_card(request.card_id))?;
     // The first step of a stacked card is the branch of the predecessor (A16); that comes with the next stage, and a
     // session cut from the main branch would work without what the card builds on.
     // On the line of its plan, a card that builds on others starts from what they did: it waits until their work is on
     // the line. Anywhere else a card with predecessors cannot be started by the studio.
     match line_base {
         None if !card.depends_on.is_empty() => {
-            return Err(refusal(
-                "card",
+            return Err(coded(
+                "card.hasPredecessors",
+                &[
+                    ("card", &card.id.to_string()),
+                    ("dep", &card.depends_on[0].to_string()),
+                ],
                 format!(
                     "card #{} builds on card #{}; only a plan that runs by itself starts cards on the work of their \
                      predecessors",
@@ -335,8 +348,9 @@ fn start_in(
                 let integrated =
                     board_store::get_card(db, *dep)?.is_some_and(|dep| dep.integrated_at.is_some());
                 if !integrated {
-                    return Err(refusal(
-                        "card",
+                    return Err(coded(
+                        "card.predecessorNotOnLine",
+                        &[("card", &card.id.to_string()), ("dep", &dep.to_string())],
                         format!(
                             "card #{} builds on card #{dep}, whose work is not on the plan's line yet",
                             card.id
@@ -354,15 +368,11 @@ fn start_in(
     let role = roles
         .iter()
         .find(|role| role.name == role_name)
-        .ok_or_else(|| {
-            refusal(
-                "role",
-                format!("there is no role “{role_name}” for this project"),
-            )
-        })?;
+        .ok_or_else(|| no_role(&role_name))?;
     if !Capabilities::of(role).work {
-        return Err(refusal(
-            "role",
+        return Err(coded(
+            "role.doesNotWork",
+            &[("name", &role_name)],
             format!(
                 "the role “{role_name}” does not work cards (it reviews or plans); pick a role of kind implement for \
                  this card"
@@ -390,7 +400,11 @@ fn start_in(
     )?;
     let Some(actor) = actor_from(Some(&agent.id.to_string()), Some(&agent.name)) else {
         agent_store::delete_agent(db, agent.id)?;
-        return Err(refusal("name", format!("“{name}” makes no valid actor")));
+        return Err(coded(
+            "agent.invalidActor",
+            &[("name", &name)],
+            format!("“{name}” makes no valid actor"),
+        ));
     };
     // The studio started this session for this card; the pane's start reads it from here.
     agent_store::set_card(db, agent.id, Some(card.id), false, None)?;
@@ -502,13 +516,19 @@ fn choose_reviewer<'a>(
     requested: Option<&str>,
 ) -> Result<(&'a Role, Tier, String)> {
     let role = review_role(roles, card).ok_or_else(|| {
-        refuse_review("there is no role of kind `review` for this project; add one in the Studio")
+        coded(
+            "review.noRole",
+            &[],
+            "there is no role of kind `review` for this project; add one in the Studio",
+        )
     })?;
     let sources = ModelSources::load();
     let needed = worker_tier(config, &sources, card, worker_role, worker_engine);
     if let Some(asked) = requested {
         if Some(asked) == worker_engine {
-            return Err(refuse_review(
+            return Err(coded(
+                "review.sameEngine",
+                &[],
                 "the reviewer must run on another engine than the session that worked on the card",
             ));
         }
@@ -525,15 +545,46 @@ fn choose_reviewer<'a>(
             return Ok((role, tier, info.engine.id.clone()));
         }
     }
-    Err(refuse_review(&format!(
-        "the reviewer needs an engine of the tier {} or above other than the worker's, and none can run; switch \
-         another model of that tier on in the Studio's Models tab, or pick one",
-        needed.as_str()
-    )))
+    Err(coded(
+        "review.noEngine",
+        &[("tier", needed.as_str())],
+        format!(
+            "the reviewer needs an engine of the tier {} or above other than the worker's, and none can run; switch \
+             another model of that tier on in the Studio's Models tab, or pick one",
+            needed.as_str()
+        ),
+    ))
 }
 
 fn refuse_review(reason: &str) -> AxiomataError {
     refusal("review", reason.to_owned())
+}
+
+/// The refusal when the session that worked on a card is gone (`card.workerGone`).
+fn worker_gone() -> AxiomataError {
+    coded(
+        "card.workerGone",
+        &[],
+        "the session that worked on the card is gone",
+    )
+}
+
+/// The refusal for a review of a card that waits for none (`review.notWaiting`).
+fn not_waiting_for_review() -> AxiomataError {
+    coded(
+        "review.notWaiting",
+        &[],
+        "the card is not waiting for a review",
+    )
+}
+
+/// The refusal for a second review of one report (`review.alreadyRunning`).
+fn reviewed_already(reviewer: &str) -> AxiomataError {
+    coded(
+        "review.alreadyRunning",
+        &[("name", reviewer)],
+        format!("the card is being reviewed already, by {reviewer}"),
+    )
 }
 
 /// The reviewer session that is judging the latest report of a card, if there is one: a reviewer made after the latest
@@ -562,7 +613,7 @@ fn project_of(db: &Connection, card: &crate::board::Card) -> Result<i64> {
         .and_then(session_id_of)
         .and_then(|id| agent_store::get_agent(db, id).ok().flatten())
         .map(|worker| worker.project_id)
-        .ok_or_else(|| refuse_review("the session that worked on the card is gone"))
+        .ok_or_else(worker_gone)
 }
 
 /// A card that was reported and has no reviewer yet, for the studio to start one for.
@@ -734,14 +785,14 @@ fn plan_review(
     request: &ReviewRequest,
     cli_available: bool,
 ) -> Result<ReviewPlan> {
-    let card = board_store::get_card(db, request.card_id)?
-        .ok_or_else(|| refusal("card", format!("no card {}", request.card_id)))?;
+    let card =
+        board_store::get_card(db, request.card_id)?.ok_or_else(|| no_card(request.card_id))?;
     let column = board_store::get_column(db, card.column_id)?;
     if column.and_then(|column| column.stage) != Some(crate::board::ColumnStage::Review)
         || card.state != crate::board::TaskState::InReview
         || card.archived_at.is_some()
     {
-        return Err(refuse_review("the card is not waiting for a review"));
+        return Err(not_waiting_for_review());
     }
     let worker = card
         .claimed_by
@@ -749,28 +800,27 @@ fn plan_review(
         .and_then(session_id_of)
         .and_then(|id| agent_store::get_agent(db, id).ok().flatten())
         .filter(|worker| worker.card_id == Some(card.id) && !worker.card_review)
-        .ok_or_else(|| refuse_review("the session that worked on the card is gone"))?;
+        .ok_or_else(worker_gone)?;
     let project = project_store::get_project(db, worker.project_id)?
-        .ok_or_else(|| refusal("project", format!("no project {}", worker.project_id)))?;
+        .ok_or_else(|| no_project(worker.project_id))?;
     if !worktree::is_repo(&project.repo_root) {
-        return Err(refusal(
-            "project",
-            "a reviewer needs a worktree of its own, and this project is not a git repository"
-                .to_string(),
+        return Err(coded(
+            "review.projectNotRepo",
+            &[],
+            "a reviewer needs a worktree of its own, and this project is not a git repository",
         ));
     }
     if !cli_available {
-        return Err(refuse_review(
+        return Err(coded(
+            "review.noCli",
+            &[],
             "a reviewer needs the team tools, and no `axiomata-cli` was found next to the app (build the workspace, or \
              set AXIOMATA_CLI)",
         ));
     }
     let sessions = agent_store::list_agents(db, worker.project_id)?;
     if let Some(existing) = current_reviewer(db, card.id, &sessions)? {
-        return Err(refuse_review(&format!(
-            "the card is being reviewed already, by {}",
-            existing.name
-        )));
+        return Err(reviewed_already(&existing.name));
     }
     let roles = roles_of(db, worker.project_id);
     let worker_role = roles.iter().find(|role| role.name == worker.agent_role);
@@ -808,11 +858,16 @@ fn snapshot_for_review(plan: &ReviewPlan, allow_agent_config: bool) -> Result<St
         .snapshot(&format!("#{} {first_line}", plan.card.id))?;
     let touched = plan.repo.agent_config_changes(&snapshot)?;
     if !touched.is_empty() && !allow_agent_config {
-        return Err(refuse_review(&format!(
-            "the work changes files agents take their configuration from ({}), and a reviewer started on that checkout \
-             would obey what the worker wrote there. Review it yourself, or start the review by hand and accept it",
-            touched.join(", ")
-        )));
+        let files = touched.join(", ");
+        return Err(coded(
+            "review.touchesAgentConfig",
+            &[("files", &files)],
+            format!(
+                "the work changes files agents take their configuration from ({files}), and a reviewer started on that \
+                 checkout would obey what the worker wrote there. Review it yourself, or start the review by hand and \
+                 accept it"
+            ),
+        ));
     }
     Ok(snapshot)
 }
@@ -825,17 +880,13 @@ fn finish_review(
     plan: &ReviewPlan,
     snapshot: &str,
 ) -> Result<(ReviewSession, Vec<Agent>)> {
-    let card = board_store::get_card(db, plan.card.id)?
-        .ok_or_else(|| refusal("card", format!("no card {}", plan.card.id)))?;
+    let card = board_store::get_card(db, plan.card.id)?.ok_or_else(|| no_card(plan.card.id))?;
     if card.state != crate::board::TaskState::InReview {
-        return Err(refuse_review("the card is not waiting for a review"));
+        return Err(not_waiting_for_review());
     }
     let sessions = agent_store::list_agents(db, plan.worker.project_id)?;
     if let Some(existing) = current_reviewer(db, card.id, &sessions)? {
-        return Err(refuse_review(&format!(
-            "the card is being reviewed already, by {}",
-            existing.name
-        )));
+        return Err(reviewed_already(&existing.name));
     }
     let name = session_name(
         config,
@@ -976,18 +1027,19 @@ fn take_over_blocking(
 
 /// Phase one of a take-over, under the lock: the card, the worker and what was reviewed.
 fn plan_take_over(db: &Connection, card_id: i64, message: Option<&str>) -> Result<TakeOverPlan> {
-    let card = board_store::get_card(db, card_id)?
-        .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
+    let card = board_store::get_card(db, card_id)?.ok_or_else(|| no_card(card_id))?;
     if card.verified_by.is_none() {
-        return Err(refusal(
-            "card",
-            "only a card the reviewer signed off can be taken over".to_string(),
+        return Err(coded(
+            "card.takeOverNotSignedOff",
+            &[],
+            "only a card the reviewer signed off can be taken over",
         ));
     }
     if card.taken_over_at.is_some() {
-        return Err(refusal(
-            "card",
-            "the card was taken over already".to_string(),
+        return Err(coded(
+            "card.takenOverAlready",
+            &[],
+            "the card was taken over already",
         ));
     }
     // A card of a plan that runs by itself goes into the plan's line, and the line is taken over as a whole.
@@ -996,11 +1048,11 @@ fn plan_take_over(db: &Connection, card_id: i64, message: Option<&str>) -> Resul
         .and_then(|id| flow::get_plan(db, id).ok().flatten())
         .is_some_and(|plan| runs_by_itself(&plan))
     {
-        return Err(refusal(
-            "card",
+        return Err(coded(
+            "card.takeOverPlanCard",
+            &[],
             "this card belongs to a plan that runs by itself: its work is integrated into the plan's line, and the plan \
-             is taken over as a whole"
-                .to_string(),
+             is taken over as a whole",
         ));
     }
     // Only a session the studio started for this card is a worker the studio takes work from: a card claimed by hand
@@ -1011,12 +1063,7 @@ fn plan_take_over(db: &Connection, card_id: i64, message: Option<&str>) -> Resul
         .and_then(session_id_of)
         .and_then(|id| agent_store::get_agent(db, id).ok().flatten())
         .filter(|worker| worker.card_id == Some(card.id) && !worker.card_review)
-        .ok_or_else(|| {
-            refusal(
-                "card",
-                "the session that worked on the card is gone".to_string(),
-            )
-        })?;
+        .ok_or_else(worker_gone)?;
     let first_line = card.title.lines().next().unwrap_or_default().trim();
     let message = message
         .map(str::trim)
@@ -1073,21 +1120,21 @@ fn gate_reviewed(
             .as_deref()
             .is_some_and(|signer| signer.starts_with("agent:"))
     {
-        return Err(refusal(
-            "card",
+        return Err(coded(
+            "card.reviewerGone",
+            &[],
             "the reviewer that signed the card off is gone, so there is no way to tell that the work is what it saw; send \
-             the card back for a new review"
-                .to_string(),
+             the card back for a new review",
         ));
     }
     match reviewed {
         Some(reviewed) => {
             if repo.is_dirty()? || repo.branch_tip()? != reviewed {
-                return Err(refusal(
-                    "card",
+                return Err(coded(
+                    "card.changedAfterReview",
+                    &[],
                     "the work changed after it was reviewed; send the card back for a new review instead of taking it \
-                     over"
-                        .to_string(),
+                     over",
                 ));
             }
             // The commit that was checked, by its id: the worker's harness may still be alive, and a branch name read
@@ -1402,9 +1449,10 @@ fn integrate_blocking(
                         &format!("{GAVE_UP_PREFIX}: {text}"),
                     )?;
                 } else if !flow::reset_for_rework(&mut conn, plan.card.id, STUDIO, &text)? {
-                    return Err(refusal(
-                        "card",
-                        "the card does not fit the line, and could not be put back".to_string(),
+                    return Err(coded(
+                        "card.doesNotFitLine",
+                        &[],
+                        "the card does not fit the line, and could not be put back",
                     ));
                 }
             }
@@ -1436,18 +1484,19 @@ fn integrate_blocking(
 
 /// Phase one, under the lock: everything that can be refused.
 fn plan_integration(db: &Connection, card_id: i64) -> Result<IntegrationPlan> {
-    let card = board_store::get_card(db, card_id)?
-        .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
+    let card = board_store::get_card(db, card_id)?.ok_or_else(|| no_card(card_id))?;
     if card.verified_by.is_none() {
-        return Err(refusal(
-            "card",
-            "only a card the reviewer signed off can be integrated".to_string(),
+        return Err(coded(
+            "card.integrateNotSignedOff",
+            &[],
+            "only a card the reviewer signed off can be integrated",
         ));
     }
     if card.integrated_at.is_some() || card.taken_over_at.is_some() {
-        return Err(refusal(
-            "card",
-            "the card was integrated or taken over already".to_string(),
+        return Err(coded(
+            "card.integratedAlready",
+            &[],
+            "the card was integrated or taken over already",
         ));
     }
     let plan = card
@@ -1455,9 +1504,10 @@ fn plan_integration(db: &Connection, card_id: i64) -> Result<IntegrationPlan> {
         .and_then(|id| flow::get_plan(db, id).ok().flatten())
         .filter(runs_by_itself)
         .ok_or_else(|| {
-            refusal(
-                "card",
-                "the card belongs to no plan that runs by itself".to_string(),
+            coded(
+                "card.noRunningPlan",
+                &[],
+                "the card belongs to no plan that runs by itself",
             )
         })?;
     let worker = card
@@ -1466,14 +1516,9 @@ fn plan_integration(db: &Connection, card_id: i64) -> Result<IntegrationPlan> {
         .and_then(session_id_of)
         .and_then(|id| agent_store::get_agent(db, id).ok().flatten())
         .filter(|worker| worker.card_id == Some(card.id) && !worker.card_review)
-        .ok_or_else(|| {
-            refusal(
-                "card",
-                "the session that worked on the card is gone".to_string(),
-            )
-        })?;
+        .ok_or_else(worker_gone)?;
     let project = project_store::get_project(db, plan.project_id.unwrap_or_default())?
-        .ok_or_else(|| refusal("project", "the plan's project is gone".to_string()))?;
+        .ok_or_else(|| coded("plan.projectGone", &[], "the plan's project is gone"))?;
     let sessions: Vec<Agent> = agent_store::list_agents(db, worker.project_id)?
         .into_iter()
         .filter(|agent| agent.card_id == Some(card.id))
@@ -1569,15 +1614,15 @@ pub fn cards_left_for_owner(db: &Connection, plan_id: i64) -> Result<Vec<i64>> {
 pub async fn redo_card(core: &AxiomataCore, card_id: i64) -> Result<Vec<i64>> {
     let sessions = {
         let mut db = core.db_lock();
-        let card = board_store::get_card(&db, card_id)?
-            .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
+        let card = board_store::get_card(&db, card_id)?.ok_or_else(|| no_card(card_id))?;
         if !gave_up_on(&db, card_id)?
             || card.integrated_at.is_some()
             || card.taken_over_at.is_some()
         {
-            return Err(refusal(
-                "card",
-                "only a card the studio gave up integrating can be done again by hand".to_string(),
+            return Err(coded(
+                "card.notGivenUp",
+                &[],
+                "only a card the studio gave up integrating can be done again by hand",
             ));
         }
         if !flow::reset_for_rework(
@@ -1586,9 +1631,10 @@ pub async fn redo_card(core: &AxiomataCore, card_id: i64) -> Result<Vec<i64>> {
             OWNER,
             "redo: the owner has the card done again",
         )? {
-            return Err(refusal(
-                "card",
-                "the card could not be put back to be done again".to_string(),
+            return Err(coded(
+                "card.couldNotPutBack",
+                &[],
+                "the card could not be put back to be done again",
             ));
         }
         // A card done anew starts counting its returns from zero. The two steps below are small writes after the reset: if
@@ -1678,8 +1724,7 @@ fn escalate_in(
     card_id: i64,
 ) -> Result<CardEscalation> {
     let not_needed = Ok(CardEscalation::NotNeeded { card_id });
-    let card = board_store::get_card(db, card_id)?
-        .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
+    let card = board_store::get_card(db, card_id)?.ok_or_else(|| no_card(card_id))?;
     let in_work = matches!(
         card.state,
         crate::board::TaskState::Working | crate::board::TaskState::InputRequired
@@ -1698,21 +1743,17 @@ fn escalate_in(
         .and_then(|id| agent_store::get_agent(db, id).ok().flatten())
         .filter(|worker| worker.card_id == Some(card_id) && !worker.card_review)
         .ok_or_else(|| {
-            refusal(
-                "card",
-                "the session that works on the card is gone".to_string(),
+            coded(
+                "card.sessionGone",
+                &[],
+                "the session that works on the card is gone",
             )
         })?;
     let roles = roles_of(db, config, worker.project_id);
     let current = roles
         .iter()
         .find(|role| role.name == worker.agent_role)
-        .ok_or_else(|| {
-            refusal(
-                "role",
-                format!("there is no role “{}” for this project", worker.agent_role),
-            )
-        })?;
+        .ok_or_else(|| no_role(&worker.agent_role))?;
     let sources = ModelSources::load();
     let from = worker_tier(
         config,
@@ -1758,9 +1799,10 @@ fn escalate_in(
         &current.name,
     )?
     .ok_or_else(|| {
-        refusal(
-            "card",
-            "the session that works on the card is gone".to_string(),
+        coded(
+            "card.sessionGone",
+            &[],
+            "the session that works on the card is gone",
         )
     })?;
     // The next start is a new conversation on the new engine: it finds the work in the worktree and the reviewers' notes in
@@ -1816,8 +1858,9 @@ fn check_line_tip(
         )?,
     };
     if !in_place {
-        return Err(refusal(
-            "plan",
+        return Err(coded(
+            "plan.lineMoved",
+            &[("plan", &plan.id.to_string()), ("branch", &line.branch)],
             format!(
                 "the line of plan #{} is not where the studio left it: something else moved or made the branch {}; look at \
                  it before anything is merged into it",
@@ -1944,17 +1987,17 @@ fn take_over_plan_blocking(
 ) -> Result<PlanTakeOver> {
     let (plan, project, integrated) = {
         let conn = lock(db);
-        let plan = flow::get_plan(&conn, plan_id)?
-            .ok_or_else(|| refusal("plan", format!("no plan {plan_id}")))?;
+        let plan = flow::get_plan(&conn, plan_id)?.ok_or_else(|| no_plan(plan_id))?;
         if !runs_by_itself(&plan) {
-            return Err(refusal(
-                "plan",
-                "only a plan that runs by itself has a line to take over".to_string(),
+            return Err(coded(
+                "plan.noLine",
+                &[],
+                "only a plan that runs by itself has a line to take over",
             ));
         }
         let project_id = plan.project_id.unwrap_or_default();
-        let project = project_store::get_project(&conn, project_id)?
-            .ok_or_else(|| refusal("project", format!("no project {project_id}")))?;
+        let project =
+            project_store::get_project(&conn, project_id)?.ok_or_else(|| no_project(project_id))?;
         let cards: Vec<_> = board_store::list_cards(&conn, plan.board_id, false)?
             .into_iter()
             .filter(|card| card.plan_id == Some(plan.id))
@@ -1962,14 +2005,14 @@ fn take_over_plan_blocking(
         if let Some(open) = cards.iter().find(|card| {
             card.integrated_at.is_none() && card.state != crate::board::TaskState::Canceled
         }) {
-            return Err(refusal(
-                "plan",
+            let state = serde_json::to_string(&open.state).unwrap_or_default();
+            let state = state.trim_matches('"');
+            return Err(coded(
+                "plan.cardNotOnLine",
+                &[("card", &open.id.to_string()), ("state", state)],
                 format!(
-                    "card #{} is not on the line yet ({}); a plan is taken over when all its cards are",
-                    open.id,
-                    serde_json::to_string(&open.state)
-                        .unwrap_or_default()
-                        .trim_matches('"')
+                    "card #{} is not on the line yet ({state}); a plan is taken over when all its cards are",
+                    open.id
                 ),
             ));
         }
@@ -1979,9 +2022,10 @@ fn take_over_plan_blocking(
             .map(|card| card.id)
             .collect();
         if integrated.is_empty() {
-            return Err(refusal(
-                "plan",
-                "no card of the plan is on its line: there is nothing to take over".to_string(),
+            return Err(coded(
+                "plan.nothingOnLine",
+                &[],
+                "no card of the plan is on its line: there is nothing to take over",
             ));
         }
         (plan, project, integrated)
@@ -2033,9 +2077,10 @@ fn finish_integration(
     agent_ids: &[i64],
 ) -> Result<CardIntegration> {
     if !flow::mark_integrated(&lock(db), plan.card.id, STUDIO)? {
-        return Err(refusal(
-            "card",
-            "the work is on the line, but the card could not be marked as integrated".to_string(),
+        return Err(coded(
+            "card.notMarkedIntegrated",
+            &[],
+            "the work is on the line, but the card could not be marked as integrated",
         ));
     }
     Ok(CardIntegration::Done {
@@ -2073,7 +2118,7 @@ pub fn release_card_session(core: &AxiomataCore, card_id: i64) -> Result<bool> {
     let holder = {
         let mut db = core.db_lock();
         let Some(card) = board_store::get_card(&db, card_id)? else {
-            return Err(refusal("card", format!("no card {card_id}")));
+            return Err(no_card(card_id));
         };
         if !flow::release_started(&mut db, card_id, OWNER)? {
             return Ok(false);

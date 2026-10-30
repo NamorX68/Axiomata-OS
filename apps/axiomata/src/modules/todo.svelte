@@ -13,6 +13,7 @@
   - Config (flip side): `showDone` — whether the Done section starts open.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import type { WorkspaceFile } from "../core/backend";
@@ -73,7 +74,7 @@
       doc = parseTodoDoc(file.content);
       error = "";
     } catch (err) {
-      const message = String(err);
+      const message = messageOf(err);
       if (isNotFound(message)) {
         // No ToDo.md yet — that is the normal first-run state, not an error.
         lastLoaded = null;
@@ -94,7 +95,7 @@
       lastLoaded = serialized;
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 

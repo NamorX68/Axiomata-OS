@@ -17,6 +17,7 @@
   there now, not as a full-view option here.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount, untrack } from "svelte";
   import { get } from "svelte/store";
   import { fade } from "svelte/transition";
@@ -241,7 +242,7 @@
         focusExternal(model.byId.get(focus) ?? null);
       }
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -371,7 +372,7 @@
       const tone = r.status === "success" ? "info" : "warning";
       toast(tBrain("skillRan", { name, status: r.status, ms: r.duration_ms }), tone);
     } catch (err) {
-      toast(String(err), "danger");
+      toast(messageOf(err), "danger");
     } finally {
       busy = false;
     }
@@ -394,7 +395,7 @@
       select(null); // also clears confirmDelete
       await load(); // rebuild the graph without the deleted node
     } catch (err) {
-      toast(tBrain("deleteFailed", { error: String(err) }), "warning");
+      toast(tBrain("deleteFailed", { error: messageOf(err) }), "warning");
     } finally {
       deleting = false;
     }

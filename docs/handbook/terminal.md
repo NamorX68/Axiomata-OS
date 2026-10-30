@@ -12,17 +12,17 @@ gelten für **alle** Terminal-Kacheln zugleich.
 
 Rückseite der Kachel (Zahnrad):
 
-- **„Session“:** „Shell“ (leer = `$SHELL`), „Start directory“, „Scrollback (lines)“, „Environment variables“ (eine
-  Zeile `KEY=value` je Variable), „Visual bell“. Gilt erst für das **nächste** geöffnete Terminal.
-- **„Font“:** Schrift (mitgelieferte, „Installed on this Mac (monospaced)“ oder „Custom…“), „Font family“, „Size
-  (px)“, „Weight“.
-- **„Appearance“:** „Theme“ (u. a. „xterm (default)“, „Dracula“, „Nord“, „Catppuccin …“, „Tokyo Night“, „GitHub …“,
-  „Rosé Pine“, „One Dark“), „Background opacity“, „Cursor style“, „Cursor blink“, „Bold text in bright colour“.
+- **„Sitzung“:** „Shell“ (leer = `$SHELL`), „Startordner“, „Verlauf (Zeilen)“, „Umgebungsvariablen“ (eine
+  Zeile `KEY=value` je Variable), „Visuelle Glocke“. Gilt erst für das **nächste** geöffnete Terminal.
+- **„Schrift“:** Schrift (mitgelieferte, „Auf diesem Mac installiert (dicktengleich)“ oder „Eigene…“), „Schriftfamilie“,
+  „Größe (px)“, „Stärke“.
+- **„Darstellung“:** „Theme“ (u. a. „xterm (Standard)“, „Dracula“, „Nord“, „Catppuccin …“, „Tokyo Night“, „GitHub …“,
+  „Rosé Pine“, „One Dark“), „Deckkraft des Hintergrunds“, „Cursorform“, „Cursor blinkt“, „Fetten Text in hellen Farben“.
   Gilt sofort.
 
 ## Häufige Handgriffe
 
-1. **Terminal öffnen:** im App-Ring auf „Terminal“ (jedes Mal eine neue Kachel), Dock → „Add module“ oder den Chat
+1. **Terminal öffnen:** im App-Ring auf „Terminal“ (jedes Mal eine neue Kachel), Dock → „Modul hinzufügen“ oder den Chat
    bitten („öffne ein Terminal“).
 2. **Text kopieren:** mit der Maus markieren — beim Loslassen ist er kopiert. Mit gedrückter Shift-Taste geht das
    auch, während ein Programm die Maus benutzt.

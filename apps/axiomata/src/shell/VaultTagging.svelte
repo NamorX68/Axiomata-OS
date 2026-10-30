@@ -5,6 +5,7 @@
   into a preview. Nothing is written into a note until the owner writes the preview (or throws it away).
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { invokeBackend, type RunRecord, type TagProposal, type VaultApplied, type VaultPhase, type VaultTagging } from "../core/backend";
@@ -33,7 +34,7 @@
       status = await invokeBackend<VaultTagging>("vault_tagging_status");
       error = null;
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -47,7 +48,7 @@
       const run = await invokeBackend<RunRecord>("vault_tagging_start", { phase });
       toast(tTags("runStatus", { status: run.status }), run.status === "success" ? "info" : "warning");
     } catch (err) {
-      toast(tTags("runFailed", { error: String(err) }), "danger");
+      toast(tTags("runFailed", { error: messageOf(err) }), "danger");
     } finally {
       running = null;
       await refreshTagProposals(() => invokeBackend<TagProposal[]>("tag_proposals"));
@@ -72,7 +73,7 @@
       }
       await load();
     } catch (err) {
-      toast(tTags("writeFailed", { error: String(err) }), "danger");
+      toast(tTags("writeFailed", { error: messageOf(err) }), "danger");
     } finally {
       busy = false;
     }

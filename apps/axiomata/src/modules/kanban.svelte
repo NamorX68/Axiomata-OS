@@ -21,6 +21,7 @@
    * labels carry colour. Nothing here is framed — the board is frameless,
    * and a column drawn with a border would fight that.
    */
+  import { messageOf } from "../core/errors";
   import { get } from "svelte/store";
   import { SvelteSet } from "svelte/reactivity";
 
@@ -149,7 +150,7 @@
         // another panel switches the application-wide default.
         if (chosen !== null) config.update((c) => ({ ...c, boardId: chosen }));
       })
-      .catch((err) => (listError = String(err)));
+      .catch((err) => (listError = messageOf(err)));
   });
 
   /** The switcher needs every board's name, not just the shown one's. Re-read whenever the chosen board changes and
@@ -157,7 +158,7 @@
   function loadBoards(): void {
     void invoke<{ id: number; name: string }[]>("list_boards")
       .then((all) => (boards = all))
-      .catch((err) => (listError = String(err)));
+      .catch((err) => (listError = messageOf(err)));
   }
   $effect(() => {
     void boardId;
@@ -325,7 +326,7 @@
     try {
       await invoke("move_card", { id, columnId: to.columnId, index: to.index });
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     } finally {
       // Whether it worked or not, what is on screen has to match the database
       // again before the card is shown anywhere.
@@ -398,7 +399,7 @@
       await invoke("move_board_column", { id: column.id, index });
       if (boardId !== null) await refreshBoard(boardId);
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     }
   }
 
@@ -522,7 +523,7 @@
       });
       if (boardId !== null) await refreshBoard(boardId);
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     }
   }
 
@@ -541,7 +542,7 @@
       // The panel is showing a card that no longer exists; close it.
       if (stagedId) closeStaged(stagedId);
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     }
   }
 
@@ -550,7 +551,7 @@
       await invoke("set_card_archived", { id: card.id, archived });
       if (boardId !== null) await refreshBoard(boardId);
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     }
   }
 
@@ -569,7 +570,7 @@
       });
       if (boardId !== null) await refreshBoard(boardId);
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     }
   }
 
@@ -583,7 +584,7 @@
       });
       await refreshBoard(boardId);
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     }
   }
 
@@ -601,7 +602,7 @@
       removingColumn = null;
       if (boardId !== null) await refreshBoard(boardId);
     } catch (err) {
-      listError = String(err);
+      listError = messageOf(err);
     }
   }
 
@@ -652,7 +653,7 @@
         if (boardId !== null) await refreshBoard(boardId);
       } catch (err) {
         // A refusal of the agent fields ("use lower-case …") belongs next to the field, not in place of the board.
-        detailError = String(err);
+        detailError = messageOf(err);
       }
     });
     return savingDetail;
@@ -759,7 +760,7 @@
       await step;
       if (boardId !== null) await refreshBoard(boardId);
     } catch (err) {
-      detailError = String(err);
+      detailError = messageOf(err);
     }
   }
 
