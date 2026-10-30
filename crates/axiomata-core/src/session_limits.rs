@@ -140,6 +140,7 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
     let roots = paths::ide_locations().channels;
     let mut roles: HashMap<i64, Vec<Role>> = HashMap::new();
     let mut plans_of_cards: HashMap<i64, Option<i64>> = HashMap::new();
+    let engines = crate::engines::Lookup::new(&config);
     let mut watched = Vec::new();
     for agent in agent_store::card_sessions(&db)?
         .into_iter()
@@ -158,10 +159,7 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
             || Tier::default().default_limits(),
             |role| role.limits.resolve(role.tier),
         );
-        let engine = agent
-            .engine_id
-            .as_deref()
-            .and_then(|id| config.agents.engines.get(id));
+        let engine = agent.engine_id.as_deref().and_then(|id| engines.engine(id));
         // Two sessions of one card (its worker and its reviewer) look the card up once.
         let plan_id = agent.plan_id.or_else(|| {
             let card_id = agent.card_id?;
@@ -174,7 +172,9 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
         });
         watched.push(Watched {
             plan_id,
-            billing: engine.map_or_else(Billing::default, |engine| engine.billing),
+            billing: engine
+                .as_ref()
+                .map_or_else(Billing::default, |engine| engine.billing),
             model: agent
                 .model
                 .clone()

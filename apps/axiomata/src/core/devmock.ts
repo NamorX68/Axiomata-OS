@@ -51,6 +51,7 @@ import type {
   BundledSkill,
 } from "./backend";
 import { mockGraphTags, mockTagCommand } from "./devmockTags";
+import { mockEngineEntries, mockModelCommand } from "./devmockModels";
 import { hunksFromTexts, parseHunkHeader } from "../editor/diff/hunks";
 import { textLines } from "../editor/diff/model";
 
@@ -1360,6 +1361,10 @@ let mockEngines: Engine[] = [
     billing: "metered",
   },
 ];
+/** Every engine the list shows: the own mock engines, then the automatic ones of the switched-on mock models. */
+function engineEntries() {
+  return mockEngineEntries(mockEngines, (id) => ideAgents.filter((a) => a.engine_id === id).length);
+}
 let mockRoles: Role[] = [
   {
     name: "allrounder",
@@ -1558,6 +1563,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
   await delay();
   const tagAnswer = mockTagCommand(cmd, args);
   if (tagAnswer) return tagAnswer.value as T;
+  const modelAnswer = mockModelCommand(cmd, args, engineEntries, () => mockRoles);
+  if (modelAnswer) return modelAnswer.value as T;
   switch (cmd) {
     case "get_app_info":
       return {
@@ -1809,12 +1816,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
 
     // ---- engines and roles (a2a.md CP-A1) ----
     case "list_engines":
-      return mockEngines.map((e) => ({
-        ...e,
-        sessions: ideAgents.filter((a) => a.engine_id === e.id).length,
-      })) as T;
+      return engineEntries() as T;
     case "save_engine": {
       const engine = args.engine as Engine;
+      if (!mockEngines.some((e) => e.id === engine.id) && engineEntries().some((e) => e.id === engine.id)) {
+        throw new Error(`roster: invalid id: “${engine.id}” is an automatic engine; it cannot be edited or removed`);
+      }
       const at = mockEngines.findIndex((e) => e.id === engine.id);
       if (at === -1) mockEngines = [...mockEngines, engine];
       else mockEngines[at] = engine;
@@ -1822,7 +1829,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "delete_engine": {
       const id = String(args.id);
-      if (!mockEngines.some((e) => e.id === id)) return false as T;
+      if (!mockEngines.some((e) => e.id === id)) {
+        if (engineEntries().some((e) => e.id === id)) {
+          throw new Error(`roster: invalid id: “${id}” is an automatic engine; it cannot be edited or removed`);
+        }
+        return false as T;
+      }
       const sessions = ideAgents.filter((a) => a.engine_id === id).length;
       if (sessions > 0) {
         throw new Error(`roster: invalid id: engine "${id}" cannot be removed: ${sessions} agent session(s) run on it`);
@@ -1837,7 +1849,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "save_role": {
       const role = args.role as Role;
       for (const id of [role.engine, ...role.fallback_engines]) {
-        if (id && !mockEngines.some((e) => e.id === id)) {
+        if (id && !engineEntries().some((e) => e.id === id)) {
           throw new Error(`roster: invalid engine: there is no engine "${id}"`);
         }
       }

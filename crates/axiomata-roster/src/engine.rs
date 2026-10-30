@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, RosterError};
 use crate::harness::Harness;
 use crate::ident::check_slug;
+use crate::role::Tier;
 
 /// Longest engine label, in characters (it is shown in lists and tabs).
 pub const MAX_LABEL_CHARS: usize = 80;
@@ -44,6 +45,10 @@ pub struct Engine {
     pub env: String,
     #[serde(default)]
     pub billing: Billing,
+    /// The tier the owner gave this engine (`docs/plans/agents-model.md`, Q9). Only the owner's own engines carry one;
+    /// an automatic engine takes the tier of its model. `None` = the tier of the model it runs, if that is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<Tier>,
 }
 
 impl Engine {
@@ -122,6 +127,7 @@ mod tests {
             model: Some("claude-opus-5-5".into()),
             env: "FOO=1\n\nBAR_2=x y".into(),
             billing: Billing::Subscription,
+            tier: None,
         }
     }
 
@@ -169,5 +175,16 @@ mod tests {
         let engine: Engine = serde_json::from_str(json).unwrap();
         assert_eq!(engine.billing, Billing::Metered);
         assert!(engine.command.is_empty() && engine.model.is_none() && engine.env.is_empty());
+        assert_eq!(engine.tier, None);
+    }
+
+    #[test]
+    fn an_owner_tier_round_trips_and_is_left_out_when_unset() {
+        let mut engine = engine();
+        assert!(!serde_json::to_string(&engine).unwrap().contains("tier"));
+        engine.tier = Some(Tier::Heavy);
+        let json = serde_json::to_string(&engine).unwrap();
+        assert!(json.contains(r#""tier":"heavy""#), "{json}");
+        assert_eq!(serde_json::from_str::<Engine>(&json).unwrap(), engine);
     }
 }

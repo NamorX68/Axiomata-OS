@@ -30,7 +30,10 @@
   /** Called after the catalog changed, so a sibling (the roles' engine picker) can reload. */
   let { onChange = () => {} }: { onChange?: () => void } = $props();
 
+  /** The owner's own engines: the automatic ones are read-only and belong to the Models tab (agents-model.md, AM3). */
   let engines = $state<EngineEntry[]>([]);
+  /** Every engine id, automatic ones too — a new engine may take none of them. */
+  let takenIds = $state<string[]>([]);
   let loading = $state(true);
   /** `null` = no form open. `isNew` decides whether the id can still be typed. */
   let form = $state<Engine | null>(null);
@@ -40,7 +43,9 @@
 
   async function reload() {
     try {
-      engines = await listEngines();
+      const all = await listEngines();
+      engines = all.filter((e) => e.origin !== "auto");
+      takenIds = all.map((e) => e.id);
       // The Agents panel picks from the same catalog.
       void refreshEngines();
     } catch (err) {
@@ -57,8 +62,8 @@
   }
 
   function startEdit(entry: EngineEntry) {
-    const { sessions: _sessions, ...engine } = entry;
-    form = { ...engine };
+    const { id, label, harness, command, model, env, billing, tier } = entry;
+    form = { id, label, harness, command, model, env, billing, tier };
     isNew = false;
     problem = null;
   }
@@ -68,7 +73,7 @@
   /** The id a new engine gets: the one typed under "Advanced", else derived from the label, clear of taken ones. */
   const derivedId = $derived(
     form && isNew
-      ? form.id.trim() || engineIdFor(form.label, form.harness, form.model, engines.map((e) => e.id))
+      ? form.id.trim() || engineIdFor(form.label, form.harness, form.model, takenIds)
       : (form?.id ?? ""),
   );
 
@@ -82,7 +87,7 @@
       problem = { field: checked.field, message: checked.message };
       return;
     }
-    if (isNew && engines.some((e) => e.id === checked.value.id)) {
+    if (isNew && takenIds.includes(checked.value.id)) {
       problem = { field: "id", message: `There is already an engine “${checked.value.id}”.` };
       return;
     }

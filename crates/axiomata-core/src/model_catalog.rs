@@ -34,6 +34,29 @@ pub const ANTHROPIC_MODELS: [(&str, &str); 5] = [
     ("claude-haiku-5-5", "Claude Haiku 5.5"),
 ];
 
+/// Anthropic's list prices, USD per million tokens: `(id, input, cached input, output)`. Claude Code runs on the
+/// subscription, so nothing is metered with these; they only rank its models beside the paid ones and propose their
+/// tier (`docs/plans/agents-model.md`, Q12, Q13). One row per entry of [`ANTHROPIC_MODELS`] (a test holds them alike).
+const ANTHROPIC_LIST_PRICES: [(&str, f64, Option<f64>, f64); 5] = [
+    ("claude-fable-5-1", 10.0, Some(0.25), 50.0),
+    ("claude-opus-5-5", 4.0, Some(0.2), 20.0),
+    ("claude-sonnet-5-5", 2.0, Some(0.2), 10.0),
+    ("claude-sonnet-5", 2.0, None, 10.0),
+    ("claude-haiku-5-5", 0.1, None, 0.5),
+];
+
+/// The list price of Anthropic model `id`, if it is one of [`ANTHROPIC_MODELS`].
+pub fn anthropic_list_price(id: &str) -> Option<ModelCost> {
+    ANTHROPIC_LIST_PRICES
+        .iter()
+        .find(|(known, ..)| *known == id)
+        .map(|(_, input, cached, output)| ModelCost {
+            input_per_m: *input,
+            cached_input_per_m: *cached,
+            output_per_m: *output,
+        })
+}
+
 /// How long one provider may take to answer; the catalog is a convenience and must never hold up the app.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -43,7 +66,7 @@ const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 /// The highest list price taken, in USD per million tokens. Real prices stay far below; anything above is a broken
 /// or hostile answer, and an infinite one would make every later Settings save fail validation.
-const MAX_USD_PER_M: f64 = 1000.0;
+pub(crate) const MAX_USD_PER_M: f64 = 1000.0;
 
 /// Longest model id or name kept, in characters — the picker shows them, the event carries them to the webview.
 const MAX_ID_CHARS: usize = 200;
@@ -387,8 +410,10 @@ fn parse_ollama(body: &Value) -> Result<Vec<CatalogModel>, String> {
 }
 
 /// The OpenRouter models the app uses, bare ids as `agents.costs` keys them: the ones already priced, the
-/// OpenRouter provider's chat and skill models, and every Opencode engine on `openrouter/…`.
-fn openrouter_models_in_use(config: &Config) -> BTreeSet<String> {
+/// OpenRouter provider's chat and skill models, every engine on `openrouter/…`, and every OpenRouter model that is
+/// switched on — each is an automatic engine a session may run on, and its session is metered from `agents.costs`
+/// (`docs/plans/agents-model.md`, Q9).
+fn openrouter_models_in_use(config: &Config, catalog: &ModelCatalog) -> BTreeSet<String> {
     let mut used: BTreeSet<String> = config.agents.costs.keys().cloned().collect();
     if let Some(settings) = config.agents.providers.get(&ProviderId::OpenRouter) {
         used.extend(
@@ -406,6 +431,11 @@ fn openrouter_models_in_use(config: &Config) -> BTreeSet<String> {
             .strip_prefix("openrouter/")
             .map(str::to_string)
     }));
+    used.extend(
+        crate::model_tiers::enabled_models(config, catalog, ProviderId::OpenRouter)
+            .into_iter()
+            .map(|model| model.id.clone()),
+    );
     used
 }
 
@@ -429,7 +459,7 @@ pub fn price_updates(config: &Config, catalog: &ModelCatalog) -> BTreeMap<String
         .iter()
         .filter_map(|model| Some((model.id.as_str(), model.price.as_ref()?)))
         .collect();
-    openrouter_models_in_use(config)
+    openrouter_models_in_use(config, catalog)
         .into_iter()
         .filter_map(|id| {
             let mut price = (*prices.get(id.as_str())?).clone();
@@ -716,8 +746,17 @@ mod tests {
             model: Some("openrouter/engine/model".into()),
             env: String::new(),
             billing: axiomata_roster::Billing::Metered,
+            tier: None,
         };
         config.agents.engines.insert("e".into(), engine);
+        // A short list is switched on as a whole, and a model that is on is in use; this one the owner switched off.
+        config.agents.models.choices.insert(
+            "openrouter/not/used".into(),
+            crate::model_tiers::ModelChoice {
+                enabled: Some(false),
+                tier: None,
+            },
+        );
 
         let catalog = openrouter_catalog(&[
             ("old/priced", Some(cost(0.1, Some(0.01), 0.2))),

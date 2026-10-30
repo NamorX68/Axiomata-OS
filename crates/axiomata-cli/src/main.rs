@@ -9,6 +9,7 @@ mod harness_card;
 mod harness_cmd;
 mod harness_master;
 mod harness_watch;
+mod ide_models_cmd;
 mod inbox_cmd;
 mod maintenance_cmd;
 mod models_cmd;
@@ -304,11 +305,18 @@ enum IdeAction {
         #[command(subcommand)]
         action: RoleAction,
     },
+    /// Models: which are switched on, their tiers, the price limits and the default engine per tier
+    /// (agents-model.md, AM1).
+    Models {
+        #[command(subcommand)]
+        action: ide_models_cmd::ModelAction,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 enum EngineAction {
-    /// List the engines and how many agent sessions run on each.
+    /// List the engines — your own, then the automatic ones from the switched-on models — with tier, origin and how
+    /// many agent sessions run on each.
     List,
     /// Add an engine.
     Add {
@@ -332,8 +340,12 @@ enum EngineAction {
         /// metered | subscription.
         #[arg(long, default_value = "metered")]
         billing: String,
+        /// light | medium | heavy. Omitted, the engine takes the tier of its model.
+        #[arg(long)]
+        tier: Option<String>,
     },
-    /// Change an engine. A flag left out **keeps its current value**.
+    /// Change an own engine (automatic ones are read-only). A flag left out **keeps its current value**.
+    #[command(group(clap::ArgGroup::new("rating").args(["tier", "clear_tier"])))]
     Edit {
         id: String,
         #[arg(long)]
@@ -348,6 +360,12 @@ enum EngineAction {
         env: Option<String>,
         #[arg(long)]
         billing: Option<String>,
+        /// light | medium | heavy.
+        #[arg(long)]
+        tier: Option<String>,
+        /// Drop the engine's own tier, so it takes its model's.
+        #[arg(long)]
+        clear_tier: bool,
     },
     /// Remove an engine. Refused while a session or a role still uses it.
     Delete { id: String },
@@ -1828,6 +1846,8 @@ fn ide_owner_gate(action: &IdeAction) -> Option<&'static str> {
             RoleAction::List | RoleAction::Show { .. } | RoleAction::Project { .. } => None,
             _ => Some("changing roles"),
         },
+        IdeAction::Models { action } => (!action.reads_only())
+            .then_some("changing the models, their tiers or the default engines"),
     }
 }
 
@@ -1909,6 +1929,7 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
         },
         IdeAction::Engines { action } => engine_cmd(core, action),
         IdeAction::Roles { action } => role_cmd(core, action),
+        IdeAction::Models { action } => ide_models_cmd::run(core, action),
     }
 }
 
@@ -1948,25 +1969,38 @@ fn engine_cmd(core: &AxiomataCore, action: EngineAction) -> Result<()> {
     match action {
         EngineAction::List => {
             let config = config_snapshot(core);
-            if config.agents.engines.is_empty() {
-                println!("no engines — add one with `ide engines add <id> --label …`");
+            let sources = axiomata_core::model_tiers::ModelSources::load();
+            let entries = {
+                let db = core.db_lock();
+                roster::engine_overview(&db, &config, &sources)?
+            };
+            if entries.is_empty() {
+                println!(
+                    "no engines — switch a model on with `ide models set`, or add one with \
+                     `ide engines add <id> --label …`"
+                );
                 return Ok(());
             }
-            let db = core.db_lock();
-            for engine in config.agents.engines.values() {
-                let sessions: i64 = db.query_row(
-                    "SELECT COUNT(*) FROM ide_agents WHERE engine_id = ?1",
-                    [&engine.id],
-                    |row| row.get(0),
-                )?;
+            for entry in &entries {
+                let info = &entry.info;
+                let engine = &info.engine;
                 println!(
-                    "{:<32} {:<12} {:<13} {} session(s)  {}  (model: {})",
+                    "{:<46} {:<4} {:<11} {:<7} {:<13} {} session(s)  {}  (model: {}){}",
                     engine.id,
+                    match info.origin {
+                        axiomata_core::engines::EngineOrigin::Auto => "auto",
+                        axiomata_core::engines::EngineOrigin::Own => "own",
+                    },
                     engine.harness.as_str(),
+                    info.rated_tier.map_or("-", axiomata_roster::Tier::as_str),
                     billing_name(engine.billing),
-                    sessions,
+                    entry.sessions,
                     engine.label,
                     engine.model.as_deref().unwrap_or("harness default"),
+                    info.unusable
+                        .as_deref()
+                        .map(|why| format!("  — cannot run: {why}"))
+                        .unwrap_or_default(),
                 );
             }
             Ok(())
@@ -1979,6 +2013,7 @@ fn engine_cmd(core: &AxiomataCore, action: EngineAction) -> Result<()> {
             model,
             env,
             billing,
+            tier,
         } => {
             let mut config = config_snapshot(core);
             if config.agents.engines.contains_key(&id) {
@@ -1994,6 +2029,10 @@ fn engine_cmd(core: &AxiomataCore, action: EngineAction) -> Result<()> {
                     model,
                     env,
                     billing: parse_billing(&billing)?,
+                    tier: tier
+                        .as_deref()
+                        .map(ide_models_cmd::parse_tier)
+                        .transpose()?,
                 },
             )?;
             adopt_engines(core, config);
@@ -2008,10 +2047,12 @@ fn engine_cmd(core: &AxiomataCore, action: EngineAction) -> Result<()> {
             model,
             env,
             billing,
+            tier,
+            clear_tier,
         } => {
             let mut config = config_snapshot(core);
             let Some(existing) = config.agents.engines.get(&id).cloned() else {
-                bail!("no engine {id:?}");
+                bail!("no own engine {id:?} (automatic engines are read-only)");
             };
             roster::save_engine(
                 &mut config,
@@ -2028,6 +2069,11 @@ fn engine_cmd(core: &AxiomataCore, action: EngineAction) -> Result<()> {
                     billing: match billing {
                         Some(raw) => parse_billing(&raw)?,
                         None => existing.billing,
+                    },
+                    tier: match tier {
+                        Some(raw) => Some(ide_models_cmd::parse_tier(&raw)?),
+                        None if clear_tier => None,
+                        None => existing.tier,
                     },
                 },
             )?;

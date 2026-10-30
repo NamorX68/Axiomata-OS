@@ -525,6 +525,12 @@ pub struct AgentDefaults {
     #[serde(default)]
     pub engines: BTreeMap<String, Engine>,
 
+    /// The owner's word on the models of the catalogs (`[agents.models]`, `docs/plans/agents-model.md` AM1): which are
+    /// switched on, which tier each has, the price limits of the price proposal and a default engine per tier. Like
+    /// [`Self::engines`] not part of the Settings dialog's update; changed through `crate::model_tiers`' own setters.
+    #[serde(default)]
+    pub models: crate::model_tiers::ModelSettings,
+
     /// The most card sessions that run at the same time across all plans that run by themselves (a worker or a reviewer
     /// each count). A plan starts as many cards at once as its dependencies allow; this only keeps a wide plan from
     /// starting more agents than the machine and the account can carry. Read as at least 1.
@@ -683,6 +689,7 @@ impl Default for AgentDefaults {
             costs: BTreeMap::new(),
             auto_approve_tools: default_auto_approve_tools(),
             engines: BTreeMap::new(),
+            models: crate::model_tiers::ModelSettings::default(),
             max_parallel_sessions: default_max_parallel_sessions(),
             plan_max_cost_usd: default_plan_max_cost_usd(),
             plan_max_tokens: default_plan_max_tokens(),
@@ -849,6 +856,7 @@ impl Config {
                 .validate()
                 .map_err(|err| format!("engine {key:?}: {err}"))?;
         }
+        self.agents.models.validate()?;
 
         // Providers, one per role (chat, skills). Each role's provider must
         // exist in the map. Anthropic may leave everything blank — billed via
@@ -1418,6 +1426,7 @@ mod tests {
             model: Some("claude-opus-5-5".into()),
             env: String::new(),
             billing: axiomata_roster::Billing::Subscription,
+            tier: None,
         }
     }
 

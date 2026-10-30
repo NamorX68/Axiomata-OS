@@ -245,9 +245,7 @@ fn prepare(
     let roles = roles_of(db, request.project_id);
     let role = pick_planner(&roles, request.grill, request.role.as_deref())?.clone();
     refuse_second_planner(db, plan.id, &roles, &role)?;
-    let engine_id = choose_engine(config, &role, request.engine_id.as_deref())?
-        .0
-        .to_owned();
+    let engine_id = choose_engine(config, &role, request.engine_id.as_deref())?.0;
     free_name(&sessions, &role.name, plan.id)?;
     Ok(Plan {
         project_root: project.repo_root,
@@ -364,6 +362,7 @@ mod tests {
             model: None,
             env: String::new(),
             billing: Billing::Subscription,
+            tier: None,
         }
     }
 

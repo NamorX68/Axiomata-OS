@@ -6,6 +6,7 @@
 //! embedded in a headless binary on another platform later — see the
 //! `axiomata-macos` crate for the platform integration boundary.
 
+pub mod agent_choice;
 pub mod agent_entry;
 pub mod agent_mcp;
 pub mod agents;
@@ -27,6 +28,7 @@ pub mod durable;
 pub mod editor_recovery;
 pub mod editor_settings;
 pub mod editor_vi;
+pub mod engines;
 pub mod error;
 pub mod files;
 pub mod glut_card;
@@ -42,6 +44,7 @@ pub mod json_state;
 pub mod maintenance;
 pub mod memory;
 pub mod model_catalog;
+pub mod model_tiers;
 pub mod notes;
 pub mod paths;
 pub mod permission_ask;

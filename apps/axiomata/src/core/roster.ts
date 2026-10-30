@@ -23,11 +23,30 @@ export interface Engine {
   /** `KEY=value` per line. */
   env: string;
   billing: Billing;
+  /** The owner's tier for an own engine; absent = the tier of its model. */
+  tier?: Tier | null;
 }
 
-/** An engine with the number of agent sessions that run on it. */
+/** Where an engine comes from: computed from a switched-on model (read-only), or the owner's own. */
+export type EngineOrigin = "auto" | "own";
+
+/** Where a tier comes from. `unrated`: nothing says yet — such a model is no agent. */
+export type TierSource = "owner" | "research" | "price" | "unrated";
+
+/** An engine with the number of agent sessions that run on it. Mirrors `roster::EngineEntry`. */
 export interface EngineEntry extends Engine {
   sessions: number;
+  origin: EngineOrigin;
+  /** The tier that applies (own engine's, else its model's); `null` while unrated. */
+  rated_tier: Tier | null;
+  tier_source: TierSource;
+  model_key: string | null;
+  /** A short model name for an agent's name ("Sonnet 5.5"). */
+  model_name: string | null;
+  /** USD per million output tokens; Claude Code at its list price, a local model 0. */
+  output_per_m: number | null;
+  /** Why it cannot run right now; `null` when it can. */
+  unusable: string | null;
 }
 
 export type Tier = "light" | "medium" | "heavy";

@@ -138,6 +138,7 @@ pub fn derive_engines(
             } else {
                 Billing::Metered
             },
+            tier: None,
         };
         if let Err(err) = engine.validate() {
             tracing::warn!(agent = agent.id, %err, "the agent profile does not make a valid engine; left unassigned");
@@ -206,16 +207,20 @@ pub fn sync_live(db: &Connection, config: &RwLock<Config>) -> Result<usize> {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EngineEntry {
     #[serde(flatten)]
-    pub engine: Engine,
+    pub info: crate::engines::EngineInfo,
     pub sessions: usize,
 }
 
-/// Every engine of the catalog with its session count, by id.
+/// Every engine — the owner's own, then the automatic ones ([`crate::engines::all`]) — with its session count.
 ///
 /// # Errors
 ///
 /// A failing database read.
-pub fn engine_overview(db: &Connection, config: &Config) -> Result<Vec<EngineEntry>> {
+pub fn engine_overview(
+    db: &Connection,
+    config: &Config,
+    sources: &crate::model_tiers::ModelSources,
+) -> Result<Vec<EngineEntry>> {
     let mut stmt = db.prepare(
         "SELECT engine_id, COUNT(*) FROM ide_agents WHERE engine_id IS NOT NULL GROUP BY engine_id",
     )?;
@@ -227,26 +232,40 @@ pub fn engine_overview(db: &Connection, config: &Config) -> Result<Vec<EngineEnt
         .into_iter()
         .map(|(id, n)| (id, usize::try_from(n).unwrap_or(0)))
         .collect();
-    Ok(config
-        .agents
-        .engines
-        .values()
-        .map(|engine| EngineEntry {
-            sessions: counts.get(&engine.id).copied().unwrap_or(0),
-            engine: engine.clone(),
+    Ok(crate::engines::all(config, sources)
+        .into_iter()
+        .map(|info| EngineEntry {
+            sessions: counts.get(&info.engine.id).copied().unwrap_or(0),
+            info,
         })
         .collect())
 }
 
-/// Adds or replaces an engine and saves it into the config file. `config` is updated with the file's catalog.
+/// The refusal for changing automatic engine `id`.
+fn auto_refusal(id: &str) -> AxiomataError {
+    refusal(
+        "id",
+        format!(
+            "“{id}” is an automatic engine, made from a model of the catalog; it cannot be edited or removed — switch \
+             its model on or off in the Studio's Models settings, or give an own engine another id"
+        ),
+    )
+}
+
+/// Adds or replaces an own engine and saves it into the config file. `config` is updated with the file's catalog.
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] if the engine is not valid; a failing read or save (then `config` is unchanged).
+/// [`RosterError::Invalid`] if the engine is not valid or takes the id of an automatic engine; a failing read or save
+/// (then `config` is unchanged).
 pub fn save_engine(config: &mut Config, engine: Engine) -> Result<()> {
     engine.validate()?;
     let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
+    // An own engine of the same id may be edited (it already wins over the automatic one); a new one may not take it.
+    if crate::engines::is_auto(&disk, &crate::model_tiers::ModelSources::load(), &engine.id) {
+        return Err(auto_refusal(&engine.id));
+    }
     disk.agents.engines.insert(engine.id.clone(), engine);
     disk.save()?;
     config.agents.engines = disk.agents.engines;
@@ -298,14 +317,20 @@ fn fields_from_engine(engine: &Engine, name: &str) -> AgentFields {
     }
 }
 
-fn known_engine<'a>(config: &'a Config, id: &str) -> Result<&'a Engine> {
-    config.agents.engines.get(id).ok_or_else(|| {
-        RosterError::Invalid {
-            field: "engine",
-            reason: format!("there is no engine “{id}”; engines are added in the Studio settings"),
-        }
-        .into()
-    })
+/// Engine `id`, own or automatic.
+fn known_engine(config: &Config, id: &str) -> Result<Engine> {
+    crate::engines::Lookup::new(config)
+        .engine(id)
+        .ok_or_else(|| {
+            RosterError::Invalid {
+                field: "engine",
+                reason: format!(
+                    "there is no engine “{id}”; switch its model on in the Studio's Models settings, or add an own \
+                     engine"
+                ),
+            }
+            .into()
+        })
 }
 
 fn known_role(roles: &[Role], name: &str) -> Result<()> {
@@ -417,7 +442,7 @@ pub fn create_agent_on_engine(
         &tx,
         crate::ide::model::NewAgent {
             project_id,
-            fields: fields_from_engine(engine, name),
+            fields: fields_from_engine(&engine, name),
         },
     )?;
     agent_store::set_engine(&tx, created.id, Some(engine_id))?;
@@ -458,7 +483,7 @@ pub fn update_agent_on_engine(
     let engine = known_engine(config, engine_id)?;
     known_role(roles, role)?;
     let tx = db.unchecked_transaction()?;
-    if agent_store::update_agent(&tx, id, fields_from_engine(engine, name))?.is_none() {
+    if agent_store::update_agent(&tx, id, fields_from_engine(&engine, name))?.is_none() {
         return Ok(None);
     }
     // Changing the profile columns dropped the engine assignment; it is set again, to the engine they came from.
@@ -468,19 +493,24 @@ pub fn update_agent_on_engine(
     Ok(agent_store::get_agent(db, id)?)
 }
 
-/// Removes an engine from the config file. `false` if there was no such engine.
+/// Removes an own engine from the config file. `false` if there was no such engine.
 ///
 /// The check and the removal happen under the same lock that serialises assignments, so a session cannot be given
 /// the engine between the two.
 ///
 /// # Errors
 ///
-/// [`RosterError::Invalid`] while a session or a role still uses it; a failing read or save.
+/// [`RosterError::Invalid`] while a session or a role still uses it, or for an automatic engine; a failing read or
+/// save.
 pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<bool> {
     let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
     if !disk.agents.engines.contains_key(id) {
+        let auto = crate::engines::is_auto(&disk, &crate::model_tiers::ModelSources::load(), id);
         config.agents.engines = disk.agents.engines;
+        if auto {
+            return Err(auto_refusal(id));
+        }
         return Ok(false);
     }
     let roles = list_roles()?.roles;
@@ -527,7 +557,8 @@ pub fn save_role(config: &Config, role: Role) -> Result<()> {
         .into());
     }
     role.validate()?;
-    role.check_engines(|id| config.agents.engines.contains_key(id))?;
+    let engines = crate::engines::Lookup::new(config);
+    role.check_engines(|id| engines.exists(id))?;
     axiomata_roster::save_role(&paths::agent_roles_dir(), &role)?;
     Ok(())
 }
@@ -599,11 +630,12 @@ pub fn project_roles(project: &std::path::Path, config: &Config) -> Result<Proje
         .filter(|brought| user.roles.iter().any(|mine| mine.name == brought.name))
         .map(|role| role.name.clone())
         .collect();
+    let engines = crate::engines::Lookup::new(config);
     let mut unknown_engines: Vec<String> = overrides
         .roles
         .iter()
         .flat_map(|role| role.engine.iter().chain(role.fallback_engines.iter()))
-        .filter(|id| !config.agents.engines.contains_key(id.as_str()))
+        .filter(|id| !engines.exists(id))
         .cloned()
         .collect();
     unknown_engines.sort();
@@ -885,6 +917,7 @@ mod tests {
             model: None,
             env: String::new(),
             billing: Billing::Metered,
+            tier: None,
         }
     }
 
@@ -923,6 +956,70 @@ mod tests {
             ));
             assert!(live.agents.engines.is_empty());
             assert!(!paths::config_path().exists());
+        });
+    }
+
+    /// The automatic engine of Claude Code on Sonnet 5.5, which the built-in Anthropic list always yields.
+    const AUTO_SONNET: &str = "claude-code-claude-sonnet-5-5";
+
+    #[test]
+    fn an_automatic_engine_is_read_only_but_starts_sessions_like_an_own_one() {
+        with_temp_home(|home| {
+            let mut live = Config {
+                workspace_root: home.join("workspace"),
+                ..Config::default()
+            };
+            live.save().unwrap();
+            let mut taken = engine(AUTO_SONNET);
+            taken.harness = Harness::ClaudeCode;
+            let refused = save_engine(&mut live, taken).unwrap_err().to_string();
+            assert!(refused.contains("automatic engine"), "{refused}");
+            let (conn, project, _dir) = fixture();
+            let refused = delete_engine(&conn, &mut live, AUTO_SONNET)
+                .unwrap_err()
+                .to_string();
+            assert!(refused.contains("automatic engine"), "{refused}");
+            assert!(!delete_engine(&conn, &mut live, "never-was").unwrap());
+
+            let roles = vec![axiomata_roster::default_role()];
+            let agent = create_agent_on_engine(
+                &conn,
+                &live,
+                &roles,
+                project,
+                "a",
+                AUTO_SONNET,
+                "allrounder",
+            )
+            .unwrap();
+            assert_eq!(agent.engine_id.as_deref(), Some(AUTO_SONNET));
+            assert_eq!(agent.harness, Harness::ClaudeCode);
+            assert_eq!(agent.model.as_deref(), Some("claude-sonnet-5-5"));
+            let overview =
+                engine_overview(&conn, &live, &crate::model_tiers::ModelSources::load()).unwrap();
+            let entry = overview
+                .iter()
+                .find(|e| e.info.engine.id == AUTO_SONNET)
+                .unwrap();
+            assert_eq!(
+                (entry.sessions, entry.info.origin),
+                (1, crate::engines::EngineOrigin::Auto)
+            );
+
+            // The card start path resolves it too.
+            let mut role = axiomata_roster::default_role();
+            role.engine = Some(AUTO_SONNET.into());
+            let (id, chosen) = crate::card_session::choose_engine(&live, &role, None).unwrap();
+            assert_eq!(
+                (id.as_str(), chosen.harness),
+                (AUTO_SONNET, Harness::ClaudeCode)
+            );
+            assert!(crate::card_session::choose_engine(&live, &role, Some("nowhere")).is_err());
+            // And a role may name it.
+            assert!(
+                role.check_engines(|id| crate::engines::Lookup::new(&live).exists(id))
+                    .is_ok()
+            );
         });
     }
 
@@ -1270,6 +1367,7 @@ mod tests {
             model: model.map(String::from),
             env: "A=1".into(),
             billing: axiomata_roster::Billing::Metered,
+            tier: None,
         }
     }
 

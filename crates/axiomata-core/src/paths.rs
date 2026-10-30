@@ -129,6 +129,13 @@ pub fn model_catalog_path() -> PathBuf {
     axiomata_home().join("model-catalog.json")
 }
 
+/// Path to the app's tier proposals per model (`~/.axiomata/model-tiers.json`, `docs/plans/agents-model.md` AM1):
+/// what research proposed, kept apart from the config so a proposal never passes for the owner's word
+/// (`crate::model_tiers`).
+pub fn model_tiers_path() -> PathBuf {
+    axiomata_home().join("model-tiers.json")
+}
+
 /// Path to the Terminal module's global preferences file
 /// (`~/.axiomata/terminal-settings.json`) — Checkpoint 5d of
 /// `docs/plans/terminal.md`. Deliberately its own file, not a section of

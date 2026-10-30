@@ -52,34 +52,32 @@ pub struct CardSession {
     pub engine_id: String,
 }
 
-/// The engine a session of `role` runs on: the one asked for, else the role's own, else the first fallback that exists.
+/// The engine a session of `role` runs on: the one asked for, else the role's own, else the first fallback that
+/// exists — own engines or automatic ones ([`crate::engines::Lookup`]). AM5 moves this to the tier's engines.
 ///
 /// # Errors
 ///
 /// A refusal naming what to do when the choice is empty or the engine cannot carry an unattended session.
-pub(crate) fn choose_engine<'a>(
-    config: &'a Config,
+pub(crate) fn choose_engine(
+    config: &Config,
     role: &Role,
     requested: Option<&str>,
-) -> Result<(&'a str, &'a Engine)> {
-    let candidates = requested
-        .into_iter()
-        .map(str::to_owned)
-        .chain(role.engine.clone())
-        .chain(role.fallback_engines.iter().cloned())
-        .collect::<Vec<_>>();
+) -> Result<(String, Engine)> {
+    let engines = crate::engines::Lookup::new(config);
     // A requested engine that does not exist is a mistake to show, not a reason to fall back silently.
     if let Some(asked) = requested
-        && !config.agents.engines.contains_key(asked)
+        && !engines.exists(asked)
     {
         return Err(refusal(
             "engine",
             format!("there is no engine “{asked}”; engines are added in the Studio settings"),
         ));
     }
-    let Some((id, engine)) = candidates
-        .iter()
-        .find_map(|id| config.agents.engines.get_key_value(id.as_str()))
+    let Some(engine) = requested
+        .into_iter()
+        .chain(role.engine.as_deref())
+        .chain(role.fallback_engines.iter().map(String::as_str))
+        .find_map(|id| engines.engine(id))
     else {
         return Err(refusal(
             "engine",
@@ -93,12 +91,13 @@ pub(crate) fn choose_engine<'a>(
         return Err(refusal(
             "engine",
             format!(
-                "the engine “{id}” runs a command of its own, which Axiomata does not touch; an unattended session \
-                 needs the generated command"
+                "the engine “{}” runs a command of its own, which Axiomata does not touch; an unattended session \
+                 needs the generated command",
+                engine.id
             ),
         ));
     }
-    Ok((id.as_str(), engine))
+    Ok((engine.id.clone(), engine))
 }
 
 /// The first of `role-<card>`, `role-<card>-2`, … no session of the project has.
@@ -347,6 +346,7 @@ fn start_in(
         ));
     }
     let (engine_id, _) = choose_engine(config, role, request.engine_id.as_deref())?;
+    let engine_id = engine_id.as_str();
     let name = free_name(
         &agent_store::list_agents(db, request.project_id)?,
         &role_name,
@@ -448,12 +448,12 @@ fn reviewers_for(roles: &[Role], needed: axiomata_roster::Tier) -> Vec<&Role> {
 ///
 /// No role of kind `review`, or nothing usable for any of them (the first refusal is the one returned).
 fn choose_reviewer<'a>(
-    config: &'a Config,
+    config: &Config,
     roles: &'a [Role],
     needed: axiomata_roster::Tier,
     worker_engine: Option<&str>,
     requested: Option<&str>,
-) -> Result<(&'a Role, &'a str)> {
+) -> Result<(&'a Role, String)> {
     let candidates = reviewers_for(roles, needed);
     if candidates.is_empty() {
         return Err(refuse_review(
@@ -483,12 +483,12 @@ fn refuse_review(reason: &str) -> AxiomataError {
 /// # Errors
 ///
 /// A refusal naming what to do: the asked-for engine is the worker's, or nothing usable is left and the owner picks.
-fn choose_review_engine<'a>(
-    config: &'a Config,
+fn choose_review_engine(
+    config: &Config,
     role: &Role,
     worker_engine: Option<&str>,
     requested: Option<&str>,
-) -> Result<&'a str> {
+) -> Result<String> {
     if let (Some(asked), Some(worker)) = (requested, worker_engine)
         && asked == worker
     {
@@ -496,8 +496,9 @@ fn choose_review_engine<'a>(
             "the reviewer must run on another engine than the session that worked on the card",
         ));
     }
+    let engines = crate::engines::Lookup::new(config);
     if let Some(asked) = requested {
-        let engine = config.agents.engines.get(asked).ok_or_else(|| {
+        let engine = engines.engine(asked).ok_or_else(|| {
             refusal(
                 "engine",
                 format!("there is no engine “{asked}”; engines are added in the Studio settings"),
@@ -508,22 +509,14 @@ fn choose_review_engine<'a>(
                 "that engine runs a command of its own, which Axiomata does not touch",
             ));
         }
-        return Ok(engine.id.as_str());
+        return Ok(engine.id);
     }
-    let usable = |id: &&String| {
-        Some(id.as_str()) != worker_engine
-            && config
-                .agents
-                .engines
-                .get(id.as_str())
-                .is_some_and(|engine| engine.command.trim().is_empty())
-    };
     role.engine
         .iter()
         .chain(role.fallback_engines.iter())
-        .find(usable)
-        .and_then(|id| config.agents.engines.get_key_value(id.as_str()))
-        .map(|(id, _)| id.as_str())
+        .filter(|id| Some(id.as_str()) != worker_engine)
+        .find_map(|id| engines.engine(id).filter(|engine| engine.command.trim().is_empty()))
+        .map(|engine| engine.id)
         .ok_or_else(|| {
             refuse_review(
                 "the reviewer needs an engine other than the worker's, and the role names none; pick one",
@@ -774,7 +767,7 @@ fn plan_review(
         worker.engine_id.as_deref(),
         request.engine_id.as_deref(),
     )?;
-    let (role, engine_id) = (role.clone(), engine_id.to_owned());
+    let role = role.clone();
     // The name is asked now too, so that a refusal does not come after the snapshot commit.
     free_name(&sessions, &role.name, card.id)?;
     let repo = crate::ide::provision::agent_repo(db, worker.id)?.ready()?;
@@ -1729,7 +1722,7 @@ fn escalate_in(
         &roles,
         worker.id,
         &worker.name,
-        engine_id,
+        &engine_id,
         &next.name,
     )?
     .ok_or_else(|| {
@@ -1761,7 +1754,7 @@ fn escalate_in(
         agent_id: worker.id,
         from_role: current.name.clone(),
         role: next.name.clone(),
-        engine_id: engine_id.to_owned(),
+        engine_id,
     })
 }
 
@@ -2149,6 +2142,7 @@ mod tests {
             model: None,
             env: String::new(),
             billing: Billing::Subscription,
+            tier: None,
         }
     }
 
@@ -2878,11 +2872,11 @@ mod tests {
         // light one would have been enough.
         let (role, engine) =
             choose_reviewer(&w.config, &w.roles, Tier::Light, Some("sonnet"), None).unwrap();
-        assert_eq!((role.name.as_str(), engine), ("heavy", "opus"));
+        assert_eq!((role.name.as_str(), engine.as_str()), ("heavy", "opus"));
         // On another engine the weakest strong-enough reviewer is the one.
         let (role, engine) =
             choose_reviewer(&w.config, &w.roles, Tier::Light, Some("opus"), None).unwrap();
-        assert_eq!((role.name.as_str(), engine), ("light", "sonnet"));
+        assert_eq!((role.name.as_str(), engine.as_str()), ("light", "sonnet"));
         // Nobody left: the refusal says what to do.
         w.roles = vec![reviewer_of("only", Tier::Medium, "sonnet")];
         assert!(choose_reviewer(&w.config, &w.roles, Tier::Light, Some("sonnet"), None).is_err());

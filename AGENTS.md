@@ -73,7 +73,10 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   ide projects list|new|rename|set-root|delete
 #   ide agents list|new|edit|delete|prepare|new-session|master|discard-worktree|status|diff|base|commit|discard|discard-hunk|take-over
 #                                            (take-over: squash by default, never pushes)
-#   ide engines list|add|edit|delete         (the owner's engine catalog; delete refused while a session/role uses it)
+#   ide engines list|add|edit|delete         (own engines + the automatic ones of the switched-on models, which are
+#                                              read-only; delete refused while a session/role uses it)
+#   ide models list|set|limits|default       (models on/off, tier per model and its source, price limits, default
+#                                              engine per tier — docs/plans/agents-model.md AM1)
 #   ide roles list|show|save|delete|project|confirm   (AGENT.md roles; `project`/`confirm`: a project's own roles, by hash)
 #   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>

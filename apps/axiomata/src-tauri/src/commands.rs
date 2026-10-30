@@ -2971,8 +2971,10 @@ pub fn list_engines(
     state: State<'_, CoreState>,
 ) -> Result<Vec<axiomata_core::roster::EngineEntry>, String> {
     let config = read_config(&state.config);
+    // Read before the database lock: the catalog and the proposals are files, and nobody needs to wait on them.
+    let sources = axiomata_core::model_tiers::ModelSources::load();
     let db = state.db_lock();
-    axiomata_core::roster::engine_overview(&db, &config).map_err(|err| err.to_string())
+    axiomata_core::roster::engine_overview(&db, &config, &sources).map_err(|err| err.to_string())
 }
 
 /// Adds or replaces an engine (the whole object; the id is the key). Only the engines of the live config change.
@@ -3010,6 +3012,91 @@ pub fn delete_engine(state: State<'_, CoreState>, id: String) -> Result<bool, St
             .engines = config.agents.engines;
     }
     Ok(removed)
+}
+
+// ---- Models, tiers and agents (agents-model.md, AM1) ----
+//
+// Each setter writes the file config under its lock (`model_tiers`), then only the live config's `[agents.models]`
+// takes the result, as engines do.
+
+/// Hands the model settings a setter wrote into the file back to the live config.
+fn adopt_models(state: &CoreState, config: axiomata_core::config::Config) {
+    state
+        .config
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .agents
+        .models = config.agents.models;
+}
+
+/// Every model the providers offer with its switch, tier and price; the price limits; the default engine per tier.
+#[tauri::command]
+pub fn list_models(state: State<'_, CoreState>) -> axiomata_core::model_tiers::ModelsOverview {
+    let config = read_config(&state.config);
+    axiomata_core::model_tiers::overview(&config, &axiomata_core::model_tiers::ModelSources::load())
+}
+
+/// The owner's word on one model (`key` = `anthropic/…`, `openrouter/…`, `ollama/…`), a full replace.
+#[tauri::command]
+pub fn set_model_choice(
+    state: State<'_, CoreState>,
+    key: String,
+    choice: axiomata_core::model_tiers::ModelChoice,
+) -> Result<(), String> {
+    let mut config = read_config(&state.config);
+    axiomata_core::model_tiers::save_choice(&mut config, &key, choice)
+        .map_err(|err| err.to_string())?;
+    adopt_models(&state, config);
+    Ok(())
+}
+
+/// The price limits of the price proposal.
+#[tauri::command]
+pub fn set_tier_limits(
+    state: State<'_, CoreState>,
+    limits: axiomata_core::model_tiers::TierLimits,
+) -> Result<(), String> {
+    let mut config = read_config(&state.config);
+    axiomata_core::model_tiers::save_tier_limits(&mut config, limits)
+        .map_err(|err| err.to_string())?;
+    adopt_models(&state, config);
+    Ok(())
+}
+
+/// The default engine of a tier; `None` clears it (the cheapest of the tier).
+#[tauri::command]
+pub fn set_default_engine(
+    state: State<'_, CoreState>,
+    tier: axiomata_roster::Tier,
+    engine: Option<String>,
+) -> Result<(), String> {
+    let mut config = read_config(&state.config);
+    axiomata_core::model_tiers::save_default_engine(&mut config, tier, engine)
+        .map_err(|err| err.to_string())?;
+    adopt_models(&state, config);
+    Ok(())
+}
+
+/// Every agent that can be started in a project: its roles × tier × the tier's engines, named (Q7, Q8).
+#[tauri::command]
+pub fn list_agent_choices(
+    state: State<'_, CoreState>,
+    project_id: i64,
+) -> Vec<axiomata_core::agent_choice::AgentChoice> {
+    let config = read_config(&state.config);
+    let roles = {
+        let db = state.db_lock();
+        axiomata_core::roster::roles_for_project(&db, &config, project_id)
+    };
+    let roles: Vec<_> = roles
+        .into_iter()
+        .filter(|role| role.name != axiomata_core::ide::model::MASTER_ROLE)
+        .collect();
+    axiomata_core::agent_choice::agent_choices(
+        &roles,
+        &config,
+        &axiomata_core::model_tiers::ModelSources::load(),
+    )
 }
 
 #[tauri::command]

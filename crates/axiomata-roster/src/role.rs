@@ -79,6 +79,32 @@ pub struct ResolvedLimits {
 }
 
 impl Tier {
+    /// Every tier, the lightest first.
+    pub const ALL: [Tier; 3] = [Tier::Light, Tier::Medium, Tier::Heavy];
+
+    /// The stored spelling, and what the CLI accepts.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Tier::Light => "light",
+            Tier::Medium => "medium",
+            Tier::Heavy => "heavy",
+        }
+    }
+
+    /// Parses the stored spelling. `None` for anything else.
+    pub fn parse(raw: &str) -> Option<Self> {
+        Tier::ALL.into_iter().find(|tier| tier.as_str() == raw)
+    }
+
+    /// The word the UI shows: "Light", "Medium", "Heavy".
+    pub fn label(self) -> &'static str {
+        match self {
+            Tier::Light => "Light",
+            Tier::Medium => "Medium",
+            Tier::Heavy => "Heavy",
+        }
+    }
+
     /// The default limits of a session of this tier (`docs/plans/a2a.md`, A27): a light role is meant for small
     /// changes, so a session that spends more than this has lost its way rather than found a hard card.
     pub fn default_limits(self) -> ResolvedLimits {
@@ -307,12 +333,7 @@ impl Role {
         out.push_str(&format!("name: {}\n", quote(&self.name)));
         out.push_str(&format!("description: {}\n", quote(&self.description)));
         out.push_str(&format!("kind: {}\n", quote(&self.kind)));
-        let tier = match self.tier {
-            Tier::Light => "light",
-            Tier::Medium => "medium",
-            Tier::Heavy => "heavy",
-        };
-        out.push_str(&format!("tier: {tier}\n"));
+        out.push_str(&format!("tier: {}\n", self.tier.as_str()));
         if let Some(engine) = &self.engine {
             out.push_str(&format!("engine: {}\n", quote(engine)));
         }
@@ -477,6 +498,19 @@ fn one_line(field: &'static str, value: &str, max: usize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tier_round_trips_through_its_spelling_and_serde_agrees() {
+        for tier in Tier::ALL {
+            assert_eq!(Tier::parse(tier.as_str()), Some(tier));
+            assert_eq!(
+                serde_json::to_string(&tier).unwrap(),
+                format!("\"{}\"", tier.as_str())
+            );
+        }
+        assert_eq!(Tier::parse("Heavy"), None);
+        assert_eq!(Tier::Medium.label(), "Medium");
+    }
 
     #[test]
     fn limits_a_role_leaves_open_come_from_its_tier() {
