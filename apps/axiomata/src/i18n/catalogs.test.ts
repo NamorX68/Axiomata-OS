@@ -10,14 +10,11 @@ import { catalogs, type Text } from "./texts";
 // Loads every catalog module of the folder, so a new area is checked without being listed here.
 import.meta.glob(["./*.ts", "!./*.test.ts", "!./texts.ts"], { eager: true });
 
-const names = (text: string): string[] =>
-  [...text.matchAll(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g)].map((m) => m[1]).sort();
-const forms = (text: Text): string[] =>
-  typeof text === "string" ? [text] : [text.one, text.other];
+const names = (text: string): string[] => [...text.matchAll(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g)].map((m) => m[1]).sort();
+const forms = (text: Text): string[] => (typeof text === "string" ? [text] : [text.one, text.other]);
 
 /** Gendered forms (Q23): a star, colon, underscore or capital I before "innen", and the participle stand-ins. */
-const GENDERED =
-  /[*:_]innen\b|[a-zäöü]Innen\b|\b(Benutzende|Nutzende|Teilnehmende|Mitarbeitende)\b/;
+const GENDERED = /[*:_]innen\b|[a-zäöü]Innen\b|\b(Benutzende|Nutzende|Teilnehmende|Mitarbeitende)\b/;
 
 describe("the catalogs", () => {
   const all = catalogs().filter((c) => !c.area.startsWith("test-"));
@@ -37,9 +34,7 @@ describe("the catalogs", () => {
         const german = forms(d);
         german.forEach((form, i) => {
           expect(form.trim(), `${area}.${key}`).not.toBe("");
-          expect(names(form), `${area}.${key}`).toEqual(
-            names(english[i] ?? ""),
-          );
+          expect(names(form), `${area}.${key}`).toEqual(names(english[i] ?? ""));
         });
       }
     }
@@ -48,8 +43,7 @@ describe("the catalogs", () => {
   it("never gender (Q23)", () => {
     for (const { area, de } of all) {
       for (const [key, text] of Object.entries(de)) {
-        for (const form of forms(text))
-          expect(form, `${area}.${key}`).not.toMatch(GENDERED);
+        for (const form of forms(text)) expect(form, `${area}.${key}`).not.toMatch(GENDERED);
       }
     }
   });

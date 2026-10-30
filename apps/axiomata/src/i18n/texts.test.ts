@@ -1,12 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  lang,
-  languageSetting,
-  locale,
-  resolveLang,
-  systemLang,
-} from "./lang.svelte";
+import { lang, languageSetting, locale, resolveLang, systemLang } from "./lang.svelte";
 import { fill, textIn, texts } from "./texts";
 
 afterEach(() => languageSetting.set("system"));
@@ -37,14 +31,8 @@ describe("the language", () => {
 });
 
 describe("a text", () => {
-  const en = {
-    hello: "Hello {name}",
-    notes: { one: "1 note", other: "{n} notes" },
-  };
-  const de = {
-    hello: "Hallo {name}",
-    notes: { one: "1 Notiz", other: "{n} Notizen" },
-  };
+  const en = { hello: "Hello {name}", notes: { one: "1 note", other: "{n} notes" } };
+  const de = { hello: "Hallo {name}", notes: { one: "1 Notiz", other: "{n} Notizen" } };
 
   it("fills the values it names and keeps a name without a value visible", () => {
     expect(fill("{a} and {b}", { a: 1 })).toBe("1 and {b}");
