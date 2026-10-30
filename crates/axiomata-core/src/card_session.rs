@@ -1,7 +1,9 @@
 //! Starting a card: the owner's click that makes a new session for it (`docs/plans/a2a.md`, A3, A5, A20, CP-A6a).
 //!
 //! A *session* is an agent row with a worktree of its own and a branch, made for exactly one card from a **role** (what
-//! the card names, else `allrounder`) on an **engine** (the role's, a fallback of it, or the one the owner picks now).
+//! the card names, else `allrounder`) at a **tier** (the card's, else the role's default) on an **engine** of that tier
+//! (`docs/plans/agents-model.md`, AM5, Q13, Q15: the owner's default engine of the tier, else the cheapest that can
+//! run — or the one the owner picks now). A role's own `engine` no longer decides anything.
 //! The app claims the card for the new session itself, atomically and before any process exists (A20): the claim is the
 //! session's actor, so the card's `claimed_by` says who works on it, and a failed claim leaves nothing behind.
 //!
@@ -9,7 +11,7 @@
 //! CLI — starts it ([`crate::ide_start::start_agent`]), which sees that the session holds a card and starts it
 //! unattended, with the card in its MCP server and the start prompt as its first words.
 
-use axiomata_roster::{Engine, Role};
+use axiomata_roster::{Engine, Role, Tier};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
@@ -23,13 +25,12 @@ use crate::config::Config;
 use crate::ide::agent_store;
 use crate::ide::model::Agent;
 use crate::ide::{store as project_store, worktree};
+use crate::model_tiers::ModelSources;
 use crate::roster::{self, refusal};
 use crate::session::actor_from;
 
 /// The role a card without one is given (the one every install has).
 const DEFAULT_ROLE: &str = "allrounder";
-/// How many names `allrounder-12`, `allrounder-12-2`, … are tried before giving up.
-const MAX_NAME_TRIES: u32 = 50;
 
 type Result<T> = std::result::Result<T, AxiomataError>;
 
@@ -52,73 +53,86 @@ pub struct CardSession {
     pub engine_id: String,
 }
 
-/// The engine a session of `role` runs on: the one asked for, else the role's own, else the first fallback that
-/// exists — own engines or automatic ones ([`crate::engines::Lookup`]). AM5 moves this to the tier's engines.
+/// The engines of `tier` an unattended session may run on, in the order they are tried ([`crate::engines::engine_for`]:
+/// the owner's default engine of the tier, then the cheapest), without those that run a command of their own.
+fn tier_engines(
+    config: &Config,
+    sources: &ModelSources,
+    tier: Tier,
+) -> Vec<crate::engines::EngineInfo> {
+    crate::engines::engine_for(tier, config, sources)
+        .into_iter()
+        .filter(|info| info.engine.command.trim().is_empty())
+        .collect()
+}
+
+/// The engine a session at `tier` runs on: the one the owner asked for, else the tier's first that can run
+/// (`docs/plans/agents-model.md`, Q13).
 ///
 /// # Errors
 ///
-/// A refusal naming what to do when the choice is empty or the engine cannot carry an unattended session.
+/// A refusal naming what to do: the asked-for engine does not exist or runs a command of its own, or no engine of the
+/// tier can run an unattended session.
 pub(crate) fn choose_engine(
     config: &Config,
-    role: &Role,
+    tier: Tier,
     requested: Option<&str>,
 ) -> Result<(String, Engine)> {
-    let engines = crate::engines::Lookup::new(config);
-    // A requested engine that does not exist is a mistake to show, not a reason to fall back silently.
-    if let Some(asked) = requested
-        && !engines.exists(asked)
-    {
-        return Err(refusal(
-            "engine",
-            format!("there is no engine “{asked}”; engines are added in the Studio settings"),
-        ));
+    if let Some(asked) = requested {
+        let engine = crate::engines::Lookup::new(config)
+            .engine(asked)
+            .ok_or_else(|| {
+                refusal(
+                    "engine",
+                    format!(
+                        "there is no engine “{asked}”; engines are added in the Studio settings"
+                    ),
+                )
+            })?;
+        if !engine.command.trim().is_empty() {
+            return Err(refusal(
+                "engine",
+                format!(
+                    "the engine “{asked}” runs a command of its own, which Axiomata does not touch; an unattended \
+                     session needs the generated command"
+                ),
+            ));
+        }
+        return Ok((engine.id.clone(), engine));
     }
-    let Some(engine) = requested
+    tier_engines(config, &ModelSources::load(), tier)
         .into_iter()
-        .chain(role.engine.as_deref())
-        .chain(role.fallback_engines.iter().map(String::as_str))
-        .find_map(|id| engines.engine(id))
-    else {
-        return Err(refusal(
-            "engine",
-            format!(
-                "the role “{}” names no engine that exists; pick one when you start it",
-                role.name
-            ),
-        ));
-    };
-    if !engine.command.trim().is_empty() {
-        return Err(refusal(
-            "engine",
-            format!(
-                "the engine “{}” runs a command of its own, which Axiomata does not touch; an unattended session \
-                 needs the generated command",
-                engine.id
-            ),
-        ));
-    }
-    Ok((engine.id.clone(), engine))
+        .next()
+        .map(|info| (info.engine.id.clone(), info.engine))
+        .ok_or_else(|| {
+            refusal(
+                "engine",
+                format!(
+                    "no engine of the tier {} can run an unattended session; switch a model of that tier on or set \
+                     the tier's default engine in the Studio's Models tab, or pick an engine when you start it",
+                    tier.as_str()
+                ),
+            )
+        })
 }
 
-/// The first of `role-<card>`, `role-<card>-2`, … no session of the project has.
-fn free_name(taken: &[Agent], role: &str, card_id: i64) -> Result<String> {
-    let base = format!("{role}-{card_id}");
-    for attempt in 1..=MAX_NAME_TRIES {
-        let name = if attempt == 1 {
-            base.clone()
-        } else {
-            format!("{base}-{attempt}")
-        };
-        if !taken.iter().any(|agent| agent.name == name) {
-            return Ok(name);
-        }
-    }
-    Err(refusal(
-        "name",
-        format!(
-            "card #{card_id} has been started {MAX_NAME_TRIES} times; remove its old sessions first"
-        ),
-    ))
+/// The name of a new session on `engine_id` (`docs/plans/agents-model.md`, Q8): "Glut Medium Allrounder (Sonnet 5.5)",
+/// with ` #2`, ` #3`, … while the project has one of that name. The card's number stays on the card and its tile.
+///
+/// # Errors
+///
+/// A refusal for an engine that is gone, or after too many sessions of one name.
+pub(crate) fn session_name(
+    config: &Config,
+    taken: &[Agent],
+    engine_id: &str,
+    tier: Tier,
+    role: &str,
+) -> Result<String> {
+    let info = crate::engines::find(config, &ModelSources::load(), engine_id)
+        .ok_or_else(|| refusal("engine", format!("there is no engine “{engine_id}”")))?;
+    let names: Vec<String> = taken.iter().map(|agent| agent.name.clone()).collect();
+    crate::agent_start::session_name(&info, tier, role, &names)
 }
 
 /// Makes a session for the card and takes the card for it. See the module documentation.
@@ -345,12 +359,15 @@ fn start_in(
             ),
         ));
     }
-    let (engine_id, _) = choose_engine(config, role, request.engine_id.as_deref())?;
+    let tier = needed_tier(&card, Some(role));
+    let (engine_id, _) = choose_engine(config, tier, request.engine_id.as_deref())?;
     let engine_id = engine_id.as_str();
-    let name = free_name(
+    let name = session_name(
+        config,
         &agent_store::list_agents(db, request.project_id)?,
+        engine_id,
+        tier,
         &role_name,
-        card.id,
     )?;
     let agent = roster::create_agent_on_engine(
         db,
@@ -387,6 +404,9 @@ fn start_in(
 /// The role kind that judges cards.
 const KIND_REVIEW: &str = "review";
 
+/// The review role a card gets when it names none of kind `review` (one of the seven fixed roles, Q5).
+const DEFAULT_REVIEWER: &str = "reviewer";
+
 /// What the studio (or the owner) asks for when a card is waiting for its review.
 #[derive(Debug, Clone)]
 pub struct ReviewRequest {
@@ -407,11 +427,9 @@ pub struct ReviewSession {
     pub engine_id: String,
 }
 
-/// The tier of role a card calls for: the card's own tier (the planner sets it by how hard the card is), else the tier of the
-/// role that works it. A review of a light card by a heavy reviewer is money spent for nothing; a heavy card judged by a
-/// light one is a review that finds little.
-fn needed_tier(card: &crate::board::Card, worker_role: Option<&Role>) -> axiomata_roster::Tier {
-    use axiomata_roster::Tier;
+/// The tier a card is worked at (`docs/plans/agents-model.md`, Q15): the card's own tier (the planner sets it by how
+/// hard the card is), else the default tier of the role that works it.
+fn needed_tier(card: &crate::board::Card, worker_role: Option<&Role>) -> Tier {
     match card.tier {
         Some(crate::board::Tier::Light) => Tier::Light,
         Some(crate::board::Tier::Medium) => Tier::Medium,
@@ -420,108 +438,92 @@ fn needed_tier(card: &crate::board::Card, worker_role: Option<&Role>) -> axiomat
     }
 }
 
-/// The reviewers of kind `review` in the order they are tried for a card of tier `needed`: **the weakest that is at least as
-/// strong as the card**, then the stronger ones, and last — a card for which nobody is strong enough — the strongest of the
-/// weaker ones first. Ties go by name, so the choice does not depend on the order of the files.
-fn reviewers_for(roles: &[Role], needed: axiomata_roster::Tier) -> Vec<&Role> {
-    let mut reviewers: Vec<&Role> = roles
-        .iter()
-        .filter(|role| role.kind == KIND_REVIEW)
-        .collect();
-    reviewers.sort_by_key(|role| {
-        let weaker = role.tier < needed;
-        // Strong enough first, the weakest of those first; then the weaker ones, the nearest to the card first.
-        let rank = if weaker {
-            2 - role.tier as u8
-        } else {
-            role.tier as u8
-        };
-        (weaker, rank, role.name.clone())
-    });
-    reviewers
+/// The role that reviews a card: the one the card names when it is of kind `review`, else `reviewer`, else the first
+/// role of kind `review` by name.
+fn review_role<'a>(roles: &'a [Role], card: &crate::board::Card) -> Option<&'a Role> {
+    let reviews = |role: &&Role| role.kind == KIND_REVIEW;
+    card.agent
+        .as_deref()
+        .and_then(|name| roles.iter().filter(reviews).find(|role| role.name == name))
+        .or_else(|| {
+            roles
+                .iter()
+                .filter(reviews)
+                .find(|role| role.name == DEFAULT_REVIEWER)
+        })
+        .or_else(|| {
+            roles
+                .iter()
+                .filter(reviews)
+                .min_by(|a, b| a.name.cmp(&b.name))
+        })
 }
 
-/// The reviewer for a card of tier `needed` and the engine it runs on: the first of [`reviewers_for`] that has an engine other
-/// than the worker's (A21), or the engine the owner asked for. A refusal names what to do when none has.
+/// The tier the worker of a card worked at: the card's (or its role's default), or higher when its session runs on an
+/// engine of a higher tier — after an escalation it does.
+fn worker_tier(
+    config: &Config,
+    sources: &ModelSources,
+    card: &crate::board::Card,
+    worker_role: Option<&Role>,
+    worker_engine: Option<&str>,
+) -> Tier {
+    let engine_tier = worker_engine
+        .and_then(|id| crate::engines::find(config, sources, id))
+        .and_then(|info| info.rated_tier);
+    needed_tier(card, worker_role).max(engine_tier.unwrap_or(Tier::Light))
+}
+
+/// The reviewer of a card, the tier it reviews at and its engine (`docs/plans/agents-model.md`, Q15): the review role
+/// ([`review_role`]) at the worker's tier or above. Of each tier, from the worker's up, an engine other than the
+/// worker's is preferred — a model marking its own homework agrees with itself (A21) — else the worker's own; a tier
+/// without any engine that can run hands over to the next one up. An engine the owner asks for is taken, but never the
+/// worker's.
 ///
 /// # Errors
 ///
-/// No role of kind `review`, or nothing usable for any of them (the first refusal is the one returned).
+/// No role of kind `review`, an asked-for engine that is the worker's, gone or runs its own command, or no engine of
+/// the worker's tier or above that can run.
 fn choose_reviewer<'a>(
     config: &Config,
     roles: &'a [Role],
-    needed: axiomata_roster::Tier,
+    card: &crate::board::Card,
+    worker_role: Option<&Role>,
     worker_engine: Option<&str>,
     requested: Option<&str>,
-) -> Result<(&'a Role, String)> {
-    let candidates = reviewers_for(roles, needed);
-    if candidates.is_empty() {
-        return Err(refuse_review(
-            "there is no role of kind `review` for this project; add one in the Studio",
-        ));
+) -> Result<(&'a Role, Tier, String)> {
+    let role = review_role(roles, card).ok_or_else(|| {
+        refuse_review("there is no role of kind `review` for this project; add one in the Studio")
+    })?;
+    let sources = ModelSources::load();
+    let needed = worker_tier(config, &sources, card, worker_role, worker_engine);
+    if let Some(asked) = requested {
+        if Some(asked) == worker_engine {
+            return Err(refuse_review(
+                "the reviewer must run on another engine than the session that worked on the card",
+            ));
+        }
+        let (id, _) = choose_engine(config, needed, Some(asked))?;
+        return Ok((role, needed, id));
     }
-    let mut first_refusal = None;
-    for role in candidates {
-        match choose_review_engine(config, role, worker_engine, requested) {
-            Ok(engine) => return Ok((role, engine)),
-            Err(err) => {
-                first_refusal.get_or_insert(err);
-            }
+    for tier in Tier::ALL.into_iter().filter(|tier| *tier >= needed) {
+        let engines = tier_engines(config, &sources, tier);
+        let other = engines
+            .iter()
+            .find(|info| Some(info.engine.id.as_str()) != worker_engine);
+        if let Some(info) = other.or_else(|| engines.first()) {
+            return Ok((role, tier, info.engine.id.clone()));
         }
     }
-    Err(first_refusal.unwrap_or_else(|| refuse_review("no reviewer could be chosen")))
+    Err(refuse_review(&format!(
+        "no engine of the tier {} or above can run a review; switch a model of that tier on in the Studio's Models \
+         tab, or pick an engine",
+        needed.as_str()
+    )))
 }
 
 fn refuse_review(reason: &str) -> AxiomataError {
     refusal("review", reason.to_owned())
-}
-
-/// The engine a reviewer runs on: never the engine of the session that worked on the card (A21) — a model marking its
-/// own homework agrees with itself. The one asked for, else the role's own, else the first fallback that exists, has no
-/// command of its own and differs.
-///
-/// # Errors
-///
-/// A refusal naming what to do: the asked-for engine is the worker's, or nothing usable is left and the owner picks.
-fn choose_review_engine(
-    config: &Config,
-    role: &Role,
-    worker_engine: Option<&str>,
-    requested: Option<&str>,
-) -> Result<String> {
-    if let (Some(asked), Some(worker)) = (requested, worker_engine)
-        && asked == worker
-    {
-        return Err(refuse_review(
-            "the reviewer must run on another engine than the session that worked on the card",
-        ));
-    }
-    let engines = crate::engines::Lookup::new(config);
-    if let Some(asked) = requested {
-        let engine = engines.engine(asked).ok_or_else(|| {
-            refusal(
-                "engine",
-                format!("there is no engine “{asked}”; engines are added in the Studio settings"),
-            )
-        })?;
-        if !engine.command.trim().is_empty() {
-            return Err(refuse_review(
-                "that engine runs a command of its own, which Axiomata does not touch",
-            ));
-        }
-        return Ok(engine.id);
-    }
-    role.engine
-        .iter()
-        .chain(role.fallback_engines.iter())
-        .filter(|id| Some(id.as_str()) != worker_engine)
-        .find_map(|id| engines.engine(id).filter(|engine| engine.command.trim().is_empty()))
-        .map(|engine| engine.id)
-        .ok_or_else(|| {
-            refuse_review(
-                "the reviewer needs an engine other than the worker's, and the role names none; pick one",
-            )
-        })
 }
 
 /// The reviewer session that is judging the latest report of a card, if there is one: a reviewer made after the latest
@@ -615,6 +617,8 @@ struct ReviewPlan {
     repo: axiomata_ide::git::AgentRepo,
     roles: Vec<Role>,
     role: Role,
+    /// The tier the reviewer reviews at.
+    tier: Tier,
     engine_id: String,
 }
 
@@ -760,16 +764,17 @@ fn plan_review(
     }
     let roles = roles_of(db, worker.project_id);
     let worker_role = roles.iter().find(|role| role.name == worker.agent_role);
-    let (role, engine_id) = choose_reviewer(
+    let (role, tier, engine_id) = choose_reviewer(
         config,
         &roles,
-        needed_tier(&card, worker_role),
+        &card,
+        worker_role,
         worker.engine_id.as_deref(),
         request.engine_id.as_deref(),
     )?;
     let role = role.clone();
     // The name is asked now too, so that a refusal does not come after the snapshot commit.
-    free_name(&sessions, &role.name, card.id)?;
+    session_name(config, &sessions, &engine_id, tier, &role.name)?;
     let repo = crate::ide::provision::agent_repo(db, worker.id)?.ready()?;
     Ok(ReviewPlan {
         card,
@@ -777,6 +782,7 @@ fn plan_review(
         repo,
         roles,
         role,
+        tier,
         engine_id,
     })
 }
@@ -821,7 +827,13 @@ fn finish_review(
             existing.name
         )));
     }
-    let name = free_name(&sessions, &plan.role.name, card.id)?;
+    let name = session_name(
+        config,
+        &sessions,
+        &plan.engine_id,
+        plan.tier,
+        &plan.role.name,
+    )?;
     let agent = roster::create_agent_on_engine(
         db,
         config,
@@ -1597,16 +1609,16 @@ pub async fn redo_card(core: &AxiomataCore, card_id: i64) -> Result<Vec<i64>> {
 
 // ------------------------------------------------------------ escalation ---
 
-/// How often a card may be sent back before a stronger role takes it over (A26): the second return is the last one the
-/// same role gets.
+/// How often a card may be sent back before its role is moved one tier up (A26, `docs/plans/agents-model.md` Q15): the
+/// second return is the last one the same tier gets.
 pub const ESCALATE_AFTER_RETURNS: u32 = 2;
 
 /// What an escalation came to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum CardEscalation {
-    /// A stronger role took the card over in the same session: worktree, branch and claim stay, the engine and the role
-    /// change, and the next start of the pane runs the new engine.
+    /// The same role took the card over a tier higher in the same session: worktree, branch, claim and role stay, the
+    /// engine changes, and the next start of the pane runs it. `role` and `from_role` are the same since AM5.
     Done {
         card_id: i64,
         plan_id: Option<i64>,
@@ -1616,32 +1628,27 @@ pub enum CardEscalation {
         role: String,
         engine_id: String,
     },
-    /// There is no stronger role of this kind with an engine that can run: said once, and the owner decides.
+    /// No higher tier (the card was heavy) or no engine of it that can run: said once, and the owner decides.
     NoStrongerRole { card_id: i64, role: String },
     /// Nothing to do: the card was not sent back often enough, is not in work, or an escalation was tried already.
     NotNeeded { card_id: i64 },
 }
 
-/// The role that takes over from `current`: the weakest of the same kind that is stronger and has an engine an unattended
-/// session can run on. Ties in tier go to the name, so the choice does not depend on the order of the files.
-fn stronger_role<'a>(config: &Config, roles: &'a [Role], current: &Role) -> Option<&'a Role> {
-    roles
-        .iter()
-        .filter(|role| {
-            role.kind == current.kind
-                && role.tier > current.tier
-                && Capabilities::of(role).work
-                && choose_engine(config, role, None).is_ok()
-        })
-        .min_by(|a, b| a.tier.cmp(&b.tier).then_with(|| a.name.cmp(&b.name)))
+/// The tier above `tier`, `None` at heavy: an escalation goes light → medium → heavy and ends there.
+fn tier_above(tier: Tier) -> Option<Tier> {
+    match tier {
+        Tier::Light => Some(Tier::Medium),
+        Tier::Medium => Some(Tier::Heavy),
+        Tier::Heavy => None,
+    }
 }
 
-/// Hands a card that was sent back [`ESCALATE_AFTER_RETURNS`] times to a stronger role of the same kind — one try, ever
-/// (A26): the worker's session changes role and engine **in place**, so its worktree, its branch and its claim stay, and
-/// the pane's next start runs the new engine on the work that is there already.
+/// Hands a card that was sent back [`ESCALATE_AFTER_RETURNS`] times to the same role one tier higher
+/// (`docs/plans/agents-model.md`, Q15) — one try, ever (A26): the worker's session changes engine **in place**, so its
+/// worktree, its branch and its claim stay, and the pane's next start runs the new engine on the work that is there.
 ///
-/// With no stronger role the card stays as it is and the owner decides; that is recorded too, so the same look is not made
-/// again.
+/// At heavy, or with no engine of the next tier that can run, the card stays as it is and the owner decides; that is
+/// recorded too, so the same look is not made again.
 ///
 /// # Errors
 ///
@@ -1696,11 +1703,26 @@ fn escalate_in(
                 format!("there is no role “{}” for this project", worker.agent_role),
             )
         })?;
-    let Some(next) = stronger_role(config, &roles, current) else {
+    let sources = ModelSources::load();
+    let from = worker_tier(
+        config,
+        &sources,
+        &card,
+        Some(current),
+        worker.engine_id.as_deref(),
+    );
+    let next = tier_above(from).and_then(|tier| {
+        choose_engine(config, tier, None)
+            .ok()
+            .map(|(id, _)| (tier, id))
+    });
+    let Some((tier, engine_id)) = next else {
         let text = format!(
-            "sent back {} times; there is no stronger role of kind “{}” than “{}” with an engine to run on, so the owner \
+            "sent back {} times; the role “{}” at {} has no higher tier with an engine to run on, so the owner \
              decides: let it go on, take it over, or call it off",
-            card.returned_count, current.kind, current.name
+            card.returned_count,
+            current.name,
+            from.as_str()
         );
         flow::add_event(
             db,
@@ -1714,8 +1736,8 @@ fn escalate_in(
             role: current.name.clone(),
         });
     };
-    let (engine_id, _) = choose_engine(config, next, None)?;
     let old_engine = worker.engine_id.clone().unwrap_or_default();
+    // The name stays: the card's claim is the session's actor, which is made from it.
     roster::update_agent_on_engine(
         db,
         config,
@@ -1723,7 +1745,7 @@ fn escalate_in(
         worker.id,
         &worker.name,
         &engine_id,
-        &next.name,
+        &current.name,
     )?
     .ok_or_else(|| {
         refusal(
@@ -1735,9 +1757,12 @@ fn escalate_in(
     // the card's history, not the old model's context.
     agent_store::set_opencode_session(db, worker.id, None)?;
     let text = format!(
-        "sent back {} times: the role “{}” on “{old_engine}” hands over to “{}” on “{engine_id}”; the worktree, the branch \
-         and the claim stay",
-        card.returned_count, current.name, next.name
+        "sent back {} times: the role “{}” goes from {} on “{old_engine}” to {} on “{engine_id}”; the worktree, the \
+         branch and the claim stay",
+        card.returned_count,
+        current.name,
+        from.as_str(),
+        tier.as_str()
     );
     flow::add_event(
         db,
@@ -1753,7 +1778,7 @@ fn escalate_in(
         project_id: worker.project_id,
         agent_id: worker.id,
         from_role: current.name.clone(),
-        role: next.name.clone(),
+        role: current.name.clone(),
         engine_id,
     })
 }
@@ -2195,10 +2220,23 @@ mod tests {
         let board = store::create_board(&mut db, "B").unwrap();
         let columns = store::list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
+        // Own engines with a tier each (agents-model.md, AM5); the tier's default engine is set for medium and heavy.
+        let tiered = |id: &str, tier: Tier| Engine {
+            tier: Some(tier),
+            ..engine(id, "")
+        };
         let mut engines = BTreeMap::new();
-        engines.insert("sonnet".to_owned(), engine("sonnet", ""));
-        engines.insert("opus".to_owned(), engine("opus", ""));
-        engines.insert("custom".to_owned(), engine("custom", "my-harness --go"));
+        engines.insert("haiku".to_owned(), tiered("haiku", Tier::Light));
+        engines.insert("sonnet".to_owned(), tiered("sonnet", Tier::Medium));
+        engines.insert("sonnet-2".to_owned(), tiered("sonnet-2", Tier::Medium));
+        engines.insert("opus".to_owned(), tiered("opus", Tier::Heavy));
+        engines.insert(
+            "custom".to_owned(),
+            Engine {
+                tier: Some(Tier::Medium),
+                ..engine("custom", "my-harness --go")
+            },
+        );
         // `Config::default()` points the workspace at the real `~/Axiomata-Workspace`, and a returned card mirrors
         // its board there.
         let mut config = Config {
@@ -2206,6 +2244,26 @@ mod tests {
             ..Config::default()
         };
         config.agents.engines = engines;
+        config
+            .agents
+            .models
+            .default_engines
+            .set(Tier::Medium, Some("sonnet".into()));
+        config
+            .agents
+            .models
+            .default_engines
+            .set(Tier::Heavy, Some("opus".into()));
+        // The built-in Anthropic models stay off, so only the engines above are offered.
+        for (id, _) in crate::model_catalog::ANTHROPIC_MODELS {
+            config.agents.models.choices.insert(
+                crate::model_tiers::model_key(crate::config::ProviderId::Anthropic, id),
+                crate::model_tiers::ModelChoice {
+                    enabled: Some(false),
+                    tier: None,
+                },
+            );
+        }
         World {
             roles: vec![
                 role("allrounder", "implement", None),
@@ -2350,13 +2408,14 @@ mod tests {
     }
 
     #[test]
-    fn a_card_is_taken_for_a_new_session_of_its_role_on_the_roles_engine() {
+    fn a_card_is_taken_for_a_new_session_of_its_role_on_its_tiers_engine() {
         let mut w = world();
         let card = w.card(w.open, Some("builder"));
         let started = w.start(card, None).unwrap();
         assert_eq!(started.role, "builder");
         assert_eq!(started.engine_id, "sonnet");
-        assert_eq!(started.agent.name, format!("builder-{card}"));
+        // Named like an agent (Q8); the card's number stays on the card.
+        assert_eq!(started.agent.name, "Claude Medium Builder (default)");
         assert_eq!(started.agent.agent_role, "builder");
         assert_eq!(started.agent.engine_id.as_deref(), Some("sonnet"));
 
@@ -2371,21 +2430,53 @@ mod tests {
     }
 
     #[test]
-    fn a_card_without_a_role_goes_to_the_allrounder_on_the_engine_the_owner_picks() {
+    fn a_card_without_a_role_goes_to_the_allrounder_at_the_cards_tier_and_nowhere_without_an_engine()
+     {
         let mut w = world();
         let card = w.card(w.open, None);
-        // The allrounder names no engine: without a pick there is nothing to run on, and nothing is made.
+        // A light card, and no light engine that can run: nothing to run on, and nothing is made.
+        w.config.agents.engines.remove("haiku");
+        let mut fields = fields_of(&store::get_card(&w.db, card).unwrap().unwrap());
+        fields.tier = Some(crate::board::Tier::Light);
+        store::update_card(&w.db, card, &fields).unwrap();
         let refused = w.start(card, None).unwrap_err().to_string();
-        assert!(refused.contains("pick one"), "{refused}");
+        assert!(refused.contains("tier light"), "{refused}");
         assert_eq!(w.sessions(), 0);
         assert_eq!(
             store::get_card(&w.db, card).unwrap().unwrap().claimed_by,
             None
         );
 
+        // The owner's pick still wins over the tier.
         let started = w.start(card, Some("sonnet")).unwrap();
         assert_eq!(started.role, "allrounder");
         assert_eq!(started.engine_id, "sonnet");
+        assert_eq!(started.agent.name, "Claude Light Allrounder (default)");
+    }
+
+    #[test]
+    fn a_card_of_a_plan_that_runs_by_itself_is_started_on_its_tiers_engine_too() {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["one"]);
+        let mut fields = fields_of(&store::get_card(&w.db, cards[0]).unwrap().unwrap());
+        fields.tier = Some(crate::board::Tier::Light);
+        store::update_card(&w.db, cards[0], &fields).unwrap();
+        // The plan's own start, as `plan_run` asks for it: no engine named.
+        let started = w.start_on(cards[0], None, Some(&line.branch)).unwrap();
+        assert_eq!(started.engine_id, "haiku");
+        assert_eq!(started.agent.name, "Claude Light Builder (default)");
+    }
+
+    #[test]
+    fn a_card_of_a_tier_runs_on_that_tiers_engine_whatever_its_role_names() {
+        let mut w = world();
+        let card = w.card(w.open, Some("builder"));
+        let mut fields = fields_of(&store::get_card(&w.db, card).unwrap().unwrap());
+        fields.tier = Some(crate::board::Tier::Heavy);
+        store::update_card(&w.db, card, &fields).unwrap();
+        // The role file names sonnet; the card is heavy: the heavy tier's default runs it.
+        let started = w.start(card, None).unwrap();
+        assert_eq!(started.engine_id, "opus");
     }
 
     #[test]
@@ -2499,7 +2590,7 @@ mod tests {
         let actor = actor_from(Some(&first.agent.id.to_string()), Some(&first.agent.name)).unwrap();
         assert!(flow::release_started(&mut w.db, card, &actor).unwrap());
         let second = w.start(card, None).unwrap();
-        assert_eq!(second.agent.name, format!("builder-{card}-2"));
+        assert_eq!(second.agent.name, "Claude Medium Builder (default) #2");
         assert_ne!(first.agent.id, second.agent.id);
     }
 
@@ -2637,16 +2728,15 @@ mod tests {
     #[test]
     fn a_reported_card_gets_a_reviewer_on_another_engine_looking_at_a_snapshot() {
         let mut w = world();
-        w.roles.retain(|r| r.name != "reviewer");
-        w.roles.push(role("reviewer", "review", Some("opus")));
         let (card, worker) = w.reported("sonnet");
 
+        // Another engine of the worker's tier (medium), whatever the reviewer's file names.
         let review = w.review(card, None).unwrap();
         assert_eq!(
             (review.role.as_str(), review.engine_id.as_str()),
-            ("reviewer", "opus")
+            ("reviewer", "sonnet-2")
         );
-        assert_eq!(review.agent.name, format!("reviewer-{card}"));
+        assert_eq!(review.agent.name, "Claude Medium Reviewer (default)");
         assert_eq!(review.agent.card_id, Some(card));
         assert!(
             review.agent.card_review,
@@ -2804,12 +2894,15 @@ mod tests {
     }
 
     #[test]
-    fn without_an_engine_other_than_the_workers_the_owner_is_asked_and_nothing_is_committed() {
+    fn without_an_engine_that_can_review_the_owner_is_asked_and_nothing_is_committed() {
         let mut w = world();
         let (card, worker) = w.reported("sonnet");
-        // The seeded reviewer names the worker's own engine: the studio does not run it there on its own.
+        // No engine of the worker's tier or above is left that can run: the studio does not review on its own.
+        for id in ["sonnet", "sonnet-2", "opus"] {
+            w.config.agents.engines.remove(id);
+        }
         let refused = w.review(card, None).unwrap_err().to_string();
-        assert!(refused.contains("pick one"), "{refused}");
+        assert!(refused.contains("pick an engine"), "{refused}");
         let tip = |w: &World| {
             let branch = agent_store::get_agent(&w.db, worker.agent.id)
                 .unwrap()
@@ -2831,6 +2924,13 @@ mod tests {
         );
 
         // The owner's pick works.
+        w.config.agents.engines.insert(
+            "opus".into(),
+            Engine {
+                tier: Some(Tier::Heavy),
+                ..engine("opus", "")
+            },
+        );
         assert_eq!(w.review(card, Some("opus")).unwrap().engine_id, "opus");
     }
 
@@ -2840,46 +2940,94 @@ mod tests {
         role
     }
 
-    #[test]
-    fn the_reviewer_is_the_weakest_that_is_strong_enough_for_the_card_then_the_stronger_then_the_nearest_weaker()
-     {
-        let roles = vec![
-            reviewer_of("heavy", Tier::Heavy, "opus"),
-            reviewer_of("light", Tier::Light, "sonnet"),
-            reviewer_of("medium", Tier::Medium, "sonnet"),
-            role("builder", "implement", Some("sonnet")),
-        ];
-        let order = |needed| {
-            reviewers_for(&roles, needed)
-                .iter()
-                .map(|r| r.name.as_str())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(order(Tier::Light), ["light", "medium", "heavy"]);
-        assert_eq!(order(Tier::Medium), ["medium", "heavy", "light"]);
-        assert_eq!(order(Tier::Heavy), ["heavy", "medium", "light"]);
-        assert!(reviewers_for(&[role("builder", "implement", None)], Tier::Medium).is_empty());
+    /// A card of `tier` worked by `builder`, as `choose_reviewer` sees it.
+    fn card_at(w: &World, tier: Option<crate::board::Tier>) -> crate::board::Card {
+        let id = w.card(w.open, Some("builder"));
+        let mut card = store::get_card(&w.db, id).unwrap().unwrap();
+        card.tier = tier;
+        card
     }
 
     #[test]
-    fn a_reviewer_whose_engine_is_the_workers_is_passed_over_for_the_next_one() {
+    fn the_reviewer_prefers_another_engine_of_the_workers_tier_then_the_same_then_the_next_tier_up()
+    {
         let mut w = world();
-        w.roles = vec![
-            reviewer_of("light", Tier::Light, "sonnet"),
-            reviewer_of("heavy", Tier::Heavy, "opus"),
-        ];
-        // The worker ran on sonnet: the light reviewer is on the same engine, so the heavy one takes the card even though a
-        // light one would have been enough.
-        let (role, engine) =
-            choose_reviewer(&w.config, &w.roles, Tier::Light, Some("sonnet"), None).unwrap();
-        assert_eq!((role.name.as_str(), engine.as_str()), ("heavy", "opus"));
-        // On another engine the weakest strong-enough reviewer is the one.
-        let (role, engine) =
-            choose_reviewer(&w.config, &w.roles, Tier::Light, Some("opus"), None).unwrap();
-        assert_eq!((role.name.as_str(), engine.as_str()), ("light", "sonnet"));
-        // Nobody left: the refusal says what to do.
-        w.roles = vec![reviewer_of("only", Tier::Medium, "sonnet")];
-        assert!(choose_reviewer(&w.config, &w.roles, Tier::Light, Some("sonnet"), None).is_err());
+        w.roles
+            .push(reviewer_of("reviewer-heavy", Tier::Heavy, "opus"));
+        let medium = card_at(&w, Some(crate::board::Tier::Medium));
+        let pick = |w: &World, card: &crate::board::Card, worker: Option<&str>| {
+            let (role, tier, engine) =
+                choose_reviewer(&w.config, &w.roles, card, None, worker, None).unwrap();
+            (role.name.clone(), tier, engine)
+        };
+        // The role `reviewer`, whatever its file's tier or engine says; another medium engine than the worker's.
+        assert_eq!(
+            pick(&w, &medium, Some("sonnet")),
+            ("reviewer".to_owned(), Tier::Medium, "sonnet-2".to_owned())
+        );
+        // The worker's engine is the only one of the tier: the same engine, not a tier up.
+        w.config.agents.engines.remove("sonnet-2");
+        assert_eq!(pick(&w, &medium, Some("sonnet")).2, "sonnet");
+        // No engine of the worker's tier can run: the next tier up.
+        let light = card_at(&w, Some(crate::board::Tier::Light));
+        assert_eq!(pick(&w, &light, Some("haiku")).1, Tier::Light);
+        w.config.agents.engines.remove("haiku");
+        assert_eq!(
+            pick(&w, &light, Some("x")),
+            ("reviewer".to_owned(), Tier::Medium, "sonnet".to_owned())
+        );
+        // Never below the worker's tier, and the card may name its own review role.
+        let mut heavy = card_at(&w, Some(crate::board::Tier::Heavy));
+        assert_eq!(
+            pick(&w, &heavy, Some("sonnet")),
+            ("reviewer".to_owned(), Tier::Heavy, "opus".to_owned())
+        );
+        heavy.agent = Some("reviewer-heavy".into());
+        assert_eq!(pick(&w, &heavy, None).0, "reviewer-heavy");
+        // Nothing of a high enough tier left: the refusal says what to do.
+        w.config.agents.engines.remove("opus");
+        assert!(choose_reviewer(&w.config, &w.roles, &heavy, None, None, None).is_err());
+        w.roles.retain(|role| role.kind != KIND_REVIEW);
+        assert!(choose_reviewer(&w.config, &w.roles, &medium, None, None, None).is_err());
+    }
+
+    #[test]
+    fn a_worker_runs_at_the_cards_tier_else_its_roles_on_the_tiers_default_else_the_cheapest_that_can_run()
+     {
+        let mut w = world();
+        let sources = ModelSources::default();
+        // The tier's default engine first.
+        assert_eq!(
+            choose_engine(&w.config, Tier::Medium, None).unwrap().0,
+            "sonnet"
+        );
+        // Without a default: the cheapest of the tier (unpriced own engines by id).
+        w.config
+            .agents
+            .models
+            .default_engines
+            .set(Tier::Medium, None);
+        assert_eq!(
+            choose_engine(&w.config, Tier::Medium, None).unwrap().0,
+            "sonnet"
+        );
+        let ids: Vec<String> = tier_engines(&w.config, &sources, Tier::Medium)
+            .into_iter()
+            .map(|info| info.engine.id)
+            .collect();
+        assert_eq!(ids, ["sonnet", "sonnet-2"]);
+        // An engine with a command of its own is no candidate; one asked for by the owner wins over the tier.
+        assert!(!ids.contains(&"custom".to_owned()));
+        assert_eq!(
+            choose_engine(&w.config, Tier::Medium, Some("opus"))
+                .unwrap()
+                .0,
+            "opus"
+        );
+        assert!(choose_engine(&w.config, Tier::Medium, Some("custom")).is_err());
+        // A tier without an engine that can run is refused with what to do.
+        w.config.agents.engines.remove("haiku");
+        assert!(choose_engine(&w.config, Tier::Light, None).is_err());
     }
 
     #[test]
@@ -2943,7 +3091,7 @@ mod tests {
         flow::report_done(&mut w.db, card, &worker_actor).unwrap();
         let second = w.review(card, Some("opus")).unwrap();
         assert_ne!(first.agent.id, second.agent.id);
-        assert_eq!(second.agent.name, format!("reviewer-{card}-2"));
+        assert_eq!(second.agent.name, "Claude Medium Reviewer (default) #2");
     }
 
     #[test]
@@ -4136,16 +4284,9 @@ mod tests {
         escalate_in(&w.db, &w.config, &move |_, _, _| roles.clone(), card)
     }
 
-    fn heavy_builder() -> Role {
-        let mut heavy = role("builder-heavy", "implement", Some("opus"));
-        heavy.tier = Tier::Heavy;
-        heavy
-    }
-
     #[test]
-    fn a_card_sent_back_twice_goes_to_a_stronger_role_in_the_same_session_and_only_once() {
+    fn a_card_sent_back_twice_goes_one_tier_up_in_the_same_session_and_only_once() {
         let mut w = world();
-        w.roles.push(heavy_builder());
         let card = w.card(w.open, Some("builder"));
         let started = w.start(card, None).unwrap();
         let before = store::get_card(&w.db, card).unwrap().unwrap().claimed_by;
@@ -4163,7 +4304,7 @@ mod tests {
             matches!(
                 &outcome,
                 CardEscalation::Done { agent_id, role, engine_id, from_role, .. }
-                    if *agent_id == started.agent.id && role == "builder-heavy"
+                    if *agent_id == started.agent.id && role == "builder"
                         && engine_id == "opus" && from_role == "builder"
             ),
             "{outcome:?}"
@@ -4171,8 +4312,15 @@ mod tests {
         let agent = agent_store::get_agent(&w.db, started.agent.id)
             .unwrap()
             .unwrap();
-        assert_eq!(agent.agent_role, "builder-heavy");
+        assert_eq!(
+            agent.agent_role, "builder",
+            "the same role, a tier higher (Q15)"
+        );
         assert_eq!(agent.engine_id.as_deref(), Some("opus"));
+        assert_eq!(
+            agent.name, started.agent.name,
+            "the name holds the claim's actor"
+        );
         assert_eq!(agent.card_id, Some(card), "the session is still the card's");
         assert_eq!(
             store::get_card(&w.db, card).unwrap().unwrap().claimed_by,
@@ -4194,9 +4342,12 @@ mod tests {
     }
 
     #[test]
-    fn without_a_stronger_role_the_owner_is_told_once_and_the_card_stays() {
+    fn at_heavy_the_owner_is_told_once_and_the_card_stays() {
         let mut w = world();
         let card = w.card(w.open, Some("builder"));
+        let mut fields = fields_of(&store::get_card(&w.db, card).unwrap().unwrap());
+        fields.tier = Some(crate::board::Tier::Heavy);
+        store::update_card(&w.db, card, &fields).unwrap();
         let started = w.start(card, None).unwrap();
         sent_back(&w, card, 2);
         let outcome = escalate(&w, card).unwrap();
@@ -4219,18 +4370,52 @@ mod tests {
     }
 
     #[test]
-    fn a_stronger_role_without_an_engine_that_can_run_is_not_chosen() {
+    fn a_higher_tier_without_an_engine_that_can_run_is_not_chosen() {
         let mut w = world();
-        let mut heavy = heavy_builder();
-        heavy.engine = Some("custom".into());
-        w.roles.push(heavy);
         let card = w.card(w.open, Some("builder"));
         w.start(card, None).unwrap();
+        // Heavy has only an engine of its own command: nothing an unattended session runs on.
+        w.config.agents.engines.remove("opus");
+        w.config
+            .agents
+            .models
+            .default_engines
+            .set(Tier::Heavy, None);
+        w.config.agents.engines.insert(
+            "big".into(),
+            Engine {
+                tier: Some(Tier::Heavy),
+                ..engine("big", "my-harness --go")
+            },
+        );
         sent_back(&w, card, 2);
         assert!(matches!(
             escalate(&w, card).unwrap(),
             CardEscalation::NoStrongerRole { .. }
         ));
+    }
+
+    #[test]
+    fn a_light_card_escalates_to_medium_then_no_further_than_one_try() {
+        let mut w = world();
+        let card = w.card(w.open, Some("builder"));
+        let mut fields = fields_of(&store::get_card(&w.db, card).unwrap().unwrap());
+        fields.tier = Some(crate::board::Tier::Light);
+        store::update_card(&w.db, card, &fields).unwrap();
+        let started = w.start(card, None).unwrap();
+        assert_eq!(started.engine_id, "haiku");
+        sent_back(&w, card, 2);
+        let outcome = escalate(&w, card).unwrap();
+        assert!(
+            matches!(&outcome, CardEscalation::Done { engine_id, .. } if engine_id == "sonnet"),
+            "{outcome:?}"
+        );
+        // Its reviewer now reviews at the worker's new tier: medium, on another medium engine.
+        let card_now = store::get_card(&w.db, card).unwrap().unwrap();
+        w.roles.push(reviewer_of("reviewer", Tier::Light, "haiku"));
+        let (_, tier, engine) =
+            choose_reviewer(&w.config, &w.roles, &card_now, None, Some("sonnet"), None).unwrap();
+        assert_eq!((tier, engine.as_str()), (Tier::Medium, "sonnet-2"));
     }
 
     #[test]

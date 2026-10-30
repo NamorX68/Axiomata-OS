@@ -59,8 +59,8 @@ pub enum RunEvent {
         name: String,
         reason: String,
     },
-    /// A card that was sent back twice was handed to a stronger role (A26, one try): its session changed role and engine in
-    /// place, so its pane is to be closed and opened again — the open is what starts the new engine.
+    /// A card that was sent back twice was moved a tier up (A26, one try; agents-model.md Q15): its session changed its
+    /// engine in place, so its pane is to be closed and opened again — the open is what starts the new engine.
     Escalated {
         card_id: i64,
         plan_id: i64,
@@ -395,13 +395,13 @@ impl PlanRun {
                 Ok(CardEscalation::NoStrongerRole { card_id, role }) => events.push(RunEvent::Blocked {
                     card_id,
                     reason: format!(
-                        "sent back twice and there is no stronger role than “{role}” to hand it to: you decide"
+                        "sent back twice and “{role}” has no higher tier with an engine to hand it to: you decide"
                     ),
                 }),
                 Ok(CardEscalation::NotNeeded { .. }) => {}
                 Err(err) => events.push(RunEvent::Blocked {
                     card_id,
-                    reason: format!("could not hand it to a stronger role: {err}"),
+                    reason: format!("could not hand it to a higher tier: {err}"),
                 }),
             }
         }

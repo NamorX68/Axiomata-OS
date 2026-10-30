@@ -409,7 +409,8 @@ is one concern a single session can finish and a reviewer can judge in one sitti
                        build or the tests (documentation) gets no build or test criterion — its check is reading the \
                        diff. Name for every card the role that should do \
                        it (`agent`, from the catalog) and why in a sentence (`agent_reason`); set `tier` by how hard \
-                       the card is, not how long, and `kind` by the sort of work (implement, test, doc). Every card is reviewed \
+                       the card is, not how long — the tier picks the model that works it —, and `kind` by \
+                       the sort of work (implement, test, doc). Every card is reviewed \
                        automatically once its session reports it done, so never make a card for reviewing. Order the \
                        work with `needs`: a card that cannot start before another one is merged names it, and nothing \
                        else does. Every card is a session that costs money, so a few well-cut cards beat many small \

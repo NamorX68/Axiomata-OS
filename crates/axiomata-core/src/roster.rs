@@ -1028,15 +1028,22 @@ mod tests {
                 (1, crate::engines::EngineOrigin::Auto)
             );
 
-            // The card start path resolves it too.
+            // The card start path resolves it too: the medium tier's engine, or the one asked for.
             let mut role = axiomata_roster::default_role();
             role.engine = Some(AUTO_SONNET.into());
-            let (id, chosen) = crate::card_session::choose_engine(&live, &role, None).unwrap();
+            let tier = axiomata_roster::Tier::Medium;
+            let (id, chosen) = crate::card_session::choose_engine(&live, tier, None).unwrap();
             assert_eq!(
                 (id.as_str(), chosen.harness),
                 (AUTO_SONNET, Harness::ClaudeCode)
             );
-            assert!(crate::card_session::choose_engine(&live, &role, Some("nowhere")).is_err());
+            assert_eq!(
+                crate::card_session::choose_engine(&live, tier, Some(AUTO_SONNET))
+                    .unwrap()
+                    .0,
+                AUTO_SONNET
+            );
+            assert!(crate::card_session::choose_engine(&live, tier, Some("nowhere")).is_err());
             // And a role may name it.
             assert!(
                 role.check_engines(|id| crate::engines::Lookup::new(&live).exists(id))

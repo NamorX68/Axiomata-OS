@@ -22,7 +22,7 @@ use serde::Serialize;
 use crate::AxiomataCore;
 use crate::AxiomataError;
 use crate::board::{PlanStatus, flow};
-use crate::card_session::{choose_engine, lock, remove_sessions};
+use crate::card_session::{choose_engine, lock, remove_sessions, session_name};
 use crate::config::Config;
 use crate::ide::agent_store;
 use crate::ide::model::Agent;
@@ -93,29 +93,10 @@ fn pick_planner<'a>(roles: &'a [Role], grill: bool, asked: Option<&str>) -> Resu
                 "role",
                 format!(
                     "there is no role of kind {kind} for this project; the {default} role is seeded at the next start of \
-                     the app, or add one in Engines & roles"
+                     the app, or add one in Models & roles"
                 ),
             )
         })
-}
-
-/// The first of `role-<plan>`, `role-<plan>-2`, … no session of the project has.
-fn free_name(taken: &[Agent], role: &str, plan_id: i64) -> Result<String> {
-    let base = format!("{role}-{plan_id}");
-    for attempt in 1..=50u32 {
-        let name = if attempt == 1 {
-            base.clone()
-        } else {
-            format!("{base}-{attempt}")
-        };
-        if !taken.iter().any(|agent| agent.name == name) {
-            return Ok(name);
-        }
-    }
-    Err(refusal(
-        "name",
-        format!("plan #{plan_id} has had 50 planners; remove the old sessions first"),
-    ))
 }
 
 /// A plan has one planner and one grilling session, in whichever project they run: two planners would propose the same
@@ -245,8 +226,9 @@ fn prepare(
     let roles = roles_of(db, request.project_id);
     let role = pick_planner(&roles, request.grill, request.role.as_deref())?.clone();
     refuse_second_planner(db, plan.id, &roles, &role)?;
-    let engine_id = choose_engine(config, &role, request.engine_id.as_deref())?.0;
-    free_name(&sessions, &role.name, plan.id)?;
+    // The planner at its role's default tier (agents-model.md, Q15), on the engine asked for or the tier's.
+    let engine_id = choose_engine(config, role.tier, request.engine_id.as_deref())?.0;
+    session_name(config, &sessions, &engine_id, role.tier, &role.name)?;
     Ok(Plan {
         project_root: project.repo_root,
         roles,
@@ -274,7 +256,13 @@ fn finish(
     }
     let sessions = agent_store::list_agents(db, request.project_id)?;
     refuse_second_planner(db, current.id, &plan.roles, &plan.role)?;
-    let name = free_name(&sessions, &plan.role.name, current.id)?;
+    let name = session_name(
+        config,
+        &sessions,
+        &plan.engine_id,
+        plan.role.tier,
+        &plan.role.name,
+    )?;
     let agent = roster::create_agent_on_engine(
         db,
         config,
@@ -438,11 +426,33 @@ mod tests {
         )
         .unwrap()
         .id;
-        let mut config = Config::default();
+        let mut config = Config {
+            workspace_root: dir.join("workspace"),
+            ..Config::default()
+        };
+        // Heavy own engines only (the planner's tier), opus the tier's default; the built-in models stay off.
+        let heavy = |id: &str, command: &str| Engine {
+            tier: Some(Tier::Heavy),
+            ..engine(id, command)
+        };
         config.agents.engines = BTreeMap::from([
-            ("opus".to_owned(), engine("opus", "")),
-            ("custom".to_owned(), engine("custom", "my-harness --go")),
+            ("opus".to_owned(), heavy("opus", "")),
+            ("custom".to_owned(), heavy("custom", "my-harness --go")),
         ]);
+        config
+            .agents
+            .models
+            .default_engines
+            .set(Tier::Heavy, Some("opus".into()));
+        for (id, _) in crate::model_catalog::ANTHROPIC_MODELS {
+            config.agents.models.choices.insert(
+                crate::model_tiers::model_key(crate::config::ProviderId::Anthropic, id),
+                crate::model_tiers::ModelChoice {
+                    enabled: Some(false),
+                    tier: None,
+                },
+            );
+        }
         World {
             db: Mutex::new(conn),
             config,
@@ -527,7 +537,7 @@ mod tests {
         );
         assert_eq!(session.agent.plan_id, Some(w.plan));
         assert_eq!(session.agent.agent_role, "planner");
-        assert_eq!(session.agent.name, format!("planner-{}", w.plan));
+        assert_eq!(session.agent.name, "Claude Heavy Planner (default)");
         assert_eq!(
             session.agent.start_ref.as_deref(),
             Some(git(&w.repo, &["rev-parse", "HEAD"]).as_str())
@@ -536,10 +546,35 @@ mod tests {
     }
 
     #[test]
-    fn the_planner_role_names_no_engine_so_one_must_be_picked() {
-        let w = world(true);
+    fn the_planner_runs_at_its_roles_tier_on_that_tiers_engine_and_nowhere_without_one() {
+        let mut w = world(true);
+        assert!(w.start(Some("nope")).is_err());
+        let own_command = w.start(Some("custom")).unwrap_err().to_string();
+        assert!(own_command.contains("command of its own"), "{own_command}");
+        w.config.agents.engines.remove("opus");
         let refused = w.start(None).unwrap_err().to_string();
-        assert!(refused.contains("names no engine"), "{refused}");
+        assert!(refused.contains("tier heavy"), "{refused}");
+        assert!(
+            agent_store::plan_sessions(&lock(&w.db)).unwrap().is_empty(),
+            "nothing left behind"
+        );
+        w.config.agents.engines.insert(
+            "opus".into(),
+            Engine {
+                tier: Some(Tier::Heavy),
+                ..engine("opus", "")
+            },
+        );
+        assert_eq!(
+            w.start(None).unwrap().engine_id,
+            "opus",
+            "the heavy tier's default"
+        );
+    }
+
+    #[test]
+    fn a_planner_asked_for_an_engine_that_does_not_exist_is_refused() {
+        let w = world(true);
         assert!(w.start(Some("nope")).is_err());
         let own_command = w.start(Some("custom")).unwrap_err().to_string();
         assert!(own_command.contains("command of its own"), "{own_command}");
@@ -573,7 +608,7 @@ mod tests {
         );
         let grill = w.start_grill(Some("opus")).unwrap();
         assert_eq!(grill.role, "grill");
-        assert_eq!(grill.agent.name, format!("grill-{}", w.plan));
+        assert_eq!(grill.agent.name, "Claude Heavy Grill (default)");
         assert_eq!(grill.agent.plan_id, Some(w.plan));
         assert_ne!(grill.agent.id, planner.agent.id);
         assert!(
