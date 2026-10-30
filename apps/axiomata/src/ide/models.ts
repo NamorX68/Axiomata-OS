@@ -100,6 +100,16 @@ export const setDefaultEngine = (tier: Tier, engine: string | null): Promise<voi
 export const listAgentChoices = (projectId: number): Promise<AgentChoice[]> =>
   invoke<AgentChoice[]>("list_agent_choices", { projectId });
 
+/**
+ * "Propose again" (AM2): forgets the research proposals of `keys` (every switched-on model when `null`) and starts the
+ * `model-tiering` skill for them. Resolves with the keys asked for; the run ends with {@link MODEL_TIERS_UPDATED}.
+ */
+export const researchModelTiers = (keys: string[] | null): Promise<string[]> =>
+  invoke<string[]>("research_model_tiers", { keys });
+
+/** The event a finished tier research run sends. Mirrors `model_research::MODEL_TIERS_UPDATED` (src-tauri). */
+export const MODEL_TIERS_UPDATED = "models:tiers-updated";
+
 /** The providers in the order the Models tab lists them. */
 export const PROVIDER_ORDER: readonly ProviderId[] = ["anthropic", "open_router", "ollama"];
 

@@ -137,8 +137,10 @@ pub const HARNESS_RUN_CHAT: &str = "chat";
 /// The commands of the CLI a Glut run may start directly; every other one stays in the sandbox.
 /// `notes tag` writes a note's tags and links through the workspace's guard and records proposals in the database, so
 /// it needs both outside the sandbox; `notes tags list|todo` only read, `notes tags propose|skip` record a proposal or
-/// a skipped note of the vault run (`docs/plans/tags-links.md` V2, TL6).
-const DIRECT_COMMANDS: [&[&str]; 8] = [
+/// a skipped note of the vault run (`docs/plans/tags-links.md` V2, TL6); `ide models list` reads the models a tier
+/// research run rates and `ide models propose` records its proposal (`docs/plans/agents-model.md`, AM2) — the CLI lets
+/// a skill run only `list --unrated` and `propose` of them (`skill_run_may`).
+const DIRECT_COMMANDS: [&[&str]; 10] = [
     &["board", "list"],
     &["board", "add"],
     &["inbox", "move"],
@@ -147,6 +149,8 @@ const DIRECT_COMMANDS: [&[&str]; 8] = [
     &["notes", "tags", "todo"],
     &["notes", "tags", "propose"],
     &["notes", "tags", "skip"],
+    &["ide", "models", "list"],
+    &["ide", "models", "propose"],
 ];
 
 /// What a chat turn may start directly beside [`DIRECT_COMMANDS`]: the read-only views and the handbook

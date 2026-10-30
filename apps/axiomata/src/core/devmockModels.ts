@@ -217,6 +217,14 @@ export function mockModelCommand(
     }
     case "list_agent_choices":
       return { value: choicesFor(roles(), engines()) };
+    case "research_model_tiers": {
+      // The mock has no skill to run: it forgets the proposals asked about, as the app does before its run starts.
+      const asked = (args.keys as string[] | null) ?? models().filter((m) => m.enabled).map((m) => m.key);
+      const unknown = asked.find((key) => !catalog.some((m) => keyOf(m) === key));
+      if (unknown) throw new Error(`roster: invalid model: the catalog offers no model “${unknown}”`);
+      for (const m of catalog) if (asked.includes(keyOf(m))) m.proposal = null;
+      return { value: asked };
+    }
     default:
       return undefined;
   }

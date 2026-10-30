@@ -75,8 +75,9 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #                                            (take-over: squash by default, never pushes)
 #   ide engines list|add|edit|delete         (own engines + the automatic ones of the switched-on models, which are
 #                                              read-only; delete refused while a session/role uses it)
-#   ide models list|set|limits|default       (models on/off, tier per model and its source, price limits, default
-#                                              engine per tier — docs/plans/agents-model.md AM1)
+#   ide models list|set|limits|default|propose  (models on/off, tier per model and its source, price limits, default
+#                                              engine per tier — agents-model.md AM1; `list --unrated` + `propose` are the
+#                                              `model-tiering` skill's, AM2)
 #   ide roles list|show|save|delete|project|confirm   (AGENT.md roles; `project`/`confirm`: a project's own roles, by hash)
 #   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>
@@ -181,8 +182,8 @@ from the code itself:
   (`skills::bundled`: up to date / outdated / missing / changed by you, by the SHA-256 of each seed in
   `~/.axiomata/bundled-skills.json`; an own edit is replaced only after a question; a quiet notice on the deck when
   one is outdated). From the shell: `skills bundled [--json]`, and `skills reseed --force` overwrites all of them
-  (the four digests/cleanup plus `inbox-sort`, `todo-to-kanban`, `news-rss`, `news-web`, `model-news` and
-  `vault-tagging`; user skills untouched).
+  (the four digests/cleanup plus `inbox-sort`, `todo-to-kanban`, `news-rss`, `news-web`, `model-news`,
+  `vault-tagging` and `model-tiering`; user skills untouched).
 - **HTML/course pages render via `<iframe sandbox srcdoc=…>`, not `asset://`** — an
   `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
   WebKit sandboxing wall); don't re-attempt it without reading the postmortem in
@@ -292,8 +293,8 @@ from the code itself:
   `docs/plans/settings-provider-overhaul.md`.
 - **A skill's declared `axiomata-cli` command runs outside Glut's sandbox** (glut-round W8): the sandbox hides
   `~/.axiomata` from every command, so a command that every narrowing names by a pattern and that is one of the
-  CLI's direct commands (`board list`, `board add`, `inbox move`, `notes tag`, `notes tags list|todo|propose|skip` —
-  `agent_entry::cli_direct_program`) starts the CLI
+  CLI's direct commands (`board list`, `board add`, `inbox move`, `notes tag`, `notes tags list|todo|propose|skip`,
+  `ide models list|propose` — `agent_entry::cli_direct_program`) starts the CLI
   directly, without a shell. Every app-harness command carries `AXIOMATA_HARNESS_RUN=skill|chat`: a skill run gets only a
   short CLI list (`main.rs` `skill_run_may`), a chat turn no owner gate and only plain cards (`board_flow::plain_*`).
   Widen either list only with the same care.

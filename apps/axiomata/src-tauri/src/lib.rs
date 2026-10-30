@@ -26,6 +26,7 @@ mod lsp;
 mod maintenance;
 #[cfg(target_os = "macos")]
 mod menu;
+mod model_research;
 mod model_watch;
 mod plan_watch;
 mod tags;
@@ -353,6 +354,7 @@ pub fn run() {
             commands::set_tier_limits,
             commands::set_default_engine,
             commands::list_agent_choices,
+            model_research::research_model_tiers,
             commands::list_roles,
             commands::save_role,
             commands::delete_role,

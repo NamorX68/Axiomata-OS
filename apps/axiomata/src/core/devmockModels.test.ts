@@ -35,4 +35,16 @@ describe("the mock's engines and agents", () => {
     expect(light[1].name).toBe("Claude Light Allrounder (Haiku 5.5)");
     expect(mockModelCommand("get_app_info", {}, engines, () => [])).toBeUndefined();
   });
+
+  it("forgets the proposals a new research asks for", () => {
+    const engines = (): EngineEntry[] => mockEngineEntries([], () => 0);
+    const list = () =>
+      (mockModelCommand("list_models", {}, engines, () => [])?.value as { models: { key: string; proposal: unknown }[] })
+        .models;
+    expect(list().find((m) => m.key === "openrouter/z-ai/glm-5.3")?.proposal).not.toBeNull();
+    const asked = mockModelCommand("research_model_tiers", { keys: ["openrouter/z-ai/glm-5.3"] }, engines, () => []);
+    expect(asked?.value).toEqual(["openrouter/z-ai/glm-5.3"]);
+    expect(list().find((m) => m.key === "openrouter/z-ai/glm-5.3")?.proposal).toBeNull();
+    expect(() => mockModelCommand("research_model_tiers", { keys: ["x/y"] }, engines, () => [])).toThrow();
+  });
 });

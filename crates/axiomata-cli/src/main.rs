@@ -2881,6 +2881,14 @@ fn skill_run_may(command: &Command) -> bool {
         Command::Board { action } => {
             matches!(action, BoardAction::List { .. } | BoardAction::Add { .. })
         }
+        // Of the IDE only what tier research needs: the models it rates and its proposal (agents-model.md, AM2).
+        Command::Ide {
+            action: IdeAction::Models { action },
+        } => matches!(
+            action,
+            ide_models_cmd::ModelAction::List { unrated: true, .. }
+                | ide_models_cmd::ModelAction::Propose { .. }
+        ),
         // Of `notes tags` the list, the vault run's todo, a skip and a proposal — nothing that writes a note. Renaming,
         // describing and lifting are the owner's.
         Command::Notes { action } => matches!(
@@ -2962,6 +2970,13 @@ fn chat_turn_refusal(command: &Command) -> Option<String> {
                     action: files_cmd::GrantAction::List
                 }
         ),
+        // A tier proposal is the research skill's step, not the chat's.
+        Command::Ide {
+            action:
+                IdeAction::Models {
+                    action: ide_models_cmd::ModelAction::Propose { .. },
+                },
+        } => false,
         Command::Ide { action } => ide_owner_gate(action).is_none(),
         Command::Maintenance { action } => match action {
             maintenance_cmd::MaintenanceAction::Status { .. } => true,
@@ -3506,6 +3521,19 @@ mod tests {
             &["harness", "run", "hi"],
             &["models", "refresh"],
             &["board", "claim", "1"],
+            &[
+                "ide",
+                "models",
+                "propose",
+                "anthropic/claude-opus-5-5",
+                "--tier",
+                "heavy",
+                "--reason",
+                "Top.",
+                "--source",
+                "https://x.org",
+            ],
+            &["ide", "models", "set", "anthropic/x", "--disable"],
         ] {
             let said = refusal(never).unwrap_or_default();
             assert!(said.contains("the owner's"), "{never:?}: {said}");
@@ -3520,6 +3548,7 @@ mod tests {
             &["maintenance", "clean", "--dry-run"],
             &["maintenance", "status"],
             &["ide", "agents", "list", "1"],
+            &["ide", "models", "list", "--unrated"],
             &["module-action", "shell", "open_view", "--json", "{}"],
             &["board", "edit", "1", "--title", "x"],
             &["files", "read", "workspace", "x.md"],
@@ -3551,6 +3580,19 @@ mod tests {
             &["notes", "tags", "list"],
             &["notes", "tags", "todo"],
             &["notes", "tags", "propose", "rust", "Rust"],
+            &["ide", "models", "list", "--unrated", "--json"],
+            &[
+                "ide",
+                "models",
+                "propose",
+                "anthropic/claude-opus-5-5",
+                "--tier",
+                "heavy",
+                "--reason",
+                "Top.",
+                "--source",
+                "https://x.org",
+            ],
             &[],
         ] {
             assert!(may(allowed), "{allowed:?}");
@@ -3574,6 +3616,12 @@ mod tests {
             &["app", "settings"],
             &["app", "studio", "--json"],
             &["app", "handbook"],
+            // Of the IDE only tier research's two steps.
+            &["ide", "models", "list"],
+            &["ide", "models", "set", "anthropic/x", "--tier", "light"],
+            &["ide", "models", "limits"],
+            &["ide", "engines", "list"],
+            &["ide", "projects", "list"],
         ] {
             assert!(!may(refused), "{refused:?}");
         }

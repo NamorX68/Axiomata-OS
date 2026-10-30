@@ -1770,6 +1770,37 @@ mod tests {
                 "{refused}"
             );
         }
+
+        // Model tiering reads its todo and records proposals; setting the owner's tier or anything else is not its.
+        let tiering = bundled_rights(
+            "model-tiering",
+            include_str!("../../resources/model-tiering/SKILL.md"),
+        );
+        for allowed in [
+            "axiomata-cli ide models list --unrated --json",
+            "axiomata-cli ide models propose anthropic/claude-opus-5-5 --tier heavy --reason \"Top.\" --source https://x.org",
+        ] {
+            assert!(
+                tiering.judge("bash", &bash(allowed)).await.is_ok(),
+                "{allowed}"
+            );
+        }
+        for refused in [
+            "axiomata-cli ide models set anthropic/claude-opus-5-5 --tier light",
+            "axiomata-cli ide models list",
+            "axiomata-cli ide engines list",
+            "axiomata-cli ide models propose x --tier light; rm -rf ~",
+        ] {
+            assert!(
+                tiering.judge("bash", &bash(refused)).await.is_err(),
+                "{refused}"
+            );
+        }
+        assert!(tiering.judge("web_fetch", &page).await.is_ok());
+        let note = Access::Edit {
+            path: "A/x.md".into(),
+        };
+        assert!(tiering.judge("write_file", &note).await.is_err());
     }
 
     /// A read skill that declares nothing still reads and runs the read commands — and nothing else, compound

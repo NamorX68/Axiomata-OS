@@ -35,7 +35,7 @@ pub fn start(app: &AppHandle) {
     });
 }
 
-/// Logs what changed and tells an open Settings dialog to redraw its lists.
+/// Logs what changed, tells an open Settings dialog to redraw its lists, and starts the tier research of new models.
 pub fn announce(app: &AppHandle, outcome: &RefreshOutcome) {
     if !outcome.repriced.is_empty() {
         tracing::info!(models = ?outcome.repriced, "model prices updated from the provider catalog");
@@ -46,4 +46,6 @@ pub fn announce(app: &AppHandle, outcome: &RefreshOutcome) {
     if let Err(err) = app.emit(MODEL_CATALOG_UPDATED, outcome) {
         tracing::warn!(%err, "could not tell the frontend about the refreshed model catalog");
     }
+    // Models that came with this refresh and wait for a tier start their research (agents-model.md, AM2).
+    crate::model_research::after_refresh(app, &outcome.catalog);
 }

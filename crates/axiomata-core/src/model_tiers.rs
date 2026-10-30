@@ -12,7 +12,7 @@
 //! A model is keyed provider-qualified, `anthropic/<id>`, `openrouter/<id>` or `ollama/<id>` ([`model_key`]): the same
 //! id can exist at two providers, and the Glut engines name their model in this spelling already.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use axiomata_roster::{Tier, check_slug};
@@ -376,6 +376,14 @@ pub struct TierProposals {
     /// By model key.
     #[serde(default)]
     pub proposals: BTreeMap<String, TierProposal>,
+    /// When research was last started for a model (RFC 3339), by key: a run that fails does not start again for it
+    /// before a day has passed (`crate::model_research`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attempts: BTreeMap<String, String>,
+    /// Models the owner asked to be researched again ("Neu vorschlagen"), even with a tier of their own; a proposal
+    /// recorded for one takes it off.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub wanted: BTreeSet<String>,
 }
 
 impl Default for TierProposals {
@@ -383,6 +391,8 @@ impl Default for TierProposals {
         Self {
             version: PROPOSALS_VERSION,
             proposals: BTreeMap::new(),
+            attempts: BTreeMap::new(),
+            wanted: BTreeSet::new(),
         }
     }
 }
@@ -398,6 +408,10 @@ pub fn load_proposals() -> TierProposals {
     struct Raw {
         #[serde(default)]
         proposals: BTreeMap<String, serde_json::Value>,
+        #[serde(default)]
+        attempts: BTreeMap<String, serde_json::Value>,
+        #[serde(default)]
+        wanted: Vec<serde_json::Value>,
     }
     let Some(raw) = json_state::load(&paths::model_tiers_path(), || {
         serde_json::to_string(&TierProposals::default()).unwrap_or_default()
@@ -424,7 +438,44 @@ pub fn load_proposals() -> TierProposals {
             Err(err) => tracing::warn!(model = %key, %err, "a tier proposal was skipped"),
         }
     }
+    for (key, at) in raw.attempts {
+        let at = at
+            .as_str()
+            .filter(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok());
+        match (parse_model_key(&key), at) {
+            (Some(_), Some(at)) => {
+                proposals.attempts.insert(key, at.to_owned());
+            }
+            _ => tracing::warn!(model = %key, "a research attempt was skipped"),
+        }
+    }
+    proposals.wanted = raw
+        .wanted
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|key| parse_model_key(key).is_some())
+        .map(str::to_owned)
+        .collect();
     proposals
+}
+
+/// Applies `change` to the stored proposals under the file's lock and writes them back.
+///
+/// # Errors
+///
+/// What `change` returns; a failing write.
+pub(crate) fn edit_proposals<T>(change: impl FnOnce(&mut TierProposals) -> Result<T>) -> Result<T> {
+    let _guard = PROPOSALS_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let mut proposals = load_proposals();
+    let before = proposals.clone();
+    let out = change(&mut proposals)?;
+    // Nothing changed, nothing written: the check after every catalog refresh stays a read.
+    if proposals != before {
+        write_proposals(&proposals)?;
+    }
+    Ok(out)
 }
 
 fn write_proposals(proposals: &TierProposals) -> Result<()> {
@@ -446,12 +497,11 @@ pub fn record_proposal(key: &str, proposal: TierProposal) -> Result<()> {
         return Err(refusal("model", format!("“{key}” is no model key")));
     }
     proposal.validate()?;
-    let _guard = PROPOSALS_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    let mut proposals = load_proposals();
-    proposals.proposals.insert(key.to_owned(), proposal);
-    write_proposals(&proposals)
+    edit_proposals(|proposals| {
+        proposals.wanted.remove(key);
+        proposals.proposals.insert(key.to_owned(), proposal);
+        Ok(())
+    })
 }
 
 /// Drops the research proposal for model `key`. `false` if there was none.

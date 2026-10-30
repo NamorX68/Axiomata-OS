@@ -44,6 +44,7 @@ pub mod json_state;
 pub mod maintenance;
 pub mod memory;
 pub mod model_catalog;
+pub mod model_research;
 pub mod model_tiers;
 pub mod notes;
 pub mod paths;

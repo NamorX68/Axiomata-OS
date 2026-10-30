@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::Config;
 use axiomata_core::model_tiers::{self, ModelChoice, ModelSources, TierLimits, TierSource};
+use axiomata_core::{model_catalog, model_research};
 use axiomata_roster::Tier;
 use clap::{ArgGroup, Subcommand};
 
@@ -15,6 +16,24 @@ pub enum ModelAction {
         /// Print JSON instead of a table.
         #[arg(long)]
         json: bool,
+        /// Only what tier research is for — switched on, no research proposal, no tier of yours unless you asked
+        /// again — with the price limits (what the `model-tiering` skill reads).
+        #[arg(long)]
+        unrated: bool,
+    },
+    /// Record a research proposal for a model's tier (the `model-tiering` skill's step; never your own value).
+    Propose {
+        /// The model key, as `ide models list --unrated` prints it.
+        key: String,
+        /// light | medium | heavy.
+        #[arg(long)]
+        tier: String,
+        /// One sentence naming the evidence.
+        #[arg(long)]
+        reason: String,
+        /// The web address the evidence comes from.
+        #[arg(long)]
+        source: String,
     },
     /// Switch a model on or off, or set or clear its tier. A flag left out keeps the current value.
     #[command(group(ArgGroup::new("switch").args(["enable", "disable"])))]
@@ -58,10 +77,12 @@ pub enum ModelAction {
 }
 
 impl ModelAction {
-    /// Whether the action only reads — open to an agent's shell as well.
+    /// Whether the action is no owner's decision: it reads, or it records a research proposal (which never becomes
+    /// the owner's value). Open beyond the owner's terminal; `propose` is still closed to an agent session (in [`run`])
+    /// and to a chat turn (`chat_turn_refusal`).
     pub fn reads_only(&self) -> bool {
         match self {
-            ModelAction::List { .. } => true,
+            ModelAction::List { .. } | ModelAction::Propose { .. } => true,
             ModelAction::Set { .. } => false,
             ModelAction::Limits {
                 light_below,
@@ -70,6 +91,15 @@ impl ModelAction {
             ModelAction::Default { engine, clear, .. } => engine.is_none() && !clear,
         }
     }
+}
+
+/// Refuses a tier proposal in an agent session: a studio card session works on its card, and the owner's model list
+/// is none of its business.
+fn not_in_a_session(session: Option<&str>) -> Result<()> {
+    if let Some(own) = session {
+        bail!("{own} does not propose model tiers; the `model-tiering` skill does");
+    }
+    Ok(())
 }
 
 pub fn parse_tier(raw: &str) -> Result<Tier> {
@@ -104,7 +134,43 @@ fn adopt(core: &AxiomataCore, config: Config) {
 
 pub fn run(core: &AxiomataCore, action: ModelAction) -> Result<()> {
     match action {
-        ModelAction::List { json } => {
+        ModelAction::List {
+            json,
+            unrated: true,
+        } => {
+            let todo = model_research::todo(&snapshot(core), &ModelSources::load());
+            if json {
+                println!("{}", serde_json::to_string_pretty(&todo)?);
+                return Ok(());
+            }
+            for model in &todo.models {
+                println!(
+                    "{:<52} {:<16} price tier {}",
+                    model.key,
+                    model
+                        .output_per_m
+                        .map_or_else(|| "no price".to_owned(), |p| format!("out {p} $/M")),
+                    model.price_tier.map_or("-", Tier::as_str),
+                );
+            }
+            Ok(())
+        }
+        ModelAction::Propose {
+            key,
+            tier,
+            reason,
+            source,
+        } => {
+            not_in_a_session(axiomata_core::session::session_actor().as_deref())?;
+            let tier = parse_tier(&tier)?;
+            model_research::propose(&model_catalog::load(), &key, tier, &reason, &source)?;
+            println!("proposed {} for {key}", tier.as_str());
+            Ok(())
+        }
+        ModelAction::List {
+            json,
+            unrated: false,
+        } => {
             let config = snapshot(core);
             let models = model_tiers::models(&config, &ModelSources::load());
             if json {
@@ -204,7 +270,23 @@ mod tests {
 
     #[test]
     fn only_a_change_needs_the_owner() {
-        assert!(ModelAction::List { json: false }.reads_only());
+        assert!(
+            ModelAction::List {
+                json: false,
+                unrated: false
+            }
+            .reads_only()
+        );
+        assert!(
+            ModelAction::Propose {
+                key: "anthropic/x".into(),
+                tier: "light".into(),
+                reason: "r".into(),
+                source: "https://x".into(),
+            }
+            .reads_only(),
+            "a proposal is no owner's decision"
+        );
         let limits = |light_below| ModelAction::Limits {
             light_below,
             heavy_above: None,
@@ -230,5 +312,7 @@ mod tests {
             .reads_only()
         );
         assert!(parse_tier("heavy").is_ok() && parse_tier("Heavy").is_err());
+        assert!(not_in_a_session(Some("agent:allrounder-12")).is_err());
+        assert!(not_in_a_session(None).is_ok());
     }
 }

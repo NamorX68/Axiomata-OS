@@ -83,6 +83,11 @@ pub(crate) const DEFAULT_SKILLS: &[(&str, &str)] = &[
         "vault-tagging",
         include_str!("../../resources/vault-tagging/SKILL.md"),
     ),
+    // The Studio's model tiers: a proposal per switched-on model from rating sites and price (agents-model.md, AM2).
+    (
+        "model-tiering",
+        include_str!("../../resources/model-tiering/SKILL.md"),
+    ),
 ];
 
 /// Writes `content` into `~/.axiomata/skills/<name>/SKILL.md` if it isn't
@@ -350,6 +355,30 @@ mod tests {
                 "{name} failed to parse via list_skills (found: {found:?})"
             );
         }
+        // Tier research (agents-model.md, AM2) is bundled and may only search, fetch, read its todo and propose.
+        let tiering = registry::list_skills()
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == crate::model_research::SKILL)
+            .expect("model-tiering is bundled");
+        let declared: Vec<String> = tiering
+            .allowed_tools
+            .as_deref()
+            .map(|rules| glut::skills::rules_of(rules).unwrap())
+            .unwrap_or_default()
+            .iter()
+            .map(|rule| rule.text().to_owned())
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                "WebSearch",
+                "WebFetch",
+                "Bash(axiomata-cli ide models list --unrated:*)",
+                "Bash(axiomata-cli ide models propose:*)"
+            ],
+            "{declared:?}"
+        );
         // The connector digests promise one JSON object to their dashboard module, and
         // `output: json` is what makes a reply without one get repaired.
         let json_skills: Vec<String> = registry::list_skills()
