@@ -593,6 +593,8 @@ fn render(event: &Event) -> Option<String> {
             "⟲ snapshot before step {turn} · glut undo --run {}",
             plain(run)
         ),
+        // Glut T88: the host OpenRouter names for the model's answers, when it changes.
+        Event::Served { by, .. } => format!("· answers from {}", plain(by)),
         // The readable lines show the whole answer once; its pieces, and the model's thinking, are for a `--json`
         // reader.
         Event::Usage { .. }
