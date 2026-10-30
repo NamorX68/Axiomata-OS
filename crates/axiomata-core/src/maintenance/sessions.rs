@@ -12,6 +12,7 @@
 //!
 //! Anything with work stays, whatever else is true: a clean-up never throws work away.
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{DateTime, TimeDelta, Utc};
@@ -105,6 +106,7 @@ struct Candidate {
 pub(super) fn sweep(
     db: &Mutex<Connection>,
     roots: &ChannelRoots,
+    worktrees: &Path,
     now: DateTime<Utc>,
     dry_run: bool,
 ) -> (Item, Vec<EndedSession>) {
@@ -139,6 +141,15 @@ pub(super) fn sweep(
     let mut ended = Vec::new();
     for candidate in candidates {
         if kept_by_channel(roots, &candidate.agent, now).is_some() {
+            continue;
+        }
+        // Only a worktree where the studio puts them is the clean-up's: a row naming another folder is never acted on.
+        let contained = candidate
+            .checkout
+            .as_ref()
+            .and_then(|checkout| checkout.worktree())
+            .is_none_or(|path| inside(path, worktrees));
+        if !contained {
             continue;
         }
         // Work, or a checkout that cannot be judged, keeps the session.
@@ -184,6 +195,10 @@ fn remove(
     if !still(&lock(db))? {
         return Ok(false);
     }
+    // Its harness may have started again since the sweep looked.
+    if kept_by_channel(roots, &candidate.agent, now).is_some() {
+        return Ok(false);
+    }
     if let Some(checkout) = &candidate.checkout {
         let removed = checkout.remove(false).map_err(|err| err.to_string())?;
         if let Some(reason) = removed.branch_kept {
@@ -202,6 +217,13 @@ fn remove(
         provision::forget_channel(roots, candidate.agent.id).map_err(|err| err.to_string())?;
     }
     Ok(deleted)
+}
+
+/// Whether `path` lies inside `root`, both resolved (a folder that is gone resolves as written).
+fn inside(path: &Path, root: &Path) -> bool {
+    let resolve = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let (path, root) = (resolve(path), resolve(root));
+    path != root && path.starts_with(&root)
 }
 
 /// Every session of every project.

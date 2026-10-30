@@ -295,7 +295,8 @@ pub(crate) fn run(
         worktrees::sweep(&locations.worktrees, &agents, dry_run);
     items.push(worktree_item);
     // After the orphans: a session removed here leaves no orphan behind for the sweep above to find next time.
-    let (session_item, ended_sessions) = sessions::sweep(db, &locations.channels, now, dry_run);
+    let (session_item, ended_sessions) =
+        sessions::sweep(db, &locations.channels, &locations.worktrees, now, dry_run);
     items.push(session_item);
 
     let last_run = if dry_run {

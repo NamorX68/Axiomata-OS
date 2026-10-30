@@ -54,11 +54,16 @@
   const choice = $derived<Favorite | null>(role ? { role: role.name, tier, engine: engineId } : null);
   const favorite = $derived(choice !== null && isFavorite(favorites, choice));
 
+  /** Counts reads, so only the newest answer is shown. */
+  let enginesRead = 0;
+
   async function loadEngines() {
+    const mine = ++enginesRead;
     try {
-      byTier = await listTierEngines();
+      const answer = await listTierEngines();
+      if (mine === enginesRead) byTier = answer;
     } catch (err) {
-      toast(`Could not load the engines: ${messageOf(err)}`, "warning");
+      if (mine === enginesRead) toast(`Could not load the engines: ${messageOf(err)}`, "warning");
     }
   }
 

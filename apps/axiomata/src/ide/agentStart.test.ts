@@ -46,4 +46,16 @@ describe("the sessions the tab lists (Q17)", () => {
     expect(sections.active.map((a) => a.id)).toEqual([9, 1, 4]);
     expect(sections.waiting.map((a) => a.id)).toEqual([2]);
   });
+
+  it("does not count a session without a known state as running", () => {
+    const sections = sessionSections(
+      [agent(1), agent(2)],
+      [],
+      () => false,
+      () => undefined,
+      new Set([2]),
+    );
+    expect(sections.active).toEqual([]);
+    expect(sections.waiting.map((a) => a.id)).toEqual([2]);
+  });
 });

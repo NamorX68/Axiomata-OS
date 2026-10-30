@@ -276,6 +276,8 @@ pub struct AgentCheckout {
     worktree: Option<PathBuf>,
     branch: Option<String>,
     base_branch: Option<String>,
+    /// The commit a detached checkout (a reviewer's, a planner's) was cut from.
+    start_ref: Option<String>,
 }
 
 /// What [`AgentCheckout::remove`] did.
@@ -304,6 +306,7 @@ impl AgentCheckout {
             worktree: agent.worktree_path,
             branch: agent.branch,
             base_branch: agent.base_branch,
+            start_ref: agent.start_ref,
         }))
     }
 
@@ -324,6 +327,18 @@ impl AgentCheckout {
             }
             if worktree::has_uncommitted_changes(path)? {
                 return Ok(true);
+            }
+            // A checkout without a branch (detached, cut from `start_ref`): a commit made in it is reachable from
+            // nothing but its HEAD, so a HEAD that moved off the commit it was cut from is work. Without that commit
+            // it cannot be judged, and counts as work.
+            if self.branch.is_none() {
+                let moved = match (self.start_ref.as_deref(), worktree::head_commit(path)) {
+                    (Some(start), Ok(head)) => head != start,
+                    _ => true,
+                };
+                if moved {
+                    return Ok(true);
+                }
             }
         }
         Ok(self.commits_not_taken_over())
@@ -1318,6 +1333,43 @@ mod tests {
         run_git(&repo, &["branch", "-D", "main"]);
         let unjudged = AgentCheckout {
             base_branch: None,
+            ..checkout.clone()
+        };
+        assert!(unjudged.has_unsaved_work().unwrap());
+    }
+
+    #[test]
+    fn a_commit_in_a_detached_checkout_counts_as_work() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let agent = add_agent(&db, project, "Reviewer");
+        let start = worktree::head_commit(&repo).unwrap();
+        // A reviewer of a card: a detached checkout of the commit it reviews, no branch.
+        db.execute(
+            "UPDATE ide_agents SET card_review = 1, start_ref = ?2 WHERE id = ?1",
+            rusqlite::params![agent, start],
+        )
+        .unwrap();
+        let ready = prepare(&db, &base, agent).unwrap();
+        let checkout = AgentCheckout::read(&db, agent).unwrap().unwrap();
+        assert!(
+            !checkout.has_unsaved_work().unwrap(),
+            "cut from its start, nothing more"
+        );
+
+        std::fs::write(ready.cwd.join("note.txt"), "found something").unwrap();
+        run_git(&ready.cwd, &["add", "."]);
+        run_git(&ready.cwd, &["commit", "-m", "review notes"]);
+        assert!(
+            checkout.has_unsaved_work().unwrap(),
+            "a commit only its HEAD reaches"
+        );
+        assert!(checkout.remove(false).is_err());
+
+        // Without the commit it was cut from, it cannot be judged: work.
+        let unjudged = AgentCheckout {
+            start_ref: None,
             ..checkout.clone()
         };
         assert!(unjudged.has_unsaved_work().unwrap());

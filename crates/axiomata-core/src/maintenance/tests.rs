@@ -650,14 +650,28 @@ fn an_ended_session_without_work_goes_and_every_reason_to_stay_keeps_one() {
         "working",
         "carded",
         "held",
+        "card-done",
+        "planned",
+        "baseless",
+        "reviewed",
+        "outside",
     ];
     let mut ids = std::collections::HashMap::new();
     let mut paths = std::collections::HashMap::new();
     {
         let mut db = lock(&s.db);
         let project = add_project(&db, &repo);
+        let start = ide::worktree::head_commit(&repo).unwrap();
         for name in names {
             let agent = add_agent(&db, project, name);
+            if name == "reviewed" {
+                // A reviewer's detached checkout of the commit it reviews (its card is set below).
+                db.execute(
+                    "UPDATE ide_agents SET card_review = 1, start_ref = ?2 WHERE id = ?1",
+                    params![agent.id, start],
+                )
+                .unwrap();
+            }
             let ready = ide::provision::prepare(&db, &ide_locations, agent.id).unwrap();
             ids.insert(name, agent.id);
             paths.insert(name, ready.cwd);
@@ -689,6 +703,71 @@ fn an_ended_session_without_work_goes_and_every_reason_to_stay_keeps_one() {
         )
         .unwrap();
         ide::agent_store::set_card(&db, ids["carded"], Some(card.id), false, None).unwrap();
+        // A card that is done holds nobody: its worker goes; its reviewer, with a commit of its own, stays.
+        let done_column = board::store::list_columns(&db, board.id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.maps_to_status == board::CardStatus::Done)
+            .unwrap();
+        let finished = board::store::create_card(
+            &db,
+            &board::NewCard {
+                column_id: done_column.id,
+                fields: board::CardFields {
+                    title: "finished".to_owned(),
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+        ide::agent_store::set_card(&db, ids["card-done"], Some(finished.id), false, None).unwrap();
+        ide::agent_store::set_card(&db, ids["reviewed"], Some(finished.id), true, Some(&start))
+            .unwrap();
+        // A plan it was started for still exists.
+        let plan = board::flow::create_plan(
+            &db,
+            board.id,
+            &board::PlanFields {
+                name: "P".to_owned(),
+                goal: String::new(),
+                project_id: None,
+                auto_start_max: None,
+                max_cost_usd: None,
+                max_tokens: None,
+            },
+        )
+        .unwrap();
+        ide::agent_store::set_plan(&db, ids["planned"], Some(plan.id), None).unwrap();
+        // Its base branch is gone: its commits cannot be judged against it.
+        ide::agent_store::set_base_branch(&db, ids["baseless"], Some("gone")).unwrap();
+        // A row naming a clean worktree outside the studio's folder: only the containment keeps it.
+        let elsewhere = s.home.join("elsewhere");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "axiomata/outside-x",
+                elsewhere.to_str().unwrap(),
+            ],
+        );
+        ide::agent_store::set_worktree(
+            &db,
+            ids["outside"],
+            Some(&elsewhere),
+            Some("axiomata/outside-x"),
+        )
+        .unwrap();
+        ide::agent_store::set_base_branch(&db, ids["outside"], Some("main")).unwrap();
+        paths.insert("outside", elsewhere);
+        for name in ["card-done", "planned", "baseless", "reviewed", "outside"] {
+            db.execute(
+                "UPDATE ide_agents SET created_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![ids[name], s.ago(3)],
+            )
+            .unwrap();
+        }
     }
     for name in names {
         set_state(
@@ -707,6 +786,18 @@ fn an_ended_session_without_work_goes_and_every_reason_to_stay_keeps_one() {
     fs::write(paths["committed"].join("done.txt"), "finished").unwrap();
     git(&paths["committed"], &["add", "."]);
     git(&paths["committed"], &["commit", "-m", "work"]);
+    fs::write(paths["baseless"].join("x.txt"), "x").unwrap();
+    git(&paths["baseless"], &["add", "."]);
+    git(
+        &paths["baseless"],
+        &["commit", "-m", "ahead of a base that is gone"],
+    );
+    fs::write(paths["reviewed"].join("notes.txt"), "notes").unwrap();
+    git(&paths["reviewed"], &["add", "."]);
+    git(
+        &paths["reviewed"],
+        &["commit", "-m", "review notes on a detached checkout"],
+    );
     // A process still holds the session lock of "held".
     let _held = ide::presence::hold(&s.channels(), ids["held"])
         .unwrap()
@@ -714,16 +805,23 @@ fn an_ended_session_without_work_goes_and_every_reason_to_stay_keeps_one() {
 
     let settings = MaintenanceSettings::default();
     let dry = s.run(&settings, true);
-    let found: Vec<&str> = dry.ended_sessions.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(found, ["done"], "{:?}", item(&dry, "ended_sessions"));
+    let mut found: Vec<&str> = dry.ended_sessions.iter().map(|e| e.name.as_str()).collect();
+    found.sort_unstable();
+    assert_eq!(
+        found,
+        ["card-done", "done"],
+        "{:?}",
+        item(&dry, "ended_sessions")
+    );
     assert!(paths["done"].exists(), "a dry run removes nothing");
 
     let done = s.run(&settings, false);
     assert!(
+        done.ended_sessions.iter().all(|e| e.removed),
+        "{:?}",
         done.ended_sessions
-            .iter()
-            .all(|e| e.name == "done" && e.removed)
     );
+    assert!(!paths["card-done"].exists(), "a done card holds nobody");
     assert!(!paths["done"].exists(), "its worktree goes");
     let rows = lock(&s.db)
         .query_row(
@@ -743,7 +841,7 @@ fn an_ended_session_without_work_goes_and_every_reason_to_stay_keeps_one() {
         String::from_utf8_lossy(&branches.stdout).trim().is_empty(),
         "and its branch"
     );
-    for kept in names.iter().filter(|n| **n != "done") {
+    for kept in names.iter().filter(|n| !["done", "card-done"].contains(*n)) {
         assert!(paths[kept].exists(), "{kept} stays");
     }
     assert!(

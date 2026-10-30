@@ -154,16 +154,33 @@
 
   /** Counts reads of the work, so a slow answer for an older list never overwrites a newer one. */
   let workRead = 0;
+  /**
+   * The sessions that could be "waiting for you": no pane open, harness ended, idle or never seen. When one joins or
+   * leaves them — a session ends with new work — the work is read again; a change between working and waiting is not.
+   */
+  const settledKey = $derived(
+    agents
+      .filter((a) => {
+        const state = $statuses.byAgent.get(a.id)?.state;
+        return !openAgentIds.has(a.id) || state === "ended" || state === "idle" || state === undefined;
+      })
+      .map((a) => `${a.id}:${$statuses.byAgent.get(a.id)?.state ?? "-"}`)
+      .join(","),
+  );
   $effect(() => {
     const id = projectId;
-    void agents;
+    void settledKey;
     const mine = ++workRead;
     if (id === null) return;
+    const all = agents.map((a) => a.id);
     void agentsWithWork(id)
       .then((ids) => {
         if (mine === workRead) withWork = new Set(ids);
       })
-      .catch(() => {});
+      // Unjudgeable counts as work: every ended session is shown rather than hidden.
+      .catch(() => {
+        if (mine === workRead) withWork = new Set(all);
+      });
   });
 
   /** A favorite's tile: one click starts it — on its engine, or on the tier's default resolved now. */
@@ -348,18 +365,29 @@
                   label={harnessLabel(agent.harness)}
                   title={engineName(agent, engines)}
                 />
-                <span class="who">
-                  <span class="name" title={agent.name}>{sessionTitle(agent)}</span>
-                  {#if sessionSubtitle(agent)}<span class="subname">{sessionSubtitle(agent)}</span>{/if}
-                  <span class="meta">
-                    <RoleChip label={agent.agent_role} kind={roleKinds.get(agent.agent_role)} />
-                    {#if !sessionSubtitle(agent)}<span class="engine">{engineName(agent, engines)}</span>{/if}
+                {#if sessionSubtitle(agent)}
+                  <!-- Named by `agent_lines` (Q8): the title takes the card's width, the subtitle says harness and
+                       model and ends in the state; a role chip and an engine line would only say the same again. -->
+                  <span class="who">
+                    <span class="name" title={agent.name}>{sessionTitle(agent)}</span>
+                    <span class="subname">
+                      <span class="subtext">{sessionSubtitle(agent)}</span>
+                      <span class="state small"><StatusDot view={card.status} /> {card.status.label}</span>
+                    </span>
                   </span>
-                </span>
-                <span class="state">
-                  <StatusDot view={card.status} />
-                  {card.status.label}
-                </span>
+                {:else}
+                  <span class="who">
+                    <span class="name">{agent.name}</span>
+                    <span class="meta">
+                      <RoleChip label={agent.agent_role} kind={roleKinds.get(agent.agent_role)} />
+                      <span class="engine">{engineName(agent, engines)}</span>
+                    </span>
+                  </span>
+                  <span class="state">
+                    <StatusDot view={card.status} />
+                    {card.status.label}
+                  </span>
+                {/if}
               </span>
               {#if agent.branch}
                 <!-- Where the work sits: the branch checked out in this agent's worktree. -->
@@ -719,9 +747,22 @@
   }
 
   .subname {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    min-width: 0;
+  }
+
+  .subtext {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .state.small {
+    flex: 0 0 auto;
   }
 
   .state {
