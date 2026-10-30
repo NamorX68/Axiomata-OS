@@ -5,7 +5,8 @@
  */
 
 import type { Harness, IdeAgent } from "../core/backend";
-import { MAX_IDENT_LEN, type EngineEntry } from "../core/roster";
+import { MAX_IDENT_LEN, type Billing, type EngineEntry, type Tier } from "../core/roster";
+import { tAgents } from "../i18n/agents";
 
 /**
  * A free text as an id (`isSlug`'s shape): lower case, accents taken off, every run of other characters one `-`,
@@ -45,7 +46,8 @@ export function engineIdFor(
   model: string | null,
   taken: readonly string[],
 ): string {
-  const base = slugify(label) || slugify(`${harness}-${modelShort(model)}`) || "engine";
+  // The id is data: built from the model's own name, or the fixed English words, never the shown language.
+  const base = slugify(label) || slugify(`${harness}-${modelId(model) || "default model"}`) || "engine";
   return uniqueSlug(base, taken);
 }
 
@@ -67,8 +69,12 @@ export function harnessBadge(harness: Harness | string): string {
 
 /** A model id without the provider path: `openrouter/deepseek/deepseek-v4.1-flash` → `deepseek-v4.1-flash`. */
 export function modelShort(model: string | null | undefined): string {
+  return modelId(model) || tAgents("defaultModel");
+}
+
+/** The last part of a model id, or empty when there is none. */
+function modelId(model: string | null | undefined): string {
   const text = (model ?? "").trim().replace(/\/+$/, "");
-  if (!text) return "default model";
   return text.slice(text.lastIndexOf("/") + 1);
 }
 
@@ -103,4 +109,18 @@ export function roleBadge(name: string): string {
 export function roleTitle(name: string): string {
   const text = name.replace(/[-_]+/g, " ").trim();
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : name;
+}
+
+/** What a tier is for, in the current language (`TIERS` in `core/roster.ts` keeps the names, which stay English). */
+export function tierHint(tier: Tier): string {
+  if (tier === "light") return tAgents("tierHintLight");
+  if (tier === "heavy") return tAgents("tierHintHeavy");
+  return tAgents("tierHintMedium");
+}
+
+/** A way of billing as a select names it, with what its limits are counted in. */
+export function billingText(billing: Billing): { label: string; hint: string } {
+  return billing === "subscription"
+    ? { label: tAgents("billingSubscription"), hint: tAgents("billingSubscriptionHint") }
+    : { label: tAgents("billingMetered"), hint: tAgents("billingMeteredHint") };
 }

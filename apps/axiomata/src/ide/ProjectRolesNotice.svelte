@@ -10,8 +10,10 @@
 -->
 <script lang="ts">
   import { messageOf } from "../core/errors";
+  import { formatNumber, formatUsd } from "../core/format";
   import { confirmProjectRoles, projectRoles, type Limits, type ProjectRoles, type Role } from "../core/roster";
   import { toast } from "../core/toast";
+  import { tAgents as t } from "../i18n/agents";
   import Notice from "../ui/Notice.svelte";
 
   let { projectId }: { projectId: number | null } = $props();
@@ -33,7 +35,7 @@
     } catch (err) {
       if (mine !== latest) return;
       found = null;
-      toast(`Project roles: ${messageOf(err)}`, "warning");
+      toast(t("projectRolesError", { error: messageOf(err) }), "warning");
     }
   }
 
@@ -56,9 +58,9 @@
 
   const limitsText = (limits: Limits): string =>
     [
-      limits.max_cost_usd != null ? `$${limits.max_cost_usd}` : "",
-      limits.max_tokens != null ? `${limits.max_tokens} tokens` : "",
-      limits.max_steps != null ? `${limits.max_steps} steps` : "",
+      limits.max_cost_usd != null ? formatUsd(limits.max_cost_usd, 2, 0) : "",
+      limits.max_tokens != null ? t("limitTokens", { n: formatNumber(limits.max_tokens) }) : "",
+      limits.max_steps != null ? t("limitSteps", { n: formatNumber(limits.max_steps) }) : "",
     ]
       .filter(Boolean)
       .join(", ");
@@ -70,21 +72,21 @@
   /** One line per field that takes effect, so nothing the hash covers is hidden from the review. */
   const facts = (role: Role): string[] =>
     [
-      role.description ? `description: ${role.description}` : "",
-      `kind: ${role.kind}, tier: ${role.tier}`,
-      namesEngine(role) ? `names an engine (${engineNames(role)}) — ignored: the engine of the tier runs` : "",
-      role.creates.length > 0 ? `creates cards without asking: ${role.creates.join(", ")}` : "",
-      role.permissions.length > 0
-        ? `rights, granted without asking in sessions started for a card: ${role.permissions.join("; ")}`
-        : "",
-      limitsText(role.limits) ? `limits: ${limitsText(role.limits)}` : "limits: none of its own",
+      role.description ? t("factDescription", { text: role.description }) : "",
+      t("factKindTier", { kind: role.kind, tier: role.tier }),
+      namesEngine(role) ? t("factNamesEngine", { engines: engineNames(role) }) : "",
+      role.creates.length > 0 ? t("factCreates", { kinds: role.creates.join(", ") }) : "",
+      role.permissions.length > 0 ? t("factRights", { rights: role.permissions.join("; ") }) : "",
+      limitsText(role.limits) ? t("factLimits", { limits: limitsText(role.limits) }) : t("factNoLimits"),
     ].filter(Boolean);
 </script>
 
 {#if found?.overrides.present}
   {#if found.confirmed}
     <p class="applied">
-      Roles from this project apply (confirmed): {found.overrides.roles.map((r) => r.name).join(", ") || "none that could be read"}.
+      {t("projectRolesApply", {
+        roles: found.overrides.roles.map((r) => r.name).join(", ") || t("noneReadable"),
+      })}
     </p>
   {:else}
     {#snippet review()}
@@ -98,44 +100,40 @@
         {/each}
       </ul>
       <div class="actions">
-        <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these roles</button>
-        <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
+        <button type="button" class="ax-btn primary" onclick={() => void allow()}>{t("allowRoles")}</button>
+        <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>{t("cancel")}</button>
       </div>
     {/snippet}
     <div class="slot">
       <Notice
-        title="Project roles need your review"
+        title={t("projectRolesReview")}
         alert
         children={reviewing && !found.overrides.blocked ? review : undefined}
       >
         {#snippet details()}
-          <p>
-            This project has its own agent roles in <code>.axiomata/agents/</code>. Their instructions are what an
-            agent will obey — and the rights they list are granted without asking in a session started for a card,
-            where nobody watches each step — so they stay off until you have read them.
-          </p>
+          <p>{t("projectRolesBefore")} <code>{".axiomata/agents/"}</code>. {t("projectRolesAfter")}</p>
         {/snippet}
         {#snippet action()}
           {#if !found?.overrides.blocked && !reviewing}
-            <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
+            <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>{t("review")}</button>
           {/if}
         {/snippet}
       </Notice>
       <!-- What is wrong with them stays in sight, not folded away: it changes what "Allow" would mean. -->
       {#if found.overrides.blocked}
-        <p class="problem">They cannot be confirmed: {found.overrides.blocked}.</p>
+        <p class="problem">{t("cannotConfirm", { reason: found.overrides.blocked })}</p>
       {/if}
       {#each found.overrides.skipped as s (s.name)}
-        <p class="problem">Skipped <code>{s.name}</code>: {s.reason}</p>
+        <p class="problem">{t("skippedNamed")} <code>{s.name}</code>: {s.reason}</p>
       {/each}
       {#if found.replaces.length > 0}
-        <p class="problem">Replaces your own role{found.replaces.length === 1 ? "" : "s"}: {found.replaces.join(", ")}.</p>
+        <p class="problem">
+          {t("replacesYours", { n: found.replaces.length, names: found.replaces.join(", ") })}
+        </p>
       {/if}
       {#if found.overrides.roles.some(namesEngine)}
-        <p class="hint">
-          {found.overrides.roles.filter(namesEngine).map((r) => r.name).join(", ")} name{found.overrides.roles.filter(namesEngine).length === 1 ? "s" : ""}
-          an engine. A role chooses no engine any more, so it is ignored: the engine of the role's tier runs.
-        </p>
+        {@const naming = found.overrides.roles.filter(namesEngine)}
+        <p class="hint">{t("namesEngine", { n: naming.length, names: naming.map((r) => r.name).join(", ") })}</p>
       {/if}
     </div>
   {/if}

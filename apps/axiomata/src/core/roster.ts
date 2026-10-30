@@ -7,6 +7,7 @@
  * `axiomata-roster`.
  */
 
+import { tAgents } from "../i18n/agents";
 import { invokeBackend as invoke, type Harness } from "./backend";
 
 export type Billing = "metered" | "subscription";
@@ -121,15 +122,50 @@ export const confirmProjectRoles = (projectId: number, hash: string): Promise<vo
 
 // ---- Pure helpers for the forms ----
 
-export const TIERS: { id: Tier; label: string; hint: string }[] = [
-  { id: "light", label: "Light", hint: "Small, well-specified changes" },
-  { id: "medium", label: "Medium", hint: "The normal case" },
-  { id: "heavy", label: "Heavy", hint: "Large or delicate changes; where escalation ends" },
+// The hints are getters: read where they are drawn, they follow a language switch; the labels are names (i18n.md Q13).
+export const TIERS: { id: Tier; label: string; readonly hint: string }[] = [
+  {
+    id: "light",
+    label: "Light",
+    get hint() {
+      return tAgents("tierHintLight");
+    },
+  },
+  {
+    id: "medium",
+    label: "Medium",
+    get hint() {
+      return tAgents("tierHintMedium");
+    },
+  },
+  {
+    id: "heavy",
+    label: "Heavy",
+    get hint() {
+      return tAgents("tierHintHeavy");
+    },
+  },
 ];
 
-export const BILLINGS: { id: Billing; label: string; hint: string }[] = [
-  { id: "metered", label: "Per token", hint: "Limits in dollars" },
-  { id: "subscription", label: "Subscription", hint: "Limits in tokens (Claude Code on the account)" },
+export const BILLINGS: { id: Billing; readonly label: string; readonly hint: string }[] = [
+  {
+    id: "metered",
+    get label() {
+      return tAgents("billingMetered");
+    },
+    get hint() {
+      return tAgents("billingMeteredHint");
+    },
+  },
+  {
+    id: "subscription",
+    get label() {
+      return tAgents("billingSubscription");
+    },
+    get hint() {
+      return tAgents("billingSubscriptionHint");
+    },
+  },
 ];
 
 /** The longest id the Rust side accepts. */
@@ -175,14 +211,14 @@ const fail = (field: string, message: string): FormResult<never> => ({ ok: false
 /** Trims an engine form and checks what can be checked without the catalog. */
 export function checkEngine(form: Engine): FormResult<Engine> {
   const id = form.id.trim();
-  if (!isSlug(id)) return fail("id", "ID: lower-case letters and digits, with - or _ between them (up to 48 characters).");
+  if (!isSlug(id)) return fail("id", tAgents("checkId"));
   const label = form.label.trim();
-  if (!label) return fail("label", "Label must not be empty.");
-  if ([...label].length > 80) return fail("label", "Label: up to 80 characters.");
+  if (!label) return fail("label", tAgents("checkLabelEmpty"));
+  if ([...label].length > 80) return fail("label", tAgents("checkLabelLong"));
   for (const line of form.env.split("\n").filter((l) => l.trim())) {
     const key = line.split("=")[0]?.trim() ?? "";
     if (!line.includes("=") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      return fail("env", `Environment: “${line.trim()}” is not KEY=value.`);
+      return fail("env", tAgents("checkEnv", { line: line.trim() }));
     }
   }
   const model = form.model?.trim() ? form.model.trim() : null;
@@ -256,33 +292,33 @@ function parseLimit(text: string, integer: boolean): number | null | undefined {
  */
 export function checkRoleForm(form: RoleForm, engines: string[] | null): FormResult<Role> {
   const name = form.name.trim();
-  if (!isSlug(name)) return fail("name", "Name: lower-case letters and digits, with - or _ between them (up to 48 characters).");
+  if (!isSlug(name)) return fail("name", tAgents("checkName"));
   const kind = form.kind.trim();
-  if (!isSlug(kind)) return fail("kind", "Kind: one lower-case word, e.g. implement, review, plan.");
+  if (!isSlug(kind)) return fail("kind", tAgents("checkKind"));
   const description = form.description.trim();
   if (description.includes("\n") || description.length > 200) {
-    return fail("description", "Description: one line, up to 200 characters.");
+    return fail("description", tAgents("checkDescription"));
   }
   const engine = form.engine.trim();
   const fallback = splitList(form.fallback);
   // Without a list of engines the form does not show the engine fields: they go back as the file had them.
   if (engines !== null) {
     const known = new Set(engines);
-    if (engine && !known.has(engine)) return fail("engine", `There is no engine “${engine}”.`);
+    if (engine && !known.has(engine)) return fail("engine", tAgents("checkNoEngine", { id: engine }));
     for (const id of fallback) {
-      if (!known.has(id)) return fail("fallback", `There is no engine “${id}”.`);
-      if (id === engine) return fail("fallback", `“${id}” is already the default engine.`);
+      if (!known.has(id)) return fail("fallback", tAgents("checkNoEngine", { id }));
+      if (id === engine) return fail("fallback", tAgents("checkFallbackIsDefault", { id }));
     }
   }
   const creates = splitList(form.creates);
   const badKind = creates.find((k) => !isSlug(k));
-  if (badKind) return fail("creates", `Card kind “${badKind}”: one lower-case word.`);
+  if (badKind) return fail("creates", tAgents("checkCardKind", { kind: badKind }));
   const cost = parseLimit(form.maxCost, false);
-  if (cost === undefined) return fail("maxCost", "Cost limit: a positive number or empty.");
+  if (cost === undefined) return fail("maxCost", tAgents("checkCost"));
   const tokens = parseLimit(form.maxTokens, true);
-  if (tokens === undefined) return fail("maxTokens", "Token limit: a positive whole number or empty.");
+  if (tokens === undefined) return fail("maxTokens", tAgents("checkTokens"));
   const steps = parseLimit(form.maxSteps, true);
-  if (steps === undefined) return fail("maxSteps", "Step limit: a positive whole number or empty.");
+  if (steps === undefined) return fail("maxSteps", tAgents("checkSteps"));
   return {
     ok: true,
     value: {

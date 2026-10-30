@@ -11,8 +11,10 @@
   import { untrack } from "svelte";
 
   import { messageOf } from "../core/errors";
+  import { formatNumber } from "../core/format";
   import { DiffModel } from "../editor/diff/model";
   import type { DiffLayout } from "../editor/diff/view";
+  import { tEditor } from "../i18n/editor";
   import IconButton from "../ui/IconButton.svelte";
   import DiffPanes from "./DiffPanes.svelte";
   import { gitApi, loadGitDiff, type GitEntry, type LoadedGitDiff, type Side } from "./gitBackend";
@@ -111,7 +113,7 @@
     run(async () => {
       const header = hunks[index]?.header;
       if (header === undefined || side !== "unstaged") return;
-      if (!confirm("Throw this change away? It is not saved anywhere and cannot be brought back.")) return;
+      if (!confirm(tEditor("discardHunkConfirm"))) return;
       await gitApi.discardHunk(root, entry.path, index, header);
     });
 
@@ -119,30 +121,35 @@
     run(() => (side === "staged" ? gitApi.unstage(root, [entry.path, ...(entry.old_path ? [entry.old_path] : [])]) : gitApi.stage(root, [entry.path])));
 </script>
 
-<section class="git-diff" class:plate aria-label="Change of {entry.path}">
+<section class="git-diff" class:plate aria-label={tEditor("changeOf", { path: entry.path })}>
   <header>
     <span class="title" title={entry.path}>{entry.path}</span>
-    <span class="side">{side === "staged" ? "Staged" : "Changes"}</span>
+    <span class="side">{side === "staged" ? tEditor("gitStaged") : tEditor("gitChanges")}</span>
     <span class="grow"></span>
     <button type="button" class="ax-btn" disabled={busy} onclick={() => void wholeFile()}>
-      {side === "staged" ? "Unstage file" : "Stage file"}
+      {side === "staged" ? tEditor("unstageFile") : tEditor("stageFile")}
     </button>
     <IconButton
       icon={layout === "unified" ? "columns-2" : "rows-2"}
-      label={layout === "unified" ? "Show both sides next to each other" : "Show one column"}
+      label={layout === "unified" ? tEditor("showSplit") : tEditor("showUnified")}
       size="sm"
       onclick={() => (layout = layout === "unified" ? "split" : "unified")}
     />
-    <IconButton icon="x" label="Close the change" size="sm" onclick={onClose} />
+    <IconButton icon="x" label={tEditor("closeChange")} size="sm" onclick={onClose} />
   </header>
   {#if error}<p class="problem" role="alert">{error}</p>{/if}
   {#if loaded && model}
     {#if loaded.diff.binary}
-      <p class="note">Binary file — {loaded.diff.old_size ?? 0} → {loaded.diff.new_size ?? 0} bytes.</p>
+      <p class="note">
+        {tEditor("binaryFile", {
+          old: formatNumber(loaded.diff.old_size ?? 0),
+          new: formatNumber(loaded.diff.new_size ?? 0),
+        })}
+      </p>
     {:else if loaded.diff.truncated && hunks.length === 0}
-      <p class="note">This file is too large to show as a diff.</p>
+      <p class="note">{tEditor("tooLargeForDiff")}</p>
     {:else if hunks.length === 0}
-      <p class="note">{side === "staged" ? "Nothing staged for this file." : "No unstaged changes in this file."}</p>
+      <p class="note">{side === "staged" ? tEditor("nothingStagedFile") : tEditor("noUnstagedFile")}</p>
     {:else}
       <div class="panes">
         <DiffPanes
@@ -160,7 +167,7 @@
       </div>
     {/if}
   {:else if !error}
-    <p class="note">Reading the change…</p>
+    <p class="note">{tEditor("readingChange")}</p>
   {/if}
 </section>
 

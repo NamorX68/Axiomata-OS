@@ -9,6 +9,7 @@
 <script lang="ts">
   import ModelsSection from "../ModelsSection.svelte";
   import RolesSection from "../RolesSection.svelte";
+  import { tAgents as t } from "../../i18n/agents";
 
   type Part = "models" | "roles";
 
@@ -19,7 +20,7 @@
 
 <div class="roster">
   <header>
-    <div class="switch" role="tablist" aria-label="Models or roles">
+    <div class="switch" role="tablist" aria-label={t("modelsOrRoles")}>
       <button
         type="button"
         role="tab"
@@ -29,7 +30,7 @@
         aria-selected={part === "models"}
         onclick={() => (part = "models")}
       >
-        Models
+        {t("models")}
       </button>
       <button
         type="button"
@@ -40,13 +41,13 @@
         aria-selected={part === "roles"}
         onclick={() => (part = "roles")}
       >
-        Roles
+        {t("roles")}
       </button>
     </div>
     <p class="chain">
-      <strong>Model</strong> = what thinks, at a tier (light · medium · heavy), on the harness that runs it ·
-      <strong>Role</strong> = what it is for (instructions, rights, limits, a default tier) · <strong>Agent</strong> =
-      a role at a tier on an engine, started as a session with its own branch.
+      <strong>{t("chainModel")}</strong> {t("chainModelText")}
+      <strong>{t("chainRole")}</strong> {t("chainRoleText")}
+      <strong>{t("chainAgent")}</strong> {t("chainAgentText")}
     </p>
   </header>
   <div class="part" class:off={part !== "models"} role="tabpanel" id="{uid}-panel-models" aria-labelledby="{uid}-tab-models">

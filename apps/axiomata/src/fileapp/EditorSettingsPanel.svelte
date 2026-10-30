@@ -27,6 +27,7 @@
   import { EDITOR_THEMES, FOLLOW_APP_THEME } from "../core/editorThemes";
   import { FILE_ICON_STYLE_NAMES, FILE_ICON_STYLES, type FileIconStyle } from "../core/fileIcons";
   import type { SurfaceSettings } from "./surfaceSettings";
+  import { tEditor } from "../i18n/editor";
 
   interface Props {
     /** The surface settings the editor uses right now (font already loaded). */
@@ -76,33 +77,43 @@
   /** The chosen family is not on this Mac (any more): the editor draws the default. */
   const missing = $derived(drawnFamily(s.fontFamily, $installedFonts.loaded) !== s.fontFamily);
 
-  const CURSOR: { value: CursorAnimation; label: string }[] = [
-    { value: "strong", label: "Strong (smear, longer on long jumps)" },
-    { value: "subtle", label: "Subtle" },
-    { value: "off", label: "Off" },
+  const CURSOR: { value: CursorAnimation; label: () => string }[] = [
+    { value: "strong", label: () => tEditor("cursorStrong") },
+    { value: "subtle", label: () => tEditor("cursorSubtle") },
+    { value: "off", label: () => tEditor("off") },
   ];
 
   /** The on/off effects of G7, each its own switch. */
-  const EFFECT_SWITCHES: { key: keyof EditorSettings; label: string }[] = [
-    { key: "smoothScroll", label: "Smooth scrolling" },
-    { key: "currentLine", label: "Highlight current line" },
-    { key: "indentGuides", label: "Indentation guides" },
-    { key: "bracketColors", label: "Coloured bracket pairs" },
-    { key: "glow", label: "Accent glow" },
-    { key: "foldAnimation", label: "Animated folding" },
-    { key: "minimap", label: "Minimap" },
-    { key: "stickyScroll", label: "Sticky scroll" },
-    { key: "diagnosticsInline", label: "Problem message at line end" },
+  const EFFECT_SWITCHES: { key: keyof EditorSettings; label: () => string }[] = [
+    { key: "smoothScroll", label: () => tEditor("smoothScroll") },
+    { key: "currentLine", label: () => tEditor("currentLine") },
+    { key: "indentGuides", label: () => tEditor("indentGuides") },
+    { key: "bracketColors", label: () => tEditor("bracketColors") },
+    { key: "glow", label: () => tEditor("accentGlow") },
+    { key: "foldAnimation", label: () => tEditor("foldAnimation") },
+    { key: "minimap", label: () => tEditor("minimap") },
+    { key: "stickyScroll", label: () => tEditor("stickyScroll") },
+    { key: "diagnosticsInline", label: () => tEditor("diagnosticsInline") },
   ];
 
-  const AUTOSAVE: { value: Autosave; label: string }[] = [
-    { value: "off", label: "Off" },
-    { value: "delay", label: "After 1 s pause" },
-    { value: "leave", label: "When leaving the editor" },
+  const AUTOSAVE: { value: Autosave; label: () => string }[] = [
+    { value: "off", label: () => tEditor("off") },
+    { value: "delay", label: () => tEditor("autosaveDelay") },
+    { value: "leave", label: () => tEditor("autosaveLeave") },
   ];
+
+  /** The line-number styles, as the radio buttons name them. */
+  const LINE_NUMBERS = { absolute: "lineAbsolute", relative: "lineRelative", hybrid: "lineHybrid" } as const;
+
+  /** A file-icon style's name: the sets keep theirs (Q13), the two plain choices are words. */
+  function iconStyleName(style: FileIconStyle): string {
+    if (style === "mono") return tEditor("iconsMono");
+    if (style === "none") return tEditor("iconsNone");
+    return FILE_ICON_STYLE_NAMES[style];
+  }
 </script>
 
-<div class="panel" aria-label="Editor settings">
+<div class="panel" aria-label={tEditor("editorSettings")}>
 
   <div class="preview">
     <EditorSurface
@@ -116,59 +127,59 @@
 
   <div class="fields">
     <label>
-      <span>Keys</span>
+      <span>{tEditor("keys")}</span>
       <select
         value={s.mode}
         onchange={(e) => updateEditorSettings({ mode: e.currentTarget.value as "normal" | "vi" })}
       >
-        <option value="normal">Normal (Mac)</option>
-        <option value="vi">Vi</option>
+        <option value="normal">{tEditor("keysNormal")}</option>
+        <option value="vi">{"Vi"}</option>
       </select>
     </label>
 
     {#if s.mode === "vi"}
       <label>
-        <span>Vi clipboard</span>
+        <span>{tEditor("viClipboard")}</span>
         <select
           value={s.viClipboard}
           onchange={(e) => updateEditorSettings({ viClipboard: e.currentTarget.value as "shared" | "separate" })}
         >
-          <option value="shared">{keyHints("Shared with the system (y and p use ⌘C/⌘V's clipboard)", $platform)}</option>
-          <option value="separate">Separate ("+y and "+p reach the Mac)</option>
+          <option value="shared">{keyHints(tEditor("viClipboardShared"), $platform)}</option>
+          <option value="separate">{tEditor("viClipboardSeparate")}</option>
         </select>
       </label>
     {/if}
 
     <label>
-      <span>Font</span>
+      <span>{tEditor("font")}</span>
       <select value={s.fontFamily} onchange={(e) => updateEditorSettings({ fontFamily: e.currentTarget.value })}>
-        <optgroup label="Bundled">
+        <optgroup label={tEditor("fontsBundled")}>
           {#each EDITOR_FONTS as font (font.family)}
             <option value={font.family}>{font.family}</option>
           {/each}
         </optgroup>
         {#if installedChoices.length > 0}
-          <optgroup label="Installed on this Mac">
+          <optgroup label={tEditor("fontsInstalled")}>
             {#each installedChoices as font (font.family)}
               <option value={font.family}>{font.family}</option>
             {/each}
           </optgroup>
         {/if}
         {#if missing}
-          <option value={s.fontFamily}>{s.fontFamily} (not installed)</option>
+          <option value={s.fontFamily}>{tEditor("fontNotInstalled", { font: s.fontFamily })}</option>
         {/if}
       </select>
     </label>
     <label class="check">
       <input type="checkbox" bind:checked={monospaceOnly} />
-      <span>Only monospaced fonts</span>
+      <span>{tEditor("monospaceOnly")}</span>
     </label>
     {#if missing}
-      <p class="note">{s.fontFamily} is not installed on this Mac — the editor shows {DEFAULT_FONT_FAMILY}.</p>
+      <p class="note">{tEditor("fontMissing", { font: s.fontFamily, fallback: DEFAULT_FONT_FAMILY })}</p>
     {/if}
 
     <label>
-      <span>Weight</span>
+      <span>{tEditor("weight")}</span>
       <input
         type="range"
         min="100"
@@ -181,13 +192,17 @@
     </label>
     {#if shownWeight !== s.fontWeight}
       <p class="note">
-        {s.fontFamily} has no {weightName(s.fontWeight).split(" ")[0]} — shows {weightName(shownWeight)}. It has
-        {weights.map((w) => weightName(w).split(" ")[0]).join(", ")}.
+        {tEditor("weightMissing", {
+          font: s.fontFamily,
+          weight: weightName(s.fontWeight).split(" ")[0],
+          shown: weightName(shownWeight),
+          weights: weights.map((w) => weightName(w).split(" ")[0]).join(", "),
+        })}
       </p>
     {/if}
 
     <label>
-      <span>Size</span>
+      <span>{tEditor("size")}</span>
       <input
         type="number"
         min="9"
@@ -195,11 +210,11 @@
         value={s.fontSize}
         onchange={(e) => updateEditorSettings({ fontSize: Number(e.currentTarget.value) })}
       />
-      <output>px</output>
+      <output>{"px"}</output>
     </label>
 
     <label>
-      <span>Line height</span>
+      <span>{tEditor("lineHeight")}</span>
       <input
         type="range"
         min="1"
@@ -217,11 +232,11 @@
         checked={s.ligatures}
         onchange={(e) => updateEditorSettings({ ligatures: e.currentTarget.checked })}
       />
-      <span>Ligatures</span>
+      <span>{tEditor("ligatures")}</span>
     </label>
 
     <fieldset>
-      <legend>Line numbers</legend>
+      <legend>{tEditor("lineNumbers")}</legend>
       {#each ["absolute", "relative", "hybrid"] as const as mode (mode)}
         <label class="check">
           <input
@@ -230,20 +245,20 @@
             checked={s.lineNumbers === mode}
             onchange={() => updateEditorSettings({ lineNumbers: mode })}
           />
-          <span>{mode[0].toUpperCase() + mode.slice(1)}</span>
+          <span>{tEditor(LINE_NUMBERS[mode])}</span>
         </label>
       {/each}
     </fieldset>
 
     <fieldset>
-      <legend>{keyHints("Soft wrap (⌥Z toggles per file)", $platform)}</legend>
+      <legend>{keyHints(tEditor("softWrap"), $platform)}</legend>
       <label class="check">
         <input
           type="checkbox"
           checked={s.wrapProse}
           onchange={(e) => updateEditorSettings({ wrapProse: e.currentTarget.checked })}
         />
-        <span>Prose (.md, .txt)</span>
+        <span>{tEditor("wrapProse")}</span>
       </label>
       <label class="check">
         <input
@@ -251,18 +266,18 @@
           checked={s.wrapCode}
           onchange={(e) => updateEditorSettings({ wrapCode: e.currentTarget.checked })}
         />
-        <span>Code</span>
+        <span>{tEditor("wrapCode")}</span>
       </label>
     </fieldset>
 
     <label>
-      <span>Indent</span>
+      <span>{tEditor("indent")}</span>
       <select
         value={s.indentKind}
         onchange={(e) => updateEditorSettings({ indentKind: e.currentTarget.value as "spaces" | "tabs" })}
       >
-        <option value="spaces">Spaces</option>
-        <option value="tabs">Tabs</option>
+        <option value="spaces">{tEditor("spaces")}</option>
+        <option value="tabs">{tEditor("tabs")}</option>
       </select>
       {#if s.indentKind === "spaces"}
         <input
@@ -274,10 +289,10 @@
         />
       {/if}
     </label>
-    <p class="note">Used only when a file shows no indentation of its own.</p>
+    <p class="note">{tEditor("indentNote")}</p>
 
     <label>
-      <span>Tab width</span>
+      <span>{tEditor("tabWidth")}</span>
       <input
         type="number"
         min="1"
@@ -288,35 +303,35 @@
     </label>
 
     <fieldset>
-      <legend>Effects</legend>
+      <legend>{tEditor("effects")}</legend>
       <label>
-        <span>Cursor</span>
+        <span>{tEditor("cursor")}</span>
         <select
           value={s.cursorAnimation}
           onchange={(e) => updateEditorSettings({ cursorAnimation: e.currentTarget.value as CursorAnimation })}
         >
           {#each CURSOR as option (option.value)}
-            <option value={option.value}>{option.label}</option>
+            <option value={option.value}>{option.label()}</option>
           {/each}
         </select>
       </label>
       <label>
-        <span>Editor theme</span>
+        <span>{tEditor("editorTheme")}</span>
         <select value={s.editorTheme} onchange={(e) => updateEditorSettings({ editorTheme: e.currentTarget.value })}>
-          <option value={FOLLOW_APP_THEME}>Follow the app theme</option>
+          <option value={FOLLOW_APP_THEME}>{tEditor("followAppTheme")}</option>
           {#each EDITOR_THEMES as theme (theme.id)}
-            <option value={theme.id}>{theme.label}{theme.light ? " (light)" : ""}</option>
+            <option value={theme.id}>{theme.light ? tEditor("themeLight", { name: theme.label }) : theme.label}</option>
           {/each}
         </select>
       </label>
       <label>
-        <span>File icons</span>
+        <span>{tEditor("fileIcons")}</span>
         <select
           value={s.fileIcons}
           onchange={(e) => updateEditorSettings({ fileIcons: e.currentTarget.value as FileIconStyle })}
         >
           {#each FILE_ICON_STYLES as style (style)}
-            <option value={style}>{FILE_ICON_STYLE_NAMES[style]}</option>
+            <option value={style}>{iconStyleName(style)}</option>
           {/each}
         </select>
       </label>
@@ -327,24 +342,24 @@
             checked={s[effect.key] === true}
             onchange={(e) => updateEditorSettings({ [effect.key]: e.currentTarget.checked })}
           />
-          <span>{effect.label}</span>
+          <span>{effect.label()}</span>
         </label>
       {/each}
     </fieldset>
-    <p class="note">With macOS "Reduce motion" on, the cursor does not glide and nothing scrolls smoothly.</p>
+    <p class="note">{tEditor("reduceMotionNote")}</p>
 
     <label>
-      <span>Autosave</span>
+      <span>{tEditor("autosave")}</span>
       <select
         value={s.autosave}
         onchange={(e) => updateEditorSettings({ autosave: e.currentTarget.value as Autosave })}
       >
         {#each AUTOSAVE as option (option.value)}
-          <option value={option.value}>{option.label}</option>
+          <option value={option.value}>{option.label()}</option>
         {/each}
       </select>
     </label>
-    <p class="note">Autosave never overwrites a change made on disk; it stops and asks instead.</p>
+    <p class="note">{tEditor("autosaveNote")}</p>
 
     <label class="check">
       <input
@@ -352,14 +367,16 @@
         checked={s.formatOnSave}
         onchange={(e) => updateEditorSettings({ formatOnSave: e.currentTarget.checked })}
       />
-      <span>{keyHints("Format on save (⌘S,", $platform)} <code>:w</code>)</span>
+      <span
+        >{keyHints(tEditor("formatOnSaveBefore"), $platform)} <code>{":w"}</code>{tEditor("formatOnSaveAfter")}</span
+      >
     </label>
     {#if s.formatOnSave}
       <label>
-        <span>Except</span>
+        <span>{tEditor("except")}</span>
         <input
           type="text"
-          placeholder="e.g. markdown, python"
+          placeholder={tEditor("exceptPlaceholder")}
           spellcheck="false"
           value={s.formatOnSaveExcept.join(", ")}
           onchange={(e) => updateEditorSettings({ formatOnSaveExcept: languageList(e.currentTarget.value.split(",")) })}

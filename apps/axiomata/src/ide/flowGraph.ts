@@ -4,6 +4,7 @@
  * plan has tens of cards and its edges point one way, so a layered layout with a barycentre pass is all it takes.
  */
 import type { BoardCard, TaskState } from "../core/backend";
+import { tFlow } from "../i18n/flow";
 
 export const NODE_W = 300;
 /** A tile: a head (number, kind, live dot), up to two lines of title, a foot (role, state). */
@@ -226,20 +227,22 @@ export function endOf(
   cards: Pick<BoardCard, "state">[],
   planStatus: "draft" | "approved" | "closed",
 ): { tone: Tone; label: string } {
-  if (planStatus === "closed") return { tone: "done", label: "closed" };
+  if (planStatus === "closed") return { tone: "done", label: tFlow("endClosed") };
   const counting = cards.filter((card) => card.state !== "canceled");
   const allIn =
     counting.length > 0 && counting.every((card) => card.state === "integrated" || card.state === "taken_over");
-  if (allIn) return { tone: "done", label: "ready to take over" };
-  if (counting.some((card) => card.state === "failed")) return { tone: "failed", label: "blockiert" };
-  return { tone: "idle", label: "offen" };
+  if (allIn) return { tone: "done", label: tFlow("endReady") };
+  if (counting.some((card) => card.state === "failed")) return { tone: "failed", label: tFlow("endBlocked") };
+  return { tone: "idle", label: tFlow("endOpen") };
 }
 
 /** What the review node says about its card: judged now, signed off, or sent back. */
 export function reviewLabel(card: Pick<BoardCard, "state" | "returned_count">): string {
-  if (card.state === "in_review") return "being reviewed";
-  if (card.state === "verified" || card.state === "integrated" || card.state === "taken_over") return "abgezeichnet";
-  return card.returned_count > 0 ? `returned (${card.returned_count}×)` : "";
+  if (card.state === "in_review") return tFlow("reviewRunning");
+  if (card.state === "verified" || card.state === "integrated" || card.state === "taken_over") {
+    return tFlow("reviewSigned");
+  }
+  return card.returned_count > 0 ? tFlow("reviewReturned", { n: card.returned_count }) : "";
 }
 
 /** How a state is drawn: one class per family, so the colours stay in the stylesheet and the tokens. */

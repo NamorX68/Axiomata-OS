@@ -4,6 +4,7 @@
  */
 
 import { invokeBackend as invoke } from "../core/backend";
+import { tAgents as t } from "../i18n/agents";
 
 /** A variant a pass before 2026-10-30 kept as an own role; folded at the next start. */
 export interface KeptVariant {
@@ -47,10 +48,10 @@ export const deleteAgentsBackup = (path: string): Promise<void> => invoke<void>(
 export function migrationSummary(report: MigrationReport): string {
   const parts: string[] = [];
   const moved = report.moved.length;
-  if (moved > 0) parts.push(`${moved} copied role${moved === 1 ? "" : "s"} moved`);
-  if (report.created.length > 0) parts.push(`${report.created.join(", ")} added`);
+  if (moved > 0) parts.push(t("migMoved", { n: moved }));
+  if (report.created.length > 0) parts.push(t("migAdded", { names: report.created.join(", ") }));
   const engines = Object.keys(report.engines_mapped).length;
-  if (engines > 0) parts.push(`${engines} engine${engines === 1 ? "" : "s"} now automatic`);
-  if (report.sessions_remapped > 0) parts.push(`${report.sessions_remapped} sessions moved along`);
-  return parts.length > 0 ? `Roles and engines tidied: ${parts.join(", ")}.` : "Roles and engines were already tidy.";
+  if (engines > 0) parts.push(t("migEngines", { n: engines }));
+  if (report.sessions_remapped > 0) parts.push(t("migSessions", { n: report.sessions_remapped }));
+  return parts.length > 0 ? t("migTidied", { parts: parts.join(", ") }) : t("migAlreadyTidy");
 }

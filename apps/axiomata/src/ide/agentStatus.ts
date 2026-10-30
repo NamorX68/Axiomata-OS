@@ -22,6 +22,7 @@
 import { writable, type Readable } from "svelte/store";
 
 import type { AgentState, AgentStatus, IdeAgent } from "../core/backend";
+import { tAgents as t } from "../i18n/agents";
 
 import { agentStates } from "./agents";
 
@@ -48,12 +49,13 @@ export interface StatusView {
   title: string;
 }
 
-const LABELS: Record<AgentState, { label: string; title: string }> = {
-  starting: { label: "starting", title: "Started — the harness has not reported yet" },
-  idle: { label: "idle", title: "Finished its turn, ready for the next prompt" },
-  working: { label: "working", title: "In the middle of a turn" },
-  waiting: { label: "waiting", title: "Waiting for you — a permission prompt or a question" },
-  ended: { label: "ended", title: "The harness has exited" },
+/** Read when a status is described, so the words follow a language switch. */
+const LABELS: Record<AgentState, () => { label: string; title: string }> = {
+  starting: () => ({ label: t("statusStarting"), title: t("statusStartingTitle") }),
+  idle: () => ({ label: t("statusIdle"), title: t("statusIdleTitle") }),
+  working: () => ({ label: t("statusWorking"), title: t("statusWorkingTitle") }),
+  waiting: () => ({ label: t("statusWaiting"), title: t("statusWaitingTitle") }),
+  ended: () => ({ label: t("statusEnded"), title: t("statusEndedTitle") }),
 };
 
 /**
@@ -69,14 +71,12 @@ export function describeStatus(status: AgentStatus | undefined, agent: IdeAgent,
     if (silentFor > SILENT_OWN_COMMAND_MS) {
       return {
         tone: "none",
-        label: "no status",
-        title:
-          "No status channel (own command). For Claude Code, " +
-          'add --settings "$AXIOMATA_CLAUDE_SETTINGS" to the command.',
+        label: t("statusNone"),
+        title: t("statusNoneTitle", { flag: '--settings "$AXIOMATA_CLAUDE_SETTINGS"' }),
       };
     }
   }
-  return { tone: state, ...LABELS[state] };
+  return { tone: state, ...LABELS[state]() };
 }
 
 /**
@@ -89,7 +89,7 @@ export function describeStatus(status: AgentStatus | undefined, agent: IdeAgent,
  */
 export function withoutPane(view: StatusView): StatusView {
   if (view.tone !== "idle" && view.tone !== "starting") return view;
-  return { tone: "ended", label: "closed", title: "No pane is open for this agent" };
+  return { tone: "ended", label: t("statusClosed"), title: t("statusClosedTitle") };
 }
 
 export interface PollerDeps {

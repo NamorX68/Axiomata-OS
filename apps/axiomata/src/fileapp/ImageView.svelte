@@ -8,6 +8,7 @@
   import { formatBytes } from "../core/format";
   import { invokeBackend } from "../core/backend";
   import { messageOf } from "../core/errors";
+  import { tEditor } from "../i18n/editor";
 
   interface Props {
     root: string;
@@ -19,6 +20,8 @@
   let src = $state<string | null>(null);
   let bytes = $state(0);
   let error = $state("");
+  /** The web view cannot decode the format: said in the current language where it is drawn. */
+  let undecodable = $state(false);
   let fit = $state(true);
   let size = $state<{ w: number; h: number } | null>(null);
 
@@ -28,6 +31,7 @@
     src = null;
     size = null;
     error = "";
+    undecodable = false;
     invokeBackend<{ mime: string; base64: string }>("file_read_image", at)
       .then((image) => {
         if (cancelled) return;
@@ -47,7 +51,9 @@
 
 <div class="image-view">
   <div class="canvas" class:fit>
-    {#if error}
+    {#if undecodable}
+      <p class="note">{tEditor("imageUndecodable")}</p>
+    {:else if error}
       <p class="note">{error}</p>
     {:else if src}
       <img
@@ -57,15 +63,15 @@
           const img = e.currentTarget as HTMLImageElement;
           size = { w: img.naturalWidth, h: img.naturalHeight };
         }}
-        onerror={() => (error = "This image cannot be shown here (the web view does not decode its format).")}
+        onerror={() => (undecodable = true)}
       />
     {:else}
-      <p class="note">Loading…</p>
+      <p class="note">{tEditor("loading")}</p>
     {/if}
   </div>
   <footer>
-    <button type="button" onclick={() => (fit = !fit)}>{fit ? "Actual size" : "Fit"}</button>
-    {#if size}<span>{size.w} × {size.h} px</span>{/if}
+    <button type="button" onclick={() => (fit = !fit)}>{fit ? tEditor("actualSize") : tEditor("fit")}</button>
+    {#if size}<span>{tEditor("imagePixels", { w: size.w, h: size.h })}</span>{/if}
     {#if bytes}<span>{formatBytes(bytes)}</span>{/if}
   </footer>
 </div>

@@ -10,6 +10,7 @@
 <script lang="ts">
   import { invokeBackend, type TextFile } from "../core/backend";
   import { messageOf } from "../core/errors";
+  import { tEditor } from "../i18n/editor";
   import { EditorDocument } from "../editor/document";
   import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import { editorFace } from "./editorFace.svelte";
@@ -94,9 +95,9 @@
 
 <div class="peek" class:plain={peek.kind === "loading" || peek.kind === "error"}>
   {#if peek.kind === "loading"}
-    <span class="note">Loading preview…</span>
+    <span class="note">{tEditor("loadingPreview")}</span>
   {:else if peek.kind === "error"}
-    <span class="note">Preview unavailable: {peek.message}</span>
+    <span class="note">{tEditor("previewUnavailable", { message: peek.message })}</span>
   {:else if peek.kind === "image"}
     <div class="image"><img src={peek.src} alt={rel} /></div>
   {:else if peek.kind === "markdown"}
@@ -107,7 +108,7 @@
     {/key}
   {/if}
   {#if (peek.kind === "markdown" || peek.kind === "code") && peek.cut}
-    <span class="cut">The first {maxLines} lines — Open shows all of it.</span>
+    <span class="cut">{tEditor("peekCut", { n: maxLines })}</span>
   {/if}
 </div>
 

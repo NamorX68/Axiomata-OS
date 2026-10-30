@@ -23,6 +23,7 @@
   import type { FileRootInfo } from "../core/backend";
   import { cancelSearch, searchFiles, type FileMatches, type LineMatch } from "./backend";
   import { dirtyFiles, isDirty } from "./dirtyFiles";
+  import { tEditor } from "../i18n/editor";
   import type { LocationList } from "./locationList";
   import {
     DEFAULT_OPTIONS,
@@ -44,10 +45,10 @@
   let { roots, initialRoot = null, onOpen }: Props = $props();
 
   /** The three switches beside the field. */
-  const OPTION_BUTTONS: { key: "caseSensitive" | "wholeWord" | "regex"; label: string; title: string }[] = [
-    { key: "caseSensitive", label: "Aa", title: "Match case" },
-    { key: "wholeWord", label: "ab", title: "Whole word" },
-    { key: "regex", label: ".*", title: "Regular expression" },
+  const OPTION_BUTTONS: { key: "caseSensitive" | "wholeWord" | "regex"; label: string; title: () => string }[] = [
+    { key: "caseSensitive", label: "Aa", title: () => tEditor("matchCase") },
+    { key: "wholeWord", label: "ab", title: () => tEditor("wholeWord") },
+    { key: "regex", label: ".*", title: () => tEditor("regularExpression") },
   ];
 
   /** Quiet time after the last key before the search starts. */
@@ -151,8 +152,8 @@
       bind:this={input}
       bind:value={pattern}
       type="text"
-      placeholder="Search"
-      aria-label="Search in files"
+      placeholder={tEditor("search")}
+      aria-label={tEditor("searchInFiles")}
       spellcheck="false"
       autocomplete="off"
       oninput={schedule}
@@ -169,17 +170,21 @@
         class="opt"
         class:word={b.key === "wholeWord"}
         aria-pressed={options[b.key]}
-        title={b.title}
+        title={b.title()}
         onclick={() => toggle(b.key)}>{b.label}</button
       >
     {/each}
   </div>
   <div class="row">
     <button type="button" class="link" aria-expanded={showGlobs} onclick={() => (showGlobs = !showGlobs)}>
-      {showGlobs ? "▾" : "▸"} include / exclude
+      {showGlobs ? "▾" : "▸"} {tEditor("includeExclude")}
     </button>
     {#if roots.length > 1}
-      <select aria-label="Where to search" value={root} onchange={(e) => ((chosenRoot = e.currentTarget.value), run())}>
+      <select
+        aria-label={tEditor("whereToSearch")}
+        value={root}
+        onchange={(e) => ((chosenRoot = e.currentTarget.value), run())}
+      >
         {#each roots as r (r.id)}
           <option value={r.id}>{r.label}</option>
         {/each}
@@ -190,8 +195,8 @@
     <input
       class="glob"
       type="text"
-      placeholder="Include, e.g. *.rs, src/**"
-      aria-label="Files to include"
+      placeholder={tEditor("includePlaceholder")}
+      aria-label={tEditor("filesToInclude")}
       spellcheck="false"
       bind:value={options.include}
       oninput={schedule}
@@ -199,8 +204,8 @@
     <input
       class="glob"
       type="text"
-      placeholder="Exclude, e.g. **/*.test.ts"
-      aria-label="Files to exclude"
+      placeholder={tEditor("excludePlaceholder")}
+      aria-label={tEditor("filesToExclude")}
       spellcheck="false"
       bind:value={options.exclude}
       oninput={schedule}
@@ -209,8 +214,10 @@
 
   {#if list}
     <div class="list-head">
-      <p class="status" role="status">{list.title} — {list.count} {list.count === 1 ? "place" : "places"}</p>
-      <button type="button" class="link" aria-label="Close the list" onclick={() => (list = null)}>✕</button>
+      <p class="status" role="status">{list.title} — {tEditor("placeCount", { n: list.count })}</p>
+      <button type="button" class="link" aria-label={tEditor("closeList")} onclick={() => (list = null)}>
+        {"✕"}
+      </button>
     </div>
   {:else if view.status !== "idle"}
     <p class="status" class:error={view.status === "error"} role="status">{statusText(view)}</p>
@@ -224,8 +231,8 @@
           <span class="chevron">{collapsed.has(key) ? "▸" : "▾"}</span>
           <span class="name">{fileName(file.rel)}</span>
           {#if isDirty($dirtyFiles, file.root, file.rel)}
-            <span class="unsaved" title="Unsaved changes in an editor — these results are the file on disk"
-              >●</span
+            <span class="unsaved" title={tEditor("unsavedSearchHint")}
+              >{"●"}</span
             >
           {/if}
           <span class="folder">{folderOf(file.rel)}</span>

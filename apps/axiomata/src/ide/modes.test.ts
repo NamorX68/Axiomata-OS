@@ -30,7 +30,7 @@ const ws = (): Workspace => ({
 describe("modes", () => {
   it("names the Canvas for what is stored as `agents`", () => {
     expect(MODES).toEqual(["editor", "agents", "flow"]);
-    expect(MODE_LABEL).toEqual({ editor: "Editor", agents: "Canvas", flow: "Flow" });
+    expect(MODES.map((m) => MODE_LABEL[m]())).toEqual(["Editor", "Canvas", "Flow"]);
   });
 
   it("gives every mode its own icon", () => {

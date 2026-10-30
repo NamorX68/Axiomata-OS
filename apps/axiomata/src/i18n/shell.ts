@@ -77,12 +77,12 @@ const en = {
 
   // The spotlight.
   search: "Search",
-  searchPlaceholder: "Search, or ask Axiomata …",
+  searchPlaceholder: "Search, or ask Axiomata…",
   results: "Results",
   askGroup: "Ask",
   askAxiomata: "Ask Axiomata",
   quoted: "“{text}”",
-  searchingFiles: "Searching files …",
+  searchingFiles: "Searching files…",
   stillAnswering: "The agent is still answering — ask again in a moment.",
 
   // The spotlight's groups.
@@ -127,7 +127,7 @@ export const tShell = texts("shell", en, {
 
   now: "jetzt",
   todayStrip: { one: "Heute: 1 Lauf oder Sitzung", other: "Heute: {n} Läufe und Sitzungen" },
-  spentNoCap: "Heute ausgegeben: {amount}, kein Tageslimit",
+  spentNoCap: "Heute ausgegeben: {amount}, keine Tagesgrenze",
   spentOfCap: "Heute ausgegeben: {amount} von {cap}",
   todaysWork: "Heute erledigt",
   todayHead: { one: "Heute · 1 Eintrag", other: "Heute · {n} Einträge" },
@@ -172,13 +172,13 @@ export const tShell = texts("shell", en, {
   dismiss: "Schließen",
 
   search: "Suche",
-  searchPlaceholder: "Suchen oder Axiomata fragen …",
+  searchPlaceholder: "Suchen oder Axiomata fragen…",
   results: "Ergebnisse",
   askGroup: "Fragen",
   askAxiomata: "Axiomata fragen",
   quoted: "„{text}“",
-  searchingFiles: "Durchsuche Dateien …",
-  stillAnswering: "Der Agent antwortet noch — frag gleich noch einmal.",
+  searchingFiles: "Durchsuche Dateien…",
+  stillAnswering: "Der Agent antwortet noch — frage gleich noch einmal.",
 
   groupSuggestion: "Gehe zu",
   groupCommand: "Befehle",

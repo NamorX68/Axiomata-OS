@@ -19,6 +19,7 @@
   import { keyHints } from "../core/keyHints";
   import { chord, platform } from "../core/keys";
   import type { FindModel } from "../editor/search/findModel";
+  import { tEditor } from "../i18n/editor";
 
   interface Props {
     model: FindModel;
@@ -51,11 +52,12 @@
   const count = $derived.by(() => {
     const s = view.status;
     if (s.kind === "empty") return { text: "", error: false, title: "" };
-    if (s.kind === "pending") return { text: "…", error: false, title: "Searching" };
-    if (s.kind === "error") return { text: "Invalid", error: true, title: s.message };
-    if (s.count === 0) return { text: "No results", error: true, title: "" };
+    if (s.kind === "pending") return { text: "…", error: false, title: tEditor("searching") };
+    if (s.kind === "error") return { text: tEditor("invalid"), error: true, title: s.message };
+    if (s.count === 0) return { text: tEditor("noResults"), error: true, title: "" };
     const total = `${formatNumber(s.count)}${s.truncated ? "+" : ""}`;
-    return { text: s.index === null ? `${total} found` : `${s.index + 1}/${total}`, error: false, title: "" };
+    const text = s.index === null ? tEditor("foundTotal", { total }) : `${s.index + 1}/${total}`;
+    return { text, error: false, title: "" };
   });
 
   /** Focuses the query field, its text selected — ⌘F again selects it for typing over. */
@@ -146,8 +148,8 @@
         type="button"
         class="twist"
         class:open={showReplace}
-        title={keyHints("Toggle replace (⌥⌘F)", $platform)}
-        aria-label="Toggle replace"
+        title={keyHints(`${tEditor("toggleReplace")} (⌥⌘F)`, $platform)}
+        aria-label={tEditor("toggleReplace")}
         aria-expanded={showReplace}
         onclick={onToggleReplace}>›</button
       >
@@ -156,8 +158,8 @@
       <input
         bind:this={queryInput}
         value={view.query}
-        placeholder="Find"
-        aria-label="Find"
+        placeholder={tEditor("find")}
+        aria-label={tEditor("find")}
         spellcheck="false"
         autocapitalize="off"
         autocomplete="off"
@@ -168,44 +170,61 @@
         type="button"
         class="toggle"
         class:on={view.options.caseSensitive}
-        title={keyHints("Match case (⌥⌘C)", $platform)}
+        title={keyHints(`${tEditor("matchCase")} (⌥⌘C)`, $platform)}
         aria-pressed={view.options.caseSensitive}
-        onclick={() => model.setOptions({ caseSensitive: !model.options.caseSensitive })}>Aa</button
+        onclick={() => model.setOptions({ caseSensitive: !model.options.caseSensitive })}
+        >{tEditor("glyphMatchCase")}</button
       >
       <button
         type="button"
         class="toggle word"
         class:on={view.options.wholeWord}
-        title={keyHints("Whole word (⌥⌘W)", $platform)}
+        title={keyHints(`${tEditor("wholeWord")} (⌥⌘W)`, $platform)}
         aria-pressed={view.options.wholeWord}
-        onclick={() => model.setOptions({ wholeWord: !model.options.wholeWord })}>ab</button
+        onclick={() => model.setOptions({ wholeWord: !model.options.wholeWord })}>{tEditor("glyphWholeWord")}</button
       >
       <button
         type="button"
         class="toggle"
         class:on={view.options.regex}
-        title={keyHints("Regular expression (⌥⌘R)", $platform)}
+        title={keyHints(`${tEditor("regularExpression")} (⌥⌘R)`, $platform)}
         aria-pressed={view.options.regex}
         onclick={() => model.setOptions({ regex: !model.options.regex })}>.*</button
       >
     </div>
     <span class="count" class:error={count.error} title={count.title}>{count.text}</span>
-    <button type="button" class="icon" title={keyHints("Previous match (⇧⏎, ⇧⌘G)", $platform)} aria-label="Previous match" onclick={() => model.next(true)}
+    <button
+      type="button"
+      class="icon"
+      title={keyHints(`${tEditor("previousMatch")} (⇧⏎, ⇧⌘G)`, $platform)}
+      aria-label={tEditor("previousMatch")}
+      onclick={() => model.next(true)}
       >↑</button
     >
-    <button type="button" class="icon" title={keyHints("Next match (⏎, ⌘G)", $platform)} aria-label="Next match" onclick={() => model.next()}
+    <button
+      type="button"
+      class="icon"
+      title={keyHints(`${tEditor("nextMatch")} (⏎, ⌘G)`, $platform)}
+      aria-label={tEditor("nextMatch")}
+      onclick={() => model.next()}
       >↓</button
     >
     <button
       type="button"
       class="icon"
       class:on={view.scope}
-      title={keyHints("Find in selection (⌥⌘L)", $platform)}
-      aria-label="Find in selection"
+      title={keyHints(`${tEditor("findInSelection")} (⌥⌘L)`, $platform)}
+      aria-label={tEditor("findInSelection")}
       aria-pressed={view.scope}
-      onclick={() => model.toggleScope()}>⌶</button
+      onclick={() => model.toggleScope()}>{"⌶"}</button
     >
-    <button type="button" class="icon" title="Close (Esc)" aria-label="Close" onclick={onClose}>×</button>
+    <button
+      type="button"
+      class="icon"
+      title={`${tEditor("close")} (Esc)`}
+      aria-label={tEditor("close")}
+      onclick={onClose}
+    >×</button>
   </div>
   {#if canReplace && showReplace}
     <div class="line replace">
@@ -213,8 +232,8 @@
         <input
           bind:this={replaceInput}
           value={view.replacement}
-          placeholder={view.options.regex ? "Replace ($1, $&)" : "Replace"}
-          aria-label="Replace"
+          placeholder={view.options.regex ? `${tEditor("replace")} ($1, $&)` : tEditor("replace")}
+          aria-label={tEditor("replace")}
           spellcheck="false"
           autocapitalize="off"
           autocomplete="off"
@@ -225,16 +244,27 @@
           type="button"
           class="toggle"
           class:on={view.options.preserveCase}
-          title={keyHints("Preserve case (⌥⌘P)", $platform)}
+          title={keyHints(`${tEditor("preserveCase")} (⌥⌘P)`, $platform)}
           aria-pressed={view.options.preserveCase}
-          onclick={() => model.setOptions({ preserveCase: !model.options.preserveCase })}>AB</button
+          onclick={() => model.setOptions({ preserveCase: !model.options.preserveCase })}
+          >{tEditor("glyphPreserveCase")}</button
         >
       </div>
-      <button type="button" class="text" disabled={!view.valid} title="Replace (⏎)" onclick={() => model.replaceOne()}
-        >Replace</button
+      <button
+        type="button"
+        class="text"
+        disabled={!view.valid}
+        title={`${tEditor("replace")} (⏎)`}
+        onclick={() => model.replaceOne()}
+        >{tEditor("replace")}</button
       >
-      <button type="button" class="text" disabled={!view.valid} title={keyHints("Replace all (⌥⌘⏎)", $platform)} onclick={() => model.replaceAll()}
-        >All</button
+      <button
+        type="button"
+        class="text"
+        disabled={!view.valid}
+        title={keyHints(`${tEditor("replaceAll")} (⌥⌘⏎)`, $platform)}
+        onclick={() => model.replaceAll()}
+        >{tEditor("all")}</button
       >
     </div>
   {/if}

@@ -4,6 +4,8 @@
   Cancel; for a new note not filed yet: File it, Discard, Cancel.
 -->
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
+
   interface Props {
     /** What is being closed, for the sentence. */
     name: string;
@@ -17,11 +19,11 @@
   let { name, untitled, onSave, onDiscard, onCancel }: Props = $props();
 </script>
 
-<div class="ask" role="alertdialog" aria-label="Unsaved changes">
-  <span>{untitled ? "This note is not filed yet." : `${name} has unsaved changes.`}</span>
-  <button type="button" class="strong" onclick={onSave}>{untitled ? "File it" : "Save"}</button>
-  <button type="button" onclick={onDiscard}>Discard</button>
-  <button type="button" onclick={onCancel}>Cancel</button>
+<div class="ask" role="alertdialog" aria-label={tEditor("unsavedChanges")}>
+  <span>{untitled ? tEditor("noteNotFiled") : tEditor("hasUnsaved", { name })}</span>
+  <button type="button" class="strong" onclick={onSave}>{untitled ? tEditor("fileIt") : tEditor("save")}</button>
+  <button type="button" onclick={onDiscard}>{tEditor("discard")}</button>
+  <button type="button" onclick={onCancel}>{tEditor("cancel")}</button>
 </div>
 
 <style>

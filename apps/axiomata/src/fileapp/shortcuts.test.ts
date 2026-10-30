@@ -135,8 +135,7 @@ describe("the list on Windows and Linux", () => {
   }
 
   it("answers every key it lists in the checked groups with what the Mac key does", () => {
-    const checked = new Set(SHORTCUTS.filter((g) => g.checked).map((g) => g.title));
-    for (const group of visibleShortcuts(false, "", "other").filter((g) => checked.has(g.title))) {
+    for (const group of visibleShortcuts(false, "", "other").filter((g) => g.checked)) {
       for (const item of group.items) {
         for (const alternative of item.keys.split(" / ")) {
           const press = pressOf(alternative);

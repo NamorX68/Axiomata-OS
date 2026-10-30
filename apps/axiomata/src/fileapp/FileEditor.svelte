@@ -40,7 +40,7 @@
 </script>
 
 <script lang="ts">
-  import { formatDateTime } from "../core/format";
+  import { formatDateTime, formatNumber } from "../core/format";
   import { keyHints } from "../core/keyHints";
   import { get } from "svelte/store";
   import BreakpointEditor from "../ide/BreakpointEditor.svelte";
@@ -123,6 +123,7 @@
   import { isUnder, renamedPath } from "./treeModel";
   import { applySet } from "./viOptions";
   import ViStatusLine from "./ViStatusLine.svelte";
+  import { tEditor, type EditorText } from "../i18n/editor";
   import type { ViStatus } from "./viSurface";
   import type { GutterMode } from "../editor/gutter";
   import type { ViEffect } from "../editor/vi/machine";
@@ -169,6 +170,11 @@
     onShowLocations,
     onOutline,
   }: Props = $props();
+
+  /** A file panel's rendered preview follows its text-size control; elsewhere the preview keeps its own size. */
+  const previewFontSize = $derived(
+    compact ? `calc(${$editorSettings.panelFontSize}px * var(--ax-ui-scale))` : undefined,
+  );
 
   /** Quiet time after the last change before unsaved text is kept aside (F8). */
   const RECOVERY_DELAY_MS = 2000;
@@ -582,7 +588,7 @@
     if (cmdOnly && (e.key === "." || (e.key === "l" && actionsHere))) {
       e.preventDefault();
       if (lspDoc) void surface?.openCodeActions();
-      else toast("No language server for this file", "info");
+      else toast(tEditor("noLanguageServer"), "info");
       return true;
     }
     if (e.key === "F2" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && lspDoc) {
@@ -668,7 +674,7 @@
       },
       take: (item) => void takeCodeAction(item),
       none: () =>
-        toast(client.codeActions ? "No code actions here" : "This language server offers no code actions", "info"),
+        toast(client.codeActions ? tEditor("noCodeActionsHere") : tEditor("serverNoCodeActions"), "info"),
     };
   });
 
@@ -692,20 +698,22 @@
     const s = session;
     const found = lspDoc;
     if (!s || !found) return;
-    if (s.readOnly) return void toast("This file is read-only", "info");
+    if (s.readOnly) return void toast(tEditor("fileReadOnly"), "info");
     const { client } = found.connection;
     const revision = s.doc.revision;
     let action: CodeActionItem;
     try {
       action = await client.resolveCodeAction(item);
     } catch (err) {
-      return void toast(`Could not run “${item.title}”: ${messageOf(err)}`, "danger");
+      return void toast(tEditor("actionCouldNotRun", { title: item.title, error: messageOf(err) }), "danger");
     }
     if (session !== s) return;
     if (s.doc.revision !== revision) {
-      return void toast("The text changed meanwhile — the action was not run", "info");
+      return void toast(tEditor("actionTextChanged"), "info");
     }
-    if (action.edit === null && !action.command) return void toast(`“${action.title}” changes nothing`, "info");
+    if (action.edit === null && !action.command) {
+      return void toast(tEditor("actionChangesNothing", { title: action.title }), "info");
+    }
     if (action.edit !== null && !(await applyServerEdit(s, found, action.edit, action.title))) return;
     if (!action.command) return;
     let before = s.doc.revision;
@@ -718,7 +726,7 @@
         return applied;
       });
     } catch (err) {
-      toast(`“${action.title}” failed: ${messageOf(err)}`, "danger");
+      toast(tEditor("actionFailed", { title: action.title, error: messageOf(err) }), "danger");
     }
   }
 
@@ -731,17 +739,17 @@
     try {
       edits = parseWorkspaceEdit(raw);
     } catch {
-      toast(`“${title}” would move files — do it in the file tree`, "danger");
+      toast(tEditor("actionMovesFiles", { title }), "danger");
       return false;
     }
     const outcome = await applyWorkspaceEdit(edits, editPorts(s, found));
     if (outcome.refused) {
-      toast(`“${title}” was not applied: ${outcome.refused}`, "danger");
+      toast(tEditor("actionNotApplied", { title, reason: outcome.refused }), "danger");
       return false;
     }
     if (outcome.skipped.length > 0) {
       const list = outcome.skipped.map((k) => `${k.file} (${k.reason})`).join(", ");
-      toast(`“${title}”: not changed: ${list}`, "danger");
+      toast(tEditor("actionNotChanged", { title, list }), "danger");
     }
     return outcome.skipped.length === 0;
   }
@@ -767,12 +775,12 @@
     return found ? found.connection.client.hover(found.uri, at) : Promise.resolve(null);
   }
 
-  /** What each kind of place is called, for the list's title and "none found". */
-  const LOCATION_WORDS: Record<LocationKind, { title: string; none: string }> = {
-    definition: { title: "Definitions of", none: "No definition found" },
-    implementation: { title: "Implementations of", none: "No implementation found" },
-    typeDefinition: { title: "Type definitions of", none: "No type definition found" },
-    references: { title: "References to", none: "No references found" },
+  /** What each kind of place is called, for the list's title (`{symbol}`) and "none found" — catalog keys. */
+  const LOCATION_WORDS: Record<LocationKind, { title: EditorText; none: EditorText }> = {
+    definition: { title: "definitionsOf", none: "noDefinition" },
+    implementation: { title: "implementationsOf", none: "noImplementation" },
+    typeDefinition: { title: "typeDefinitionsOf", none: "noTypeDefinition" },
+    references: { title: "referencesTo", none: "noReferences" },
   };
 
   /**
@@ -797,11 +805,11 @@
     if (session !== s) return;
     const words = LOCATION_WORDS[kind];
     if (places.length === 0) {
-      toast(words.none, "info");
+      toast(tEditor(words.none), "info");
       return;
     }
     if (onShowLocations && (places.length > 1 || kind === "references")) {
-      const title = `${words.title} ${symbolAt(s, at) ?? "the symbol"}`;
+      const title = tEditor(words.title, { symbol: symbolAt(s, at) ?? tEditor("theSymbol") });
       const list = await buildLocationList(
         title,
         places,
@@ -818,7 +826,7 @@
   function goToPlace(s: FileSession, found: LspDocument, location: Location): void {
     const file = definitionFile(s.root, found, location);
     if (!file) {
-      toast("That place is not a file", "info");
+      toast(tEditor("placeNotFile"), "info");
       return;
     }
     if (file.root === s.root && file.rel === s.rel) {
@@ -961,10 +969,10 @@
     if (!s) return;
     // Where the jump starts, before anything is awaited: the cursor may move meanwhile.
     const here = placeOf(s);
-    if (from === null) return void toast("Wikilinks lead to notes of the workspace", "info");
+    if (from === null) return void toast(tEditor("wikilinksWorkspaceOnly"), "info");
     if (!target) {
       const line = heading ? headingLine(s.doc.store.text(), heading) : null;
-      if (line === null) return void toast(`No heading “${heading ?? ""}” in this note`, "info");
+      if (line === null) return void toast(tEditor("noHeading", { heading: heading ?? "" }), "info");
       if (!s.untitled) jumpHistory.record(here);
       surface?.goTo({ line, col: 0 });
       if (viewMode !== "source") preview?.scrollToLine(line);
@@ -977,13 +985,13 @@
       index = await loadNoteIndex();
     }
     if (session !== s) return;
-    if (!index) return void toast("The vault's notes could not be read", "danger");
+    if (!index) return void toast(tEditor("vaultUnreadable"), "danger");
     const rel = index.resolve(from, target);
     if (rel === null) {
       const several = index.sameStem(target);
       if (several.length > 1) {
         const names = several.map((p) => p.replace(/\.md$/i, "")).join(", ");
-        return void toast(`“${target}” fits several notes — name its folder: ${names}`, "info");
+        return void toast(tEditor("severalNotes", { target, names }), "info");
       }
       return void createLinkedNote(s, from, target, here);
     }
@@ -1008,22 +1016,22 @@
 
   /** A link into nothing (Q3): its note, created beside `from` with the target as its title, then opened. */
   async function createLinkedNote(s: FileSession, from: string, target: string, here: JumpPlace): Promise<void> {
-    if (s.untitled) return void toast("File this note first (⌘S) — a linked note is created beside it", "info");
+    if (s.untitled) return void toast(keyHints(tEditor("fileNoteFirst"), $platform), "info");
     const path = newNotePath(from, target);
-    if (!path) return void toast(`“${target}” is no usable file name`, "info");
+    if (!path) return void toast(tEditor("unusableFileName", { target }), "info");
     const file = vaultFile(path);
     try {
       // `file_create` refuses to replace anything (`O_EXCL`); the title goes in against the version it made.
       const version = await createFile(file.root, file.rel);
       await fileBackend.write(file.root, file.rel, `# ${fileStem(path)}\n\n`, version);
     } catch (err) {
-      return void toast(`Could not create ${path}: ${messageOf(err)}`, "danger");
+      return void toast(tEditor("couldNotCreate", { path, error: messageOf(err) }), "danger");
     }
     invalidateNoteIndex();
     void loadNoteIndex();
     if (session !== s) return;
     jumpHistory.record(here);
-    toast(`Created ${path}`, "info");
+    toast(tEditor("created", { path }), "info");
     // Below the title, ready to write — in the source, since a new note has nothing to read yet.
     goToFile(file, 2, "edit");
   }
@@ -1066,17 +1074,17 @@
   async function startRename(name: string | null): Promise<void> {
     const s = session;
     const found = lspDoc;
-    if (!s || !found) return void toast("No language server for this file", "info");
+    if (!s || !found) return void toast(tEditor("noLanguageServer"), "info");
     const { client } = found.connection;
     if (!(await client.whenReady()) || !client.renames) {
-      return void toast("This language server does not rename", "info");
+      return void toast(tEditor("serverNoRename"), "info");
     }
     const at = s.doc.selection.head;
     const line = s.doc.store.line(at.line);
     const word = wordAt(line, at.col);
     const prepared = await client.prepareRename(found.uri, at, line.slice(word.start, word.end));
     if (session !== s) return;
-    if (!prepared) return void toast("Nothing to rename here", "info");
+    if (!prepared) return void toast(tEditor("nothingToRename"), "info");
     if (name !== null) return void rename(at, name);
     const point = surface?.cursorPoint() ?? { x: 0, y: 0 };
     renameBox = { ...point, name: prepared.name, at };
@@ -1113,22 +1121,20 @@
       // A rename that would move files (a Rust module) is refused, as the client says it moves none (L16).
       const message = messageOf(err);
       const movesFiles = /rename capability|create, move or delete files/i.test(message);
-      const text = movesFiles
-        ? "This rename would move files — do it in the file tree"
-        : `Could not rename: ${message}`;
+      const text = movesFiles ? tEditor("renameMovesFiles") : tEditor("couldNotRename", { error: message });
       return void toast(text, "danger");
     }
     if (session !== s) return;
     if (s.doc.revision !== revision) {
-      return void toast("The text changed while renaming — nothing was renamed", "info");
+      return void toast(tEditor("renameTextChanged"), "info");
     }
     const outcome = await applyWorkspaceEdit(edits, editPorts(s, found));
-    if (outcome.refused) return void toast(`Nothing was renamed: ${outcome.refused}`, "danger");
-    const files = outcome.changed === 1 ? "1 file" : `${outcome.changed} files`;
-    if (outcome.skipped.length === 0) toast(`Renamed to ${newName} in ${files}`, "info");
+    if (outcome.refused) return void toast(tEditor("nothingRenamed", { reason: outcome.refused }), "danger");
+    const files = tEditor("fileCount", { n: outcome.changed, count: formatNumber(outcome.changed) });
+    if (outcome.skipped.length === 0) toast(tEditor("renamed", { name: newName, files }), "info");
     else {
       const list = outcome.skipped.map((k) => `${k.file} (${k.reason})`).join(", ");
-      toast(`Renamed to ${newName} in ${files}; not changed: ${list}`, "danger");
+      toast(tEditor("renamedPartly", { name: newName, files, list }), "danger");
     }
   }
 
@@ -1204,7 +1210,7 @@
         return;
       } else if (result.kind === "missing") missing = result.formatter;
     } catch (err) {
-      toast(`Could not format: ${messageOf(err)}`, "danger");
+      toast(tEditor("couldNotFormat", { error: messageOf(err) }), "danger");
       return;
     }
     if (output === null) {
@@ -1216,7 +1222,9 @@
           })
         : null;
       if (!edits) {
-        if (!onSave || missing) toast(missing ? `${missing} is not installed` : "No formatter for this file", "info");
+        if (!onSave || missing) {
+          toast(missing ? tEditor("notInstalled", { name: missing }) : tEditor("noFormatter"), "info");
+        }
         return;
       }
       output = applyTextEdits(input.replace(/\r\n?/g, "\n"), edits);
@@ -1242,7 +1250,7 @@
       await fileBackend.recoveryDelete(DRAFT_ROOT, DRAFT_REL).catch(() => undefined);
       await open({ root: "workspace", rel }, null, "read");
     } catch (err) {
-      draft.banner = { kind: "error", message: `Could not file the note: ${messageOf(err)}` };
+      draft.banner = { kind: "error", message: tEditor("couldNotFile", { error: messageOf(err) }) };
       refresh();
     } finally {
       filing = false;
@@ -1286,7 +1294,7 @@
     else if (effect.type === "format") void formatNow();
     else if (effect.type === "rename") void startRename(effect.name);
     else if (effect.type === "codeAction") {
-      if (!lspDoc) toast("No language server for this file", "info");
+      if (!lspDoc) toast(tEditor("noLanguageServer"), "info");
       else void surface?.openCodeActions(effect.range?.start, effect.range?.end);
     }
     else if (effect.type === "quit") {
@@ -1304,7 +1312,7 @@
       const head = session?.doc.selection.head ?? null;
       // `gd` on a note's link follows it (TL2), before any server is asked.
       if (effect.type === "definition" && head && followMarkAt(head)) return;
-      if (!lspDoc) toast("No language server for this file", "info");
+      if (!lspDoc) toast(tEditor("noLanguageServer"), "info");
       else if (effect.type === "definition") void goToDefinition(head);
       else if (effect.type === "locations") void goToLocations(effect.kind, head);
       else surface?.showHoverAtCursor();
@@ -1366,7 +1374,7 @@
     if (walk && (session || image)) {
       e.preventDefault();
       e.stopPropagation();
-      if (!walkHistory(walk)) toast(walk === "back" ? "Nothing to go back to" : "Nothing to go forward to", "info");
+      if (!walkHistory(walk)) toast(walk === "back" ? tEditor("nothingBack") : tEditor("nothingForward"), "info");
       return;
     }
     const c = chord(e, $platform);
@@ -1454,35 +1462,39 @@
     <div class="banner" class:danger={banner.kind === "error" || banner.kind === "deleted"} role="status">
       {#if banner.kind === "recovery"}
         <span>
-          Unsaved changes from {formatDateTime(banner.entry.saved_at)} were kept.
-          {#if banner.changedSince}The file has changed on disk since.{/if}
+          {tEditor("recoveryKept", { when: formatDateTime(banner.entry.saved_at) })}
+          {#if banner.changedSince}{tEditor("changedSince")}{/if}
         </span>
-        <button type="button" onclick={() => void act((s) => s.restoreRecovery())}>Restore</button>
-        <button type="button" onclick={() => void act((s) => s.discardRecovery())}>Discard</button>
+        <button type="button" onclick={() => void act((s) => s.restoreRecovery())}>{tEditor("restore")}</button>
+        <button type="button" onclick={() => void act((s) => s.discardRecovery())}>{tEditor("discard")}</button>
       {:else if banner.kind === "external"}
         {#if banner.confirmReload}
-          <span>Reloading throws your unsaved changes away.</span>
-          <button type="button" class="strong" onclick={() => void act((s) => s.requestReload())}>Reload anyway</button>
-          <button type="button" onclick={() => void act((s) => s.cancelReload())}>Cancel</button>
+          <span>{tEditor("reloadWarning")}</span>
+          <button
+            type="button"
+            class="strong"
+            onclick={() => void act((s) => s.requestReload())}
+          >{tEditor("reloadAnyway")}</button>
+          <button type="button" onclick={() => void act((s) => s.cancelReload())}>{tEditor("cancel")}</button>
         {:else}
-          <span>The file changed on disk while you have unsaved changes.</span>
-          <button type="button" onclick={() => void act((s) => s.requestReload())}>Reload</button>
-          <button type="button" onclick={() => void act((s) => s.keepMine())}>Keep mine</button>
-          <button type="button" onclick={() => void showCompare()}>Compare</button>
+          <span>{tEditor("changedOnDisk")}</span>
+          <button type="button" onclick={() => void act((s) => s.requestReload())}>{tEditor("reload")}</button>
+          <button type="button" onclick={() => void act((s) => s.keepMine())}>{tEditor("keepMine")}</button>
+          <button type="button" onclick={() => void showCompare()}>{tEditor("compare")}</button>
         {/if}
       {:else if banner.kind === "confirmOverwrite"}
-        <span>The file was changed on disk. Save anyway and overwrite it?</span>
-        <button type="button" class="strong" onclick={() => void save(true)}>Overwrite</button>
-        <button type="button" onclick={() => void act((s) => s.dismissBanner())}>Cancel</button>
+        <span>{tEditor("overwriteQuestion")}</span>
+        <button type="button" class="strong" onclick={() => void save(true)}>{tEditor("overwrite")}</button>
+        <button type="button" onclick={() => void act((s) => s.dismissBanner())}>{tEditor("cancel")}</button>
       {:else if banner.kind === "deleted"}
-        <span>The file was deleted on disk. Saving creates it again.</span>
-        <button type="button" onclick={() => void save()}>Save</button>
-        <button type="button" onclick={() => void act((s) => s.dismissBanner())}>Dismiss</button>
+        <span>{tEditor("deletedOnDisk")}</span>
+        <button type="button" onclick={() => void save()}>{tEditor("save")}</button>
+        <button type="button" onclick={() => void act((s) => s.dismissBanner())}>{tEditor("dismiss")}</button>
       {:else if banner.kind === "reloaded"}
-        <span>Reloaded — the file changed on disk.</span>
+        <span>{tEditor("reloaded")}</span>
       {:else if banner.kind === "error"}
         <span>{banner.message}</span>
-        <button type="button" onclick={() => void act((s) => s.dismissBanner())}>Dismiss</button>
+        <button type="button" onclick={() => void act((s) => s.dismissBanner())}>{tEditor("dismiss")}</button>
       {/if}
     </div>
   {/if}
@@ -1554,7 +1566,7 @@
           class="rename"
           style:left="{renameBox.x}px"
           style:top="{renameBox.y}px"
-          aria-label="New name"
+          aria-label={tEditor("newName")}
           spellcheck="false"
           autocomplete="off"
           onkeydown={onRenameKey}
@@ -1564,7 +1576,7 @@
       {#if previewKind && viewMode !== "source"}
         <div
           class="pane preview-pane"
-          style:--ax-preview-font-size={compact ? `calc(${$editorSettings.panelFontSize}px * var(--ax-ui-scale))` : undefined}
+          style:--ax-preview-font-size={previewFontSize}
           style:--ax-prose-zoom={previewZoomFactor}
         >
           {#if previewKind === "markdown"}
@@ -1593,8 +1605,8 @@
       {#if compare}
         <div class="pane compare">
           <div class="compare-bar">
-            <span>On disk → your text {compare.model.hunkCount === 0 ? "(no difference)" : ""}</span>
-            <button type="button" onclick={() => (compare = null)}>Close</button>
+            <span>{compare.model.hunkCount === 0 ? tEditor("compareSame") : tEditor("compareTitle")}</span>
+            <button type="button" onclick={() => (compare = null)}>{tEditor("close")}</button>
           </div>
           <div class="compare-diff">
             {#key compare}
@@ -1621,7 +1633,7 @@
       <span>{status.position}</span>
       <span>{status.eol}</span>
       <span>{status.indent}</span>
-      <span>{wrap ? "Wrap on" : "Wrap off"} <kbd>{keyHints("⌥Z", $platform)}</kbd></span>
+      <span>{wrap ? tEditor("wrapOn") : tEditor("wrapOff")} <kbd>{keyHints("⌥Z", $platform)}</kbd></span>
       {#if previewKind}
         <span>
           {viewModeLabel(viewMode)}
@@ -1629,18 +1641,18 @@
         </span>
       {/if}
       {#if session.untitled}
-        <span class="note">{filing ? "Filing the note…" : keyHints("New note — ⌘S files it", $platform)}</span>
+        <span class="note">{filing ? tEditor("filingNote") : keyHints(tEditor("newNoteHint"), $platform)}</span>
       {/if}
-      {#if session.light}<span class="warn" title="Over 2 MB: no syntax colours">Large file — light mode</span>{/if}
+      {#if session.light}<span class="warn" title={tEditor("largeFileTitle")}>{tEditor("largeFile")}</span>{/if}
       {#if session.readOnly}
-        <span class="note" title={session.rel}>Read-only — outside the project, shown by the language server</span>
+        <span class="note" title={session.rel}>{tEditor("readOnlyOutside")}</span>
       {/if}
       {#if diagnostics && diagnostics.size > 0}
         {@const counts = diagnostics.counts()}
-        <span class="problems" title={keyHints("Problems from the language server — F8 / ⇧F8 to step through", $platform)}>
-          {#if counts.error}<span class="diag-error">✖ {counts.error}</span>{/if}
-          {#if counts.warning}<span class="diag-warning">⚠ {counts.warning}</span>{/if}
-          {#if counts.info + counts.hint}<span class="diag-info">ℹ {counts.info + counts.hint}</span>{/if}
+        <span class="problems" title={keyHints(tEditor("problemsTitle"), $platform)}>
+          {#if counts.error}<span class="diag-error">{"✖"} {counts.error}</span>{/if}
+          {#if counts.warning}<span class="diag-warning">{"⚠"} {counts.warning}</span>{/if}
+          {#if counts.info + counts.hint}<span class="diag-info">{"ℹ"} {counts.info + counts.hint}</span>{/if}
         </span>
       {/if}
     </footer>

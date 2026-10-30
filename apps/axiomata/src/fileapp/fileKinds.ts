@@ -8,6 +8,8 @@
  * on purpose: it is text, opened as source, and previewed as a picture.
  */
 
+import { tEditor } from "../i18n/editor";
+
 /** Files the editor can show rendered beside (or instead of) their source. */
 export type PreviewKind = "markdown" | "html" | "svg";
 
@@ -47,7 +49,7 @@ export function initialViewMode(kind: PreviewKind | null, intent: OpenIntent): V
 
 /** The footer's word for `mode`. */
 export function viewModeLabel(mode: ViewMode): string {
-  return mode === "source" ? "Source" : mode === "preview" ? "Preview" : "Side by side";
+  return mode === "source" ? tEditor("modeSource") : mode === "preview" ? tEditor("modePreview") : tEditor("modeSplit");
 }
 
 /**

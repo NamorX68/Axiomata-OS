@@ -16,6 +16,7 @@
   import { messageOf } from "../core/errors";
   import { projectRoles, type Role } from "../core/roster";
   import { toast } from "../core/toast";
+  import { tAgents as t } from "../i18n/agents";
   import AgentStart from "./AgentStart.svelte";
   import {
     agentsWithWork,
@@ -247,11 +248,11 @@
 </script>
 
 <div class="panel">
-  <SectionHead label="Agents" rule level={2} />
+  <SectionHead label={t("agents")} rule level={2} />
   <div class="body">
     {#if !disabled}
       <!-- The engines as the owner uses them outside: own settings and rules, the real folder, the team tools added. -->
-      <div class="masters" role="group" aria-label="Master panes">
+      <div class="masters" role="group" aria-label={t("masterPanes")}>
         {#each MASTER_HARNESSES as harness (harness)}
           {@const agent = masters.get(harness)}
           {@const card = agent
@@ -263,9 +264,8 @@
             use:ring={ringOf(card?.status.tone)}
             type="button"
             title={harness === "opencode"
-              ? "Opencode as you run it yourself — your settings, your models, in the project folder; no team tools"
-              : `${harnessLabel(harness)} as you use it outside — your settings and rules, in the project folder, ` +
-                "with the team tools. Click again while it is open for one more beside it"}
+              ? t("masterOpencodeTitle")
+              : t("masterTitle", { harness: harnessLabel(harness) })}
             onclick={() => onMaster(harness)}
           >
             <HexAvatar
@@ -286,10 +286,9 @@
             <div class="row-actions">
               <IconButton
                 icon="trash-2"
-                label="Remove the {harnessLabel(harness)} master"
+                label={t("removeMaster", { harness: harnessLabel(harness) })}
                 size="sm"
-                onclick={() =>
-                  void askRemove(agent.id, `Remove the ${harnessLabel(harness)} master? Panes already running it stay open.`)}
+                onclick={() => void askRemove(agent.id, t("removeMasterAsk", { harness: harnessLabel(harness) }))}
               />
             </div>
           {/if}
@@ -300,8 +299,8 @@
     <ProjectRolesNotice {projectId} />
     {#if !disabled && projectId !== null && editing === undefined}
       {#if favorites.length > 0}
-        <section class="favorites" aria-label="Favorites">
-          <SectionHead label="Favorites" count={favorites.length} />
+        <section class="favorites" aria-label={t("favorites")}>
+          <SectionHead label={t("favorites")} count={favorites.length} />
           <div class="fav-tiles">
             {#each favorites as f (`${f.role}/${f.tier}/${f.engine ?? ""}`)}
               <div class="fav-tile" class:unavailable={f.unavailable !== null}>
@@ -309,12 +308,12 @@
                   type="button"
                   class="fav"
                   disabled={f.unavailable !== null}
-                  title={f.unavailable ?? `Start ${f.name}`}
+                  title={f.unavailable ?? t("startNamed", { name: f.name })}
                   onclick={() => void startFavorite(f)}
                 >
                   <span class="fav-title">{f.title}</span>
                   <span class="fav-sub">
-                    {f.unavailable ? "unavailable" : f.subtitle}{f.engine ? "" : " · tier default"}
+                    {f.unavailable ? t("unavailable") : f.subtitle}{f.engine ? "" : ` · ${t("tierDefault")}`}
                   </span>
                 </button>
                 <div class="row-actions">
@@ -322,7 +321,7 @@
                     icon="star"
                     size="sm"
                     pressed
-                    label="Remove {f.name} from the favorites"
+                    label={t("removeFavoriteNamed", { name: f.name })}
                     onclick={() => void toggleStar(f)}
                   />
                 </div>
@@ -384,18 +383,22 @@
               </span>
               {#if agent.branch}
                 <!-- Where the work sits: the branch checked out in this agent's worktree. -->
-                <span class="branchline" title="Checked out in its worktree">{agent.branch}</span>
+                <span class="branchline" title={t("branchTitle")}>{agent.branch}</span>
               {/if}
               {#if card.plan || card.step}
                 <span class="doing">{card.step ?? card.plan}</span>
               {/if}
               {#if card.progress}
-                <span class="progress" title="{card.progress.done} of {card.progress.total} steps done">
+                <span class="progress" title={t("stepsDone", { done: card.progress.done, total: card.progress.total })}>
                   <span class="bar"><span class="fill" style:width="{(card.progress.done / card.progress.total) * 100}%"></span></span>
                   <span class="count">{card.progress.done}/{card.progress.total}</span>
                 </span>
               {/if}
-              {#if card.since}<span class="since">{card.status.tone === "ended" ? "last" : card.status.label} · {card.since}</span>{/if}
+              {#if card.since}
+                <span class="since">
+                  {card.status.tone === "ended" ? t("lastState") : card.status.label} · {card.since}
+                </span>
+              {/if}
             </button>
             <!-- Quiet until the card is hovered or focused (editor-look I4). -->
             <div class="row-actions">
@@ -406,47 +409,48 @@
                     icon="star"
                     size="sm"
                     pressed={isFavorite(favorites, fav)}
-                    label={isFavorite(favorites, fav)
-                      ? "Remove this agent from the favorites"
-                      : "Keep this agent as a favorite"}
+                    label={isFavorite(favorites, fav) ? t("removeAgentFavorite") : t("keepAgentFavorite")}
                     onclick={() => void toggleStar(fav)}
                   />
                 {/if}
               {/if}
               {#if agent.agent_role !== "master"}
                 <!-- A master keeps its engine and role (`roster::update_agent_on_engine` refuses). -->
-                <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
+                <IconButton
+                  icon="pencil"
+                  label={t("editNamed", { name: agent.name })}
+                  size="sm"
+                  onclick={() => startEdit(agent)}
+                />
               {/if}
               <IconButton
                 icon="trash-2"
-                label="Remove {agent.name}"
+                label={t("removeNamed", { name: agent.name })}
                 size="sm"
-                onclick={() =>
-                  void askRemove(
-                    agent.id,
-                    `Remove the agent “${agent.name}”? Its worktree and branch go with it; panes already running it stay open.`,
-                  )}
+                onclick={() => void askRemove(agent.id, t("removeAgentAsk", { name: agent.name }))}
               />
             </div>
           </li>
     {/snippet}
     {#if sections.active.length > 0}
-      <SectionHead label="Sessions" count={sections.active.length} />
+      <SectionHead label={t("sessions")} count={sections.active.length} />
       <ul class="cards">
         {#each sections.active as agent (agent.id)}{@render sessionCard(agent)}{/each}
       </ul>
     {/if}
     {#if sections.waiting.length > 0}
-      <SectionHead label="Waiting for you: take over or discard" count={sections.waiting.length} tone="warn" />
+      <SectionHead label={t("waitingForYou")} count={sections.waiting.length} tone="warn" />
       <ul class="cards">
         {#each sections.waiting as agent (agent.id)}{@render sessionCard(agent)}{/each}
       </ul>
     {/if}
     {#if sections.active.length === 0 && sections.waiting.length === 0}
-      <p class="empty">{disabled ? "Open a project to work with agents." : "No session runs or waits for you."}</p>
+      <p class="empty">{disabled ? t("openProjectForAgents") : t("noSession")}</p>
     {/if}
     {#if editing === undefined}
-      <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Models &amp; roles…</button>
+      <button class="add" type="button" onclick={onManage}>
+        <Icon name="settings" size="sm" /> {t("modelsAndRolesMore")}
+      </button>
     {:else}
       <form
         onsubmit={(event) => {
@@ -454,26 +458,26 @@
           submit();
         }}
       >
-        <p class="label">Edit agent</p>
-        <input type="text" bind:value={form.name} placeholder="Name" spellcheck="false" />
-        <select bind:value={form.role} aria-label="Role">
+        <p class="label">{t("editAgent")}</p>
+        <input type="text" bind:value={form.name} placeholder={t("name")} spellcheck="false" />
+        <select bind:value={form.role} aria-label={t("role")}>
           {#each roleNames as name (name)}
             <option value={name}>{name}</option>
           {/each}
         </select>
-        <select bind:value={form.engine_id} aria-label="Engine">
-          <option value="" disabled>Engine…</option>
+        <select bind:value={form.engine_id} aria-label={t("engine")}>
+          <option value="" disabled>{t("pickEngine")}</option>
           {#each engines as engine (engine.id)}
             <option value={engine.id} title={engineLine(engine)}>{engine.label}</option>
           {/each}
         </select>
         <p class="hint">
-          Another role or engine for this session only. Models, engines and roles are made and changed under
-          <button type="button" class="link" onclick={onManage}>Models &amp; roles</button>.
+          {t("editHint")}
+          <button type="button" class="link" onclick={onManage}>{t("modelsAndRoles")}</button>.
         </p>
         <div class="form-actions">
-          <button type="submit" class="ax-btn primary" disabled={!specReady(form)}>Save</button>
-          <button type="button" class="ax-btn" onclick={() => (editing = undefined)}>Cancel</button>
+          <button type="submit" class="ax-btn primary" disabled={!specReady(form)}>{t("save")}</button>
+          <button type="button" class="ax-btn" onclick={() => (editing = undefined)}>{t("cancel")}</button>
         </div>
       </form>
     {/if}

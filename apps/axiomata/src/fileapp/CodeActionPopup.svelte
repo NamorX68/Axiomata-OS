@@ -7,6 +7,7 @@
   never takes the focus from the text.
 -->
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
   import { kindTag, type CodeActionItem } from "../editor/lsp/codeActions";
   import { NUMBERED } from "./codeActionMenu";
 
@@ -34,8 +35,8 @@
 </script>
 
 <div class="actions" style:left="{x}px" style:top="{y}px" role="presentation" onmousedown={(e) => e.preventDefault()}>
-  <div class="query" class:empty={query === ""}>{query === "" ? "Code actions — type to filter" : query}</div>
-  <div class="items" role="listbox" aria-label="Code actions" bind:this={list} style:--rows={VISIBLE_ROWS}>
+  <div class="query" class:empty={query === ""}>{query === "" ? tEditor("codeActionsFilter") : query}</div>
+  <div class="items" role="listbox" aria-label={tEditor("codeActions")} bind:this={list} style:--rows={VISIBLE_ROWS}>
     {#each items as item, i (i)}
       <button
         type="button"
@@ -55,7 +56,7 @@
         {#if item.disabled}<span class="reason">{item.disabled}</span>{/if}
       </button>
     {:else}
-      <div class="none">No match</div>
+      <div class="none">{tEditor("noMatch")}</div>
     {/each}
   </div>
 </div>

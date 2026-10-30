@@ -17,8 +17,10 @@ import {
   planTab,
   teamTab,
   openOrFocus,
+  paneTitle,
   projectRoot,
   showsFile,
+  taskTab,
   withFilesPane,
   layoutAfterRename,
   openFilePreview,
@@ -301,5 +303,19 @@ describe("isAreaTab (G4)", () => {
 
   it("counts a file as a document, not an area", () => {
     expect(isAreaTab(fileTab("project:1", "a.rs", null))).toBe(false);
+  });
+});
+
+describe("paneTitle", () => {
+  it("names a pane its kind fixes anew, and keeps every other stored title", () => {
+    expect(paneTitle({ ...planTab(), title: "Planung" })).toBe("Planning");
+    expect(paneTitle(untitledTab())).toBe("New note");
+    expect(paneTitle(fileTab("project:1", "src/a.rs", null))).toBe("a.rs");
+    expect(paneTitle(taskTab("cargo test", "cargo:test"))).toBe("cargo test");
+  });
+
+  it("reads a watch pane's session name back out of its stored title", () => {
+    expect(paneTitle(taskTab("Watch reviewer", "watch:7"))).toBe("Watch reviewer");
+    expect(paneTitle(taskTab("Watch reviewer", "cargo:test"))).toBe("Watch reviewer");
   });
 });

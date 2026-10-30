@@ -29,6 +29,7 @@
     type TaskListInfo,
     type TaskScope,
   } from "./tasksBackend";
+  import { tStudio } from "../i18n/studio";
 
   let {
     root,
@@ -90,13 +91,14 @@
   let scope = $state<TaskScope>("project");
   let saving = $state(false);
 
-  const GROUP_CHOICES: { id: TaskGroup; label: string }[] = [
-    { id: "run", label: "Run" },
-    { id: "build", label: "Build" },
-    { id: "test", label: "Test" },
-    { id: "lint", label: "Check" },
-    { id: "other", label: "Other" },
-  ];
+  /** The groups the form offers, in the panel's order; each is named by `GROUP_LABEL` where it is drawn. */
+  /** The project's own file, named as it is on disk in every language. */
+  const PROJECT_FILE = ".axiomata/tasks.json";
+
+  /** A command line as the placeholder shows it: code, the same in every language. */
+  const EXAMPLE_COMMAND = "uv run uvicorn app:app --reload";
+
+  const GROUP_CHOICES: TaskGroup[] = ["run", "build", "test", "lint", "other"];
 
   function startNew(): void {
     editing = "";
@@ -113,7 +115,7 @@
   async function submit(): Promise<void> {
     if (!root || editing === null || saving) return;
     if (!form.label.trim() || !form.command.trim()) {
-      onError("A task needs a name and a command.");
+      onError(tStudio("taskNeeds"));
       return;
     }
     saving = true;
@@ -130,7 +132,8 @@
 
   async function remove(task: TaskInfo): Promise<void> {
     if (!root || task.source === "detected") return;
-    if (!window.confirm(`Remove the task “${task.label}” from ${task.source === "personal" ? "your tasks file" : "the project's tasks.json"}?`)) return;
+    const question = task.source === "personal" ? "removeTaskPersonal" : "removeTaskProject";
+    if (!window.confirm(tStudio(question, { label: task.label }))) return;
     try {
       await removeTask(root, task.source === "personal" ? "personal" : "project", task.label);
       await refresh();
@@ -145,14 +148,14 @@
 </script>
 
 <div class="panel">
-  <SectionHead label="Run" rule level={2}>
+  <SectionHead label={tStudio("run")} rule level={2}>
     {#snippet actions()}
-      <IconButton icon="refresh-cw" label="Read the tasks again" size="sm" onclick={() => void refresh()} />
+      <IconButton icon="refresh-cw" label={tStudio("readTasks")} size="sm" onclick={() => void refresh()} />
     {/snippet}
   </SectionHead>
   <div class="body">
     {#if !root}
-      <p class="note">Open a project to see what it can run.</p>
+      <p class="note">{tStudio("openToRun")}</p>
     {:else if listed}
       {#if listed.project_file && !listed.project_file.trusted}
         {#snippet review()}
@@ -160,21 +163,20 @@
             {#each projectTasks as task (task.id)}<li><code>{describeTask(task)}</code></li>{/each}
           </ul>
           <div class="actions">
-            <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these tasks</button>
-            <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
+            <button type="button" class="ax-btn primary" onclick={() => void allow()}>{tStudio("allowTasks")}</button>
+            <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>{tStudio("cancel")}</button>
           </div>
         {/snippet}
         <div class="notice-slot">
-          <Notice title="Project tasks need your review" alert children={reviewing ? review : undefined}>
+          <Notice title={tStudio("tasksReview")} alert children={reviewing ? review : undefined}>
             {#snippet details()}
               <p>
-                This project has its own <code>.axiomata/tasks.json</code>. It runs commands from the repository, so it
-                stays off until you have looked at them.
+                {tStudio("tasksReviewBefore")} <code>{PROJECT_FILE}</code>. {tStudio("tasksReviewAfter")}
               </p>
             {/snippet}
             {#snippet action()}
               {#if !reviewing}
-                <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
+                <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>{tStudio("review")}</button>
               {/if}
             {/snippet}
           </Notice>
@@ -182,7 +184,10 @@
       {/if}
       {#each groups as g (g.group)}
         <section class="group g-{g.group}">
-          <h3><span class="swatch" aria-hidden="true"></span>{GROUP_LABEL[g.group]}<span class="n">{g.tasks.length}</span></h3>
+          <h3>
+            <span class="swatch" aria-hidden="true"></span>{GROUP_LABEL[g.group]()}
+            <span class="n">{g.tasks.length}</span>
+          </h3>
           <ul>
             {#each g.tasks as task (task.id)}
               {@const inPane = openTaskIds.has(task.id)}
@@ -192,9 +197,9 @@
                   class="run"
                   disabled={locked(task)}
                   title={locked(task)
-                    ? "Review the project's tasks.json first"
+                    ? tStudio("reviewTasksFirst")
                     : inPane
-                      ? `Start again in its pane: ${describeTask(task)}`
+                      ? tStudio("startInPane", { task: describeTask(task) })
                       : describeTask(task)}
                   onclick={() => onRun(task)}
                 >
@@ -204,16 +209,28 @@
                     {#if task.command !== task.label}<span class="cmd">{describeTask(task)}</span>{/if}
                   </span>
                   {#if locked(task)}
-                    <span class="tag"><Icon name="lock" size="sm" /> project</span>
+                    <span class="tag"><Icon name="lock" size="sm" /> {tStudio("tagProject")}</span>
                   {:else if task.source !== "detected"}
-                    <span class="tag">{task.source}</span>
+                    <span class="tag">
+                      {task.source === "personal" ? tStudio("tagPersonal") : tStudio("tagProject")}
+                    </span>
                   {/if}
-                  {#if inPane}<span class="pane-mark">in a pane</span>{/if}
+                  {#if inPane}<span class="pane-mark">{tStudio("inPane")}</span>{/if}
                 </button>
                 {#if task.source !== "detected" && !locked(task)}
                   <span class="own">
-                    <IconButton icon="pencil" label="Edit {task.label}" size="sm" onclick={() => startEdit(task)} />
-                    <IconButton icon="trash-2" label="Remove {task.label}" size="sm" onclick={() => void remove(task)} />
+                    <IconButton
+                      icon="pencil"
+                      label={tStudio("editNamed", { name: task.label })}
+                      size="sm"
+                      onclick={() => startEdit(task)}
+                    />
+                    <IconButton
+                      icon="trash-2"
+                      label={tStudio("removeNamed", { name: task.label })}
+                      size="sm"
+                      onclick={() => void remove(task)}
+                    />
                   </span>
                 {/if}
               </li>
@@ -223,8 +240,8 @@
       {:else}
         <EmptyState
           compact
-          title="Nothing to run yet"
-          text="Tasks are found in Cargo.toml, package.json, pyproject.toml and a Makefile, or written in .axiomata/tasks.json."
+          title={tStudio("nothingToRun")}
+          text={tStudio("nothingToRunText")}
         />
       {/each}
       {#each listed.problems as problem (problem)}
@@ -233,7 +250,9 @@
     {/if}
     {#if root}
       {#if editing === null}
-        <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> New task</button>
+        <button type="button" class="add" onclick={startNew}>
+          <Icon name="plus" size="sm" /> {tStudio("newTask")}
+        </button>
       {:else}
         <form
           onsubmit={(event) => {
@@ -241,48 +260,65 @@
             void submit();
           }}
         >
-          <p class="form-title">{editing === "" ? "New task" : "Edit task"}</p>
+          <p class="form-title">{editing === "" ? tStudio("newTask") : tStudio("editTask")}</p>
           <label class="field">
-            <span>Name</span>
-            <input type="text" bind:value={form.label} placeholder="Start the server" spellcheck="false" />
+            <span>{tStudio("name")}</span>
+            <input
+              type="text"
+              bind:value={form.label}
+              placeholder={tStudio("taskNamePlaceholder")}
+              spellcheck="false"
+            />
           </label>
           <label class="field">
-            <span>Command</span>
-            <input type="text" class="mono" bind:value={form.command} placeholder="uv run uvicorn app:app --reload" spellcheck="false" />
+            <span>{tStudio("command")}</span>
+            <input
+              type="text"
+              class="mono"
+              bind:value={form.command}
+              placeholder={EXAMPLE_COMMAND}
+              spellcheck="false"
+            />
           </label>
           <label class="field">
-            <span>Folder <small>inside the project, optional</small></span>
+            <span>{tStudio("folder")} <small>{tStudio("insideOptional")}</small></span>
             <input type="text" class="mono" bind:value={form.cwd} placeholder="." spellcheck="false" />
           </label>
           <div class="field">
-            <span>What it is for</span>
-            <div class="kinds" role="radiogroup" aria-label="What it is for">
-              {#each GROUP_CHOICES as choice (choice.id)}
-                <label class="kind g-{choice.id}" class:on={form.group === choice.id}>
-                  <input type="radio" bind:group={form.group} value={choice.id} />
-                  <span class="swatch" aria-hidden="true"></span>{choice.label}
+            <span>{tStudio("taskFor")}</span>
+            <div class="kinds" role="radiogroup" aria-label={tStudio("taskFor")}>
+              {#each GROUP_CHOICES as choice (choice)}
+                <label class="kind g-{choice}" class:on={form.group === choice}>
+                  <input type="radio" bind:group={form.group} value={choice} />
+                  <span class="swatch" aria-hidden="true"></span>{GROUP_LABEL[choice]()}
                 </label>
               {/each}
             </div>
           </div>
           <div class="field">
-            <span>Keep it</span>
-            <div class="scopes" role="radiogroup" aria-label="Keep it">
+            <span>{tStudio("keepIt")}</span>
+            <div class="scopes" role="radiogroup" aria-label={tStudio("keepIt")}>
               <label class="scope" class:on={scope === "project"}>
                 <input type="radio" bind:group={scope} value="project" />
-                <span>In this project</span>
-                <small>.axiomata/tasks.json</small>
+                <span>{tStudio("inThisProject")}</span>
+                <small>{PROJECT_FILE}</small>
               </label>
               <label class="scope" class:on={scope === "personal"}>
                 <input type="radio" bind:group={scope} value="personal" />
-                <span>For all my projects</span>
+                <span>{tStudio("forAllProjects")}</span>
                 <small>~/.axiomata/tasks.json</small>
               </label>
             </div>
           </div>
           <div class="actions">
-            <button type="submit" class="ax-btn primary" disabled={saving || !form.label.trim() || !form.command.trim()}>Save</button>
-            <button type="button" class="ax-btn" onclick={() => (editing = null)}>Cancel</button>
+            <button
+              type="submit"
+              class="ax-btn primary"
+              disabled={saving || !form.label.trim() || !form.command.trim()}
+            >
+              {tStudio("save")}
+            </button>
+            <button type="button" class="ax-btn" onclick={() => (editing = null)}>{tStudio("cancel")}</button>
           </div>
         </form>
       {/if}

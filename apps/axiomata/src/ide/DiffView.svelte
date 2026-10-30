@@ -31,6 +31,7 @@
   import { messageOf } from "../core/errors";
   import { AgentDiffSession } from "./diffSession.svelte";
   import GitActionDialog, { type GitAction } from "./GitActionDialog.svelte";
+  import { tStudio } from "../i18n/studio";
 
   interface Props {
     agent: IdeAgent;
@@ -77,11 +78,11 @@
   /** Why "Take over" is not possible right now (G12), or `null`. */
   const takeOverBlocked = $derived(
     agentState === "working" || agentState === "waiting"
-      ? `Wait until ${agent.name} is idle`
+      ? tStudio("waitIdle", { name: agent.name })
       : session.hasUncommitted
-        ? "Commit the uncommitted changes first"
+        ? tStudio("commitFirst")
         : files.length === 0
-          ? "Nothing to take over"
+          ? tStudio("nothingToTakeOver")
           : null,
   );
 
@@ -125,14 +126,14 @@
       else if (action.kind === "discard-hunk") await session.discardHunk(action.hunk);
       else if (action.kind === "commit") {
         const commit = await session.commit(action.message);
-        toast(`${agent.name}: committed ${commit.slice(0, 7)}`);
+        toast(tStudio("committed", { name: agent.name, commit: commit.slice(0, 7) }));
       } else {
         const result = await session.takeOver(action.mode, action.message);
         if (result.outcome === "conflict") {
           conflictFiles = result.files;
           return;
         }
-        toast(`${agent.name}'s work is on ${action.branch} as ${result.commit.slice(0, 7)}`);
+        toast(tStudio("tookOver", { name: agent.name, branch: action.branch, commit: result.commit.slice(0, 7) }));
       }
       pending = null;
     } catch (err) {
@@ -156,12 +157,13 @@
     if (!e.defaultPrevented && !pending && onKey(e)) e.preventDefault();
   }
 
-  const KIND_MARK: Record<AgentFileChange["kind"], { mark: string; title: string }> = {
-    added: { mark: "A", title: "Added" },
-    modified: { mark: "M", title: "Modified" },
-    deleted: { mark: "D", title: "Deleted" },
-    renamed: { mark: "R", title: "Renamed" },
-    type_changed: { mark: "T", title: "Became a link, or stopped being one" },
+  /** Each kind's letter (git's own, the same in every language) and its explanation, read where it is drawn. */
+  const KIND_MARK: Record<AgentFileChange["kind"], { mark: string; title: () => string }> = {
+    added: { mark: "A", title: () => tStudio("kindAdded") },
+    modified: { mark: "M", title: () => tStudio("kindModified") },
+    deleted: { mark: "D", title: () => tStudio("kindDeleted") },
+    renamed: { mark: "R", title: () => tStudio("kindRenamed") },
+    type_changed: { mark: "T", title: () => tStudio("kindTypeChanged") },
   };
 
   function splitPath(path: string): { dir: string; name: string } {
@@ -183,8 +185,10 @@
   <header class="bar">
     {#if heading}<span class="heading">{heading}</span>{/if}
     {#if base}
-      <span class="base" title="Compared with the merge base {base.commit}">
-        against <strong>{base.branch}</strong> @ {base.commit.slice(0, 7)}{base.fallback ? " (not recorded)" : ""}
+      <span class="base" title={tStudio("comparedWith", { commit: base.commit })}>
+        {tStudio("against")} <strong>{base.branch}</strong> @ {base.commit.slice(0, 7)}{base.fallback
+          ? ` ${tStudio("notRecorded")}`
+          : ""}
       </span>
       <span class="totals"><span class="add">+{totals.add}</span> <span class="del">−{totals.del}</span></span>
     {/if}
@@ -193,18 +197,23 @@
       <IconButton
         icon="file"
         size="sm"
-        label="Show the whole file"
+        label={tStudio("wholeFile")}
         pressed={session.wholeFile}
         onclick={() => session.toggleWholeFile()}
       />
       <IconButton
         icon={layout === "unified" ? "columns-2" : "rows-2"}
         size="sm"
-        label={keyHints(layout === "unified" ? "Two columns (⌘⇧D)" : "One column (⌘⇧D)", $platform)}
+        label={keyHints(layout === "unified" ? tStudio("twoColumns") : tStudio("oneColumn"), $platform)}
         onclick={toggleLayout}
       />
       {#if onOpenFile && loaded?.change.kind !== "deleted"}
-        <IconButton icon="external-link" size="sm" label="Open the agent's copy (⏎)" onclick={() => open(panes?.openLine() ?? 0)} />
+        <IconButton
+          icon="external-link"
+          size="sm"
+          label={tStudio("openAgentCopy")}
+          onclick={() => open(panes?.openLine() ?? 0)}
+        />
       {/if}
     {/if}
     {#if session.current}
@@ -212,7 +221,7 @@
         type="button"
         class="ax-btn danger"
         onclick={() => ask({ kind: "discard-file", path: session.current!.path })}
-        title="Put this file back to how {base?.branch} has it">Discard file</button
+        title={tStudio("discardFileTitle", { branch: base?.branch ?? "" })}>{tStudio("discardFile")}</button
       >
     {/if}
     {#if base}
@@ -221,44 +230,43 @@
         class="ax-btn"
         disabled={!session.hasUncommitted}
         onclick={() => ask({ kind: "commit", message: `wip: ${agent.name}` })}
-        title={session.hasUncommitted ? "Commit what the agent left uncommitted" : "Nothing uncommitted"}
-        >Commit…</button
+        title={session.hasUncommitted ? tStudio("commitUncommitted") : tStudio("nothingUncommitted")}
+        >{tStudio("commitButton")}</button
       >
       <button
         type="button"
         class="ax-btn primary"
         disabled={takeOverBlocked !== null}
         onclick={() => void askTakeOver()}
-        title={takeOverBlocked ?? `Take the committed work over into ${base.branch}`}>Take over…</button
+        title={takeOverBlocked ?? tStudio("takeOverInto", { branch: base.branch })}>{tStudio("takeOverButton")}</button
       >
     {/if}
     {#if onDock}
-      <IconButton icon="panel-right" size="sm" label="Open these diffs in a dock pane of their own" onclick={onDock} />
+      <IconButton icon="panel-right" size="sm" label={tStudio("dockDiffs")} onclick={onDock} />
     {/if}
     <span class="reload" class:spinning={session.refreshing}>
-      <IconButton icon="refresh-cw" size="sm" label={keyHints("Reload (⌘R)", $platform)} onclick={() => session.refresh(true)} />
+      <IconButton
+        icon="refresh-cw"
+        size="sm"
+        label={keyHints(tStudio("reload"), $platform)}
+        onclick={() => session.refresh(true)}
+      />
     </span>
   </header>
 
   {#if session.listError}
     <p class="note error">{session.listError}</p>
   {:else if !session.diffState}
-    <p class="note">Loading…</p>
+    <p class="note">{tStudio("loading")}</p>
   {:else if session.diffState.state === "shared_folder"}
-    <p class="note">
-      This project folder is not a git repository, so its agents work in it together and there is no diff per agent.
-      Make it a git repository to give every agent a worktree of its own.
-    </p>
+    <p class="note">{tStudio("sharedFolder")}</p>
   {:else if session.diffState.state === "not_started"}
-    <p class="note">
-      This agent has not been started yet. Its worktree and branch are made on the first start; what it changes shows up
-      here.
-    </p>
+    <p class="note">{tStudio("notStarted")}</p>
   {:else if files.length === 0}
-    <p class="note">No changes against {base?.branch} yet.</p>
+    <p class="note">{tStudio("noChanges", { branch: base?.branch ?? "" })}</p>
   {:else}
     <div class="body">
-      <ul class="files" aria-label="Changed files" {...KEEP_SCROLL}>
+      <ul class="files" aria-label={tStudio("changedFiles")} {...KEEP_SCROLL}>
         {#each files as file (file.path)}
           {@const part = splitPath(file.path)}
           <li>
@@ -269,11 +277,11 @@
               onclick={() => session.select(file)}
               title={file.old_path ? `${file.old_path} → ${file.path}` : file.path}
             >
-              <span class="kind {file.kind}" title={KIND_MARK[file.kind].title}>{KIND_MARK[file.kind].mark}</span>
+              <span class="kind {file.kind}" title={KIND_MARK[file.kind].title()}>{KIND_MARK[file.kind].mark}</span>
               <span class="path"><span class="name">{part.name}</span> <span class="dir">{part.dir}</span></span>
-              {#if file.uncommitted}<span class="open" title="Not committed yet">●</span>{/if}
+              {#if file.uncommitted}<span class="open" title={tStudio("notCommitted")}>●</span>{/if}
               {#if file.additions === null}
-                <span class="counts">bin</span>
+                <span class="counts">{tStudio("binaryMark")}</span>
               {:else}
                 <span class="counts"><span class="add">+{file.additions}</span> <span class="del">−{file.deletions}</span></span>
               {/if}
@@ -285,30 +293,44 @@
         {#if session.diffError}
           <p class="note error">{session.diffError}</p>
         {:else if !loaded || !model}
-          <p class="note">Loading…</p>
+          <p class="note">{tStudio("loading")}</p>
         {:else if loaded.images}
           <div class="images">
             <figure>
-              {#if loaded.images.old}<img src={loaded.images.old} alt="Before" />{:else}<div class="none">none</div>{/if}
-              <figcaption>Before{loaded.diff.old_size !== null ? ` · ${formatBytes(loaded.diff.old_size)}` : ""}</figcaption>
+              {#if loaded.images.old}
+                <img src={loaded.images.old} alt={tStudio("before")} />
+              {:else}
+                <div class="none">{tStudio("none")}</div>
+              {/if}
+              <figcaption>
+                {tStudio("before")}{loaded.diff.old_size !== null ? ` · ${formatBytes(loaded.diff.old_size)}` : ""}
+              </figcaption>
             </figure>
             <figure>
-              {#if loaded.images.new}<img src={loaded.images.new} alt="After" />{:else}<div class="none">none</div>{/if}
-              <figcaption>After{loaded.diff.new_size !== null ? ` · ${formatBytes(loaded.diff.new_size)}` : ""}</figcaption>
+              {#if loaded.images.new}
+                <img src={loaded.images.new} alt={tStudio("after")} />
+              {:else}
+                <div class="none">{tStudio("none")}</div>
+              {/if}
+              <figcaption>
+                {tStudio("after")}{loaded.diff.new_size !== null ? ` · ${formatBytes(loaded.diff.new_size)}` : ""}
+              </figcaption>
             </figure>
           </div>
         {:else if loaded.diff.binary || loaded.change.binary}
           <p class="note">
-            Binary file changed: {loaded.diff.old_size === null ? "new" : formatBytes(loaded.diff.old_size)} →
-            {loaded.diff.new_size === null ? "deleted" : formatBytes(loaded.diff.new_size)}.
+            {tStudio("binaryChanged", {
+              from: loaded.diff.old_size === null ? tStudio("binaryNew") : formatBytes(loaded.diff.old_size),
+              to: loaded.diff.new_size === null ? tStudio("binaryDeleted") : formatBytes(loaded.diff.new_size),
+            })}
           </p>
         {:else if model.hunkCount === 0}
           <p class="note">
             {loaded.diff.truncated
-              ? "Too large to show as a diff."
+              ? tStudio("tooLarge")
               : loaded.change.kind === "renamed"
-                ? `Renamed from ${loaded.change.old_path}, content unchanged.`
-                : "No line changes (only the file's mode or type)."}
+                ? tStudio("renamedFrom", { path: loaded.change.old_path ?? "" })
+                : tStudio("modeOnly")}
           </p>
         {:else}
           <DiffPanes

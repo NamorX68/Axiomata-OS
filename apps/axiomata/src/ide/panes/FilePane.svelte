@@ -24,6 +24,7 @@
   import { session } from "../projectSession";
   import type { LocationList } from "../../fileapp/locationList";
   import type { OutlineInfo } from "../../fileapp/outlineModel";
+  import { tStudio } from "../../i18n/studio";
 
   let {
     tabId,
@@ -65,8 +66,8 @@
   const ownerAgent = $derived(worktreeAgent(config.root));
   const notice = $derived.by(() => {
     if (ownerAgent === null || $statuses.byAgent.get(ownerAgent)?.state !== "working") return null;
-    const name = $session.agents.find((a) => a.id === ownerAgent)?.name ?? "The agent";
-    return `${name} is working in this worktree and may change this file while you edit it — you'll be asked before anything is overwritten.`;
+    const name = $session.agents.find((a) => a.id === ownerAgent)?.name ?? tStudio("theAgent");
+    return tStudio("agentWorksHere", { name });
   });
 
   onMount(() => {
@@ -93,10 +94,10 @@
     }
     failure =
       result.kind === "UnknownRoot"
-        ? `${config.rel}: the place it lived in is gone (a discarded worktree, or a removed project).`
+        ? tStudio("placeGone", { rel: config.rel })
         : result.kind === "NotFound"
-          ? `${config.rel} does not exist (any more).`
-          : `Could not open ${config.rel}: ${result.message}`;
+          ? tStudio("fileMissing", { rel: config.rel })
+          : tStudio("cannotOpen", { rel: config.rel, error: result.message });
   }
 
   /** The editor's own account of what it shows. */

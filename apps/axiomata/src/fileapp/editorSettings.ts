@@ -17,6 +17,7 @@ import { toast } from "../core/toast";
 import { usableFamilyName } from "../core/installedFonts";
 import { FILE_ICON_STYLES, type FileIconStyle } from "../core/fileIcons";
 import { editorThemeOr, FOLLOW_APP_THEME } from "../core/editorThemes";
+import { tEditor } from "../i18n/editor";
 
 export type EditorMode = "normal" | "vi";
 export type Autosave = "off" | "delay" | "leave";
@@ -222,7 +223,7 @@ export function ensureEditorSettingsLoaded(): Promise<void> {
       }
       editorSettings.set(parseEditorSettings(parsed));
     })
-    .catch((err) => toast(`Could not read editor-settings.json: ${String(err)}`, "danger"));
+    .catch((err) => toast(tEditor("settingsReadFailed", { error: String(err) }), "danger"));
   return loaded;
 }
 
@@ -233,7 +234,7 @@ export function updateEditorSettings(patch: Partial<EditorSettings>): void {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       invokeBackend("save_editor_settings", { json: JSON.stringify({ version: SETTINGS_VERSION, ...next }) }).catch(
-        (err) => toast(`Could not save editor-settings.json: ${String(err)}`, "danger"),
+        (err) => toast(tEditor("settingsSaveFailed", { error: String(err) }), "danger"),
       );
     }, SAVE_DEBOUNCE_MS);
     return next;

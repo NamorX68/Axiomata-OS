@@ -40,6 +40,7 @@
   import { onMount } from "svelte";
 
   import type { FileRootInfo } from "../core/backend";
+  import { tEditor } from "../i18n/editor";
   import { parseQuery, rankFiles, type Candidate, type Ranked } from "./quickOpen";
   import type { FileRef } from "./tabs";
 
@@ -135,17 +136,23 @@
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 <div class="backdrop" onclick={onClose}>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="quick-open" role="dialog" aria-label="Open a file" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+  <div
+    class="quick-open"
+    role="dialog"
+    aria-label={tEditor("openAFile")}
+    tabindex="-1"
+    onclick={(e) => e.stopPropagation()}
+  >
     <input
       bind:this={input}
       bind:value={query}
       onkeydown={onKeydown}
-      placeholder="File name — :12 for a line"
-      aria-label="File name"
+      placeholder={tEditor("quickOpenPlaceholder")}
+      aria-label={tEditor("fileName")}
       spellcheck="false"
       autocomplete="off"
     />
-    <ul role="listbox" aria-label="Files">
+    <ul role="listbox" aria-label={tEditor("files")}>
       {#each results as result, i (result.root + "\0" + result.rel)}
         <li role="option" aria-selected={i === selected}>
           <button
@@ -161,10 +168,10 @@
           </button>
         </li>
       {:else}
-        <li class="note">{loadingAny ? "Reading the folders…" : "No file matches."}</li>
+        <li class="note">{loadingAny ? tEditor("readingFolders") : tEditor("noFileMatches")}</li>
       {/each}
     </ul>
-    {#if truncated}<p class="note">Some folders have more files than quick open reads.</p>{/if}
+    {#if truncated}<p class="note">{tEditor("quickOpenTruncated")}</p>{/if}
   </div>
 </div>
 

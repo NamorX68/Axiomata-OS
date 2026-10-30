@@ -5,6 +5,7 @@
   The file app's footer holds it, and so does the bar under a diff.
 -->
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
   import type { ViStatus } from "./viSurface";
 
   let { status }: { status: ViStatus } = $props();
@@ -21,7 +22,7 @@
 
 <span class="vi-status">
   <span class="vi-pill {status.mode}">{LABELS[status.mode]}</span>
-  {#if status.recording}<span class="vi-rec">● REC {status.recording}</span>{/if}
+  {#if status.recording}<span class="vi-rec">{tEditor("viRecording", { register: status.recording })}</span>{/if}
   {#if status.cmdline}
     {@const line = status.cmdline}
     <span class="vi-cmdline" aria-live="polite"

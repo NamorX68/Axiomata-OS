@@ -8,6 +8,7 @@
   import { tick } from "svelte";
 
   import { filterOutline, pathAt, type OutlineSymbol, type SymbolKind } from "../editor/syntax/outline";
+  import { tEditor } from "../i18n/editor";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import type { OutlineInfo } from "./outlineModel";
@@ -87,14 +88,19 @@
       <button
         type="button"
         class="chevron"
-        aria-label={isFolded ? "Unfold" : "Fold"}
+        aria-label={isFolded ? tEditor("unfold") : tEditor("fold")}
         onclick={() => toggleFold(s)}
         ><Icon name={isFolded ? "chevron-right" : "chevron-down"} size="sm" /></button
       >
     {:else}
       <span class="chevron"></span>
     {/if}
-    <button type="button" class="jump" onclick={() => onJump(s.nameLine)} title="Line {s.line + 1}">
+    <button
+      type="button"
+      class="jump"
+      onclick={() => onJump(s.nameLine)}
+      title={tEditor("lineN", { line: s.line + 1 })}
+    >
       <span class="glyph kind-{s.kind}" aria-hidden="true">{GLYPH[s.kind]}</span>
       <span class="name">{s.name}</span>
     </button>
@@ -106,17 +112,17 @@
   {/if}
 {/snippet}
 
-<section class="outline" aria-label="Outline">
+<section class="outline" aria-label={tEditor("outline")}>
   <header>
     <button type="button" class="title" aria-expanded={open} onclick={onToggle}>
-      <Icon name={open ? "chevron-down" : "chevron-right"} size="sm" /> Outline
+      <Icon name={open ? "chevron-down" : "chevron-right"} size="sm" /> {tEditor("outline")}
     </button>
     {#if open}
       <IconButton
         icon="lock"
         size="sm"
         pressed={pinned}
-        label={pinned ? "Follow the cursor again" : "Pin: stop following the cursor"}
+        label={pinned ? tEditor("followCursorAgain") : tEditor("pinOutline")}
         onclick={() => {
           pinned = !pinned;
           if (!pinned && info) markLine = info.line;
@@ -125,14 +131,14 @@
     {/if}
   </header>
   {#if open}
-    <input class="filter" type="text" spellcheck="false" placeholder="Filter symbols" bind:value={query} />
+    <input class="filter" type="text" spellcheck="false" placeholder={tEditor("filterSymbols")} bind:value={query} />
     <div class="list" bind:this={list}>
       {#if !info}
-        <p class="note">No file open.</p>
+        <p class="note">{tEditor("noFileOpen")}</p>
       {:else if info.symbols === null}
-        <p class="note">No outline for this file.</p>
+        <p class="note">{tEditor("noOutline")}</p>
       {:else if shown.length === 0}
-        <p class="note">{query === "" ? "No symbols." : "Nothing matches."}</p>
+        <p class="note">{query === "" ? tEditor("noSymbols") : tEditor("nothingMatches")}</p>
       {:else}
         {#each shown as s (keyOf(s))}
           {@render row(s, 0)}

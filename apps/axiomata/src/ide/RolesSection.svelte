@@ -24,15 +24,20 @@
     type SkippedRole,
   } from "../core/roster";
   import { toast } from "../core/toast";
+  import { tAgents as t } from "../i18n/agents";
   import MigrationNotice from "./MigrationNotice.svelte";
   import RoleChip from "./RoleChip.svelte";
-  import { roleIdFor } from "./rosterLook";
+  import { roleIdFor, tierHint } from "./rosterLook";
   import { bumpRoster } from "./rosterStore";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
 
   /** The fields this form shows a problem beside; any other problem is shown above the buttons. */
   const SHOWN_FIELDS = ["name", "description", "kind", "creates", "maxCost", "maxTokens", "maxSteps"];
+  /** The kinds of work the form suggests: values a role file holds, so they stay as they are in every language. */
+  const ROLE_KINDS = ["implement", "review", "plan", "test", "doc"];
+  /** Where a role's file lives: a path, the same in every language. */
+  const ROLE_FILE = "~/.axiomata/agents/<id>/AGENT.md";
 
   let roles = $state<Role[]>([]);
   let skipped = $state<SkippedRole[]>([]);
@@ -48,7 +53,7 @@
       roles = loaded.roles;
       skipped = loaded.skipped;
     } catch (err) {
-      toast(`Could not load the roles: ${messageOf(err)}`, "warning");
+      toast(t("rolesUnreadable", { error: messageOf(err) }), "warning");
     } finally {
       loading = false;
     }
@@ -85,7 +90,7 @@
       return;
     }
     if (isNew && roles.some((r) => r.name === checked.value.name)) {
-      problem = { field: "name", message: `There is already a role “${checked.value.name}”.` };
+      problem = { field: "name", message: t("roleExists", { name: checked.value.name }) };
       return;
     }
     saving = true;
@@ -102,7 +107,7 @@
   }
 
   async function remove(role: Role) {
-    if (!window.confirm(`Delete the role “${role.name}”? Its AGENT.md file is removed.`)) return;
+    if (!window.confirm(t("deleteRoleAsk", { name: role.name }))) return;
     try {
       await deleteRole(role.name);
       if (form?.name === role.name && !isNew) form = null;
@@ -113,7 +118,7 @@
     }
   }
 
-  const tierLabel = (id: Role["tier"]) => TIERS.find((t) => t.id === id)?.label ?? id;
+  const tierLabel = (id: Role["tier"]) => TIERS.find((level) => level.id === id)?.label ?? id;
 
   onMount(reload);
 </script>
@@ -121,15 +126,15 @@
 <section class="split" class:has-form={form !== null}>
   <div class="list">
     <div class="list-head">
-      <h3>Roles</h3>
-      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add role…</button>
+      <h3>{t("roles")}</h3>
+      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> {t("addRole")}</button>
     </div>
     <MigrationNotice onChange={() => void reload()} />
     {#if loading}
-      <p class="hint">Loading…</p>
+      <p class="hint">{t("loading")}</p>
     {:else}
       {#if roles.length === 0}
-        <p class="hint">No roles yet.</p>
+        <p class="hint">{t("noRoles")}</p>
       {:else}
         <ul class="cards">
           {#each roles as r (r.name)}
@@ -141,115 +146,127 @@
                     <span class="name">{r.name}</span>
                     <span class="meta">
                       <RoleChip label={r.kind} kind={r.kind} />
-                      default tier {tierLabel(r.tier).toLowerCase()}
+                      {t("defaultTierNamed", { tier: tierLabel(r.tier) })}
                     </span>
                   </span>
                 </span>
                 {#if r.description}<span class="since">{r.description}</span>{/if}
               </button>
               <div class="row-actions">
-                <IconButton icon="trash-2" label="Delete {r.name}" size="sm" onclick={() => remove(r)} />
+                <IconButton
+                  icon="trash-2"
+                  label={t("deleteNamed", { name: r.name })}
+                  size="sm"
+                  onclick={() => remove(r)}
+                />
               </div>
             </li>
           {/each}
         </ul>
       {/if}
       {#each skipped as s (s.name)}
-        <p class="problem">Skipped: <code>{s.name}</code> — {s.reason}</p>
+        <p class="problem">{t("skippedRole")} <code>{s.name}</code> — {s.reason}</p>
       {/each}
     {/if}
   </div>
 
   <div class="detail">
     {#if form}
-      <button type="button" class="back" onclick={() => (form = null)}>← All roles</button>
-      <h3>{isNew ? "New role" : form.name}</h3>
+      <button type="button" class="back" onclick={() => (form = null)}>{t("allRoles")}</button>
+      <h3>{isNew ? t("newRole") : form.name}</h3>
       {#if isNew}
         <label class="field">
-          <span>Name</span>
-          <input type="text" spellcheck="false" bind:value={form.name} placeholder="e.g. Reviewer light" />
+          <span>{t("name")}</span>
+          <input type="text" spellcheck="false" bind:value={form.name} placeholder={t("roleNamePlaceholder")} />
           {#if problem?.field === "name"}<em class="problem">{problem.message}</em>{/if}
         </label>
-        <p class="idline">ID and file name: <code>{derivedId || "—"}</code></p>
+        <p class="idline">{t("idAndFile")} <code>{derivedId || "—"}</code></p>
       {/if}
       <label class="field">
-        <span>Description</span>
+        <span>{t("description")}</span>
         <input type="text" bind:value={form.description} />
         {#if problem?.field === "description"}<em class="problem">{problem.message}</em>{/if}
       </label>
       <div class="pair">
         <label class="field">
-          <span>Kind of work</span>
-          <input type="text" spellcheck="false" list="role-kinds" bind:value={form.kind} placeholder="implement, review, plan, test, doc" />
+          <span>{t("kindOfWork")}</span>
+          <input
+            type="text"
+            spellcheck="false"
+            list="role-kinds"
+            bind:value={form.kind}
+            placeholder={ROLE_KINDS.join(", ")}
+          />
           <datalist id="role-kinds">
-            {#each ["implement", "review", "plan", "test", "doc"] as k (k)}<option value={k}></option>{/each}
+            {#each ROLE_KINDS as k (k)}<option value={k}></option>{/each}
           </datalist>
           {#if problem?.field === "kind"}<em class="problem">{problem.message}</em>{/if}
         </label>
         <div class="field">
-          <span id="role-tier">Default tier</span>
+          <span id="role-tier">{t("defaultTier")}</span>
           <div class="segments" role="radiogroup" aria-labelledby="role-tier">
-            {#each TIERS as t (t.id)}
+            {#each TIERS as level (level.id)}
               <button
                 type="button"
                 role="radio"
-                aria-checked={form.tier === t.id}
-                class:mine={form.tier === t.id}
-                title={t.hint}
-                onclick={() => form && (form.tier = t.id)}>{t.label}</button
+                aria-checked={form.tier === level.id}
+                class:mine={form.tier === level.id}
+                title={tierHint(level.id)}
+                onclick={() => form && (form.tier = level.id)}>{level.label}</button
               >
             {/each}
           </div>
         </div>
       </div>
       <label class="field">
-        <span>Working instructions (Markdown)</span>
+        <span>{t("instructions")}</span>
         <textarea rows="12" spellcheck="false" bind:value={form.instructions}></textarea>
       </label>
       <label class="field">
-        <span>Rights (harness rules, one per line)</span>
+        <span>{t("rights")}</span>
         <textarea rows="2" spellcheck="false" bind:value={form.permissions}></textarea>
       </label>
       <div class="field">
-        <span>Limits of a session (empty = the tier's default)</span>
+        <span>{t("sessionLimits")}</span>
         <div class="triple">
           <label class="field">
-            <span>Cost limit (USD)</span>
-            <input type="text" inputmode="decimal" bind:value={form.maxCost} placeholder="empty = default" />
+            <span>{t("costLimit")}</span>
+            <input type="text" inputmode="decimal" bind:value={form.maxCost} placeholder={t("emptyIsDefault")} />
             {#if problem?.field === "maxCost"}<em class="problem">{problem.message}</em>{/if}
           </label>
           <label class="field">
-            <span>Token limit</span>
-            <input type="text" inputmode="numeric" bind:value={form.maxTokens} placeholder="empty = default" />
+            <span>{t("tokenLimit")}</span>
+            <input type="text" inputmode="numeric" bind:value={form.maxTokens} placeholder={t("emptyIsDefault")} />
             {#if problem?.field === "maxTokens"}<em class="problem">{problem.message}</em>{/if}
           </label>
           <label class="field">
-            <span>Step limit</span>
-            <input type="text" inputmode="numeric" bind:value={form.maxSteps} placeholder="empty = default" />
+            <span>{t("stepLimit")}</span>
+            <input type="text" inputmode="numeric" bind:value={form.maxSteps} placeholder={t("emptyIsDefault")} />
             {#if problem?.field === "maxSteps"}<em class="problem">{problem.message}</em>{/if}
           </label>
         </div>
       </div>
       <details class="advanced" open={advancedProblem}>
-        <summary>Advanced</summary>
+        <summary>{t("advanced")}</summary>
         <label class="field">
-          <span>Creates cards without asking (kinds, comma-separated)</span>
-          <input type="text" spellcheck="false" bind:value={form.creates} placeholder="e.g. test, doc" />
+          <span>{t("createsCards")}</span>
+          <input type="text" spellcheck="false" bind:value={form.creates} placeholder={t("createsPlaceholder")} />
           {#if problem?.field === "creates"}<em class="problem">{problem.message}</em>{/if}
         </label>
       </details>
       <!-- A problem of a field the form does not show (or of none) is said here, never swallowed. -->
       {#if problem && !SHOWN_FIELDS.includes(problem.field)}<p class="problem">{problem.message}</p>{/if}
       <div class="actions">
-        <button type="button" class="ax-btn primary" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save role"}</button>
-        <button type="button" class="ax-btn" onclick={() => (form = null)}>Cancel</button>
+        <button type="button" class="ax-btn primary" disabled={saving} onclick={save}>
+          {saving ? t("saving") : t("saveRole")}
+        </button>
+        <button type="button" class="ax-btn" onclick={() => (form = null)}>{t("cancel")}</button>
       </div>
     {:else if !loading}
       <p class="hint">
-        A role says what an agent is for: kind of work, default tier, rights, limits and the working instructions —
-        no engine: the tier's engine runs (Models tab). It lives as a file at
-        <code>~/.axiomata/agents/&lt;id&gt;/AGENT.md</code> and can never start a program itself. Pick one on the left
-        to change it, or add a new one.
+        {t("rolesHintBefore")}
+        <code>{ROLE_FILE}</code>
+        {t("rolesHintAfter")}
       </p>
     {/if}
   </div>

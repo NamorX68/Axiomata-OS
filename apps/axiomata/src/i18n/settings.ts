@@ -398,9 +398,9 @@ export const tSettings = texts("settings", en, {
 
   harnessClaudeCode: "Nur Anthropic, mit der eigenen Anmeldung der App",
   harnessGlut: "Axiomatas eigener Harness — OpenRouter oder Ollama",
-  webExaHint: "Geht auch ohne Schlüssel (begrenzt); ein Schlüssel hebt das Limit an",
+  webExaHint: "Geht auch ohne Schlüssel (begrenzt); ein Schlüssel hebt die Grenze an",
   webTinyfishHint: "Wird gefragt, wenn Exa begrenzt ist oder scheitert",
-  webTavilyHint: "Wird zuletzt gefragt, nur bis zum Monatslimit unten (auf dem Konto liegt eine Karte)",
+  webTavilyHint: "Wird zuletzt gefragt, nur bis zur Monatsgrenze unten (auf dem Konto liegt eine Karte)",
 
   vault: "Vault",
   vaultLead: "Wurzelordner des Second-Brain-Workspace. Eine Änderung wirkt nach einem Neustart.",
@@ -515,14 +515,14 @@ export const tSettings = texts("settings", en, {
 
   spend: "Ausgaben",
   spendToday: "{amount} heute",
-  spendCap: "/ {amount} Limit",
+  spendCap: "/ {amount} Grenze",
   spendMonth: "· {amount} diesen Monat",
   roleToProvider: "{role} → {provider}",
   subscriptionBilled: "{role} → {provider} wird über das Abo abgerechnet — keine Kostenerfassung.",
-  dailyLimit: "Tageslimit (USD, bezahlte Anbieter)",
-  noLimit: "leer = kein Limit",
+  dailyLimit: "Tagesgrenze (USD, bezahlte Anbieter)",
+  noLimit: "leer = keine Grenze",
   dailyLimitHint:
-    "Sobald die heutige Summe das Limit erreicht, wird der nächste Agent-Aufruf über einen bezahlten Anbieter " +
+    "Sobald die heutige Summe die Grenze erreicht, wird der nächste Agent-Aufruf über einen bezahlten Anbieter " +
     "abgelehnt.",
   saveAssignment: "Zuordnung speichern",
 

@@ -20,6 +20,7 @@
   import { relativeTime } from "../../core/format";
   import { STATE_LABEL } from "../../core/kanban";
   import { toast } from "../../core/toast";
+  import { tFlow } from "../../i18n/flow";
   import { NODE_H, NODE_W, endOf, layoutGraph, reviewLabel, reviewToneOf, toneOf, wrapTitle } from "../flowGraph";
   import { allCardsOfPlan } from "../planning";
   import { flowSelection, resolvePlan } from "../flowSelection";
@@ -159,9 +160,9 @@
       const result = await invoke<CardIntegrationResult>("integrate_card", { cardId: card.id });
       if (result.outcome === "done") {
         closePanesOf(result.agent_ids);
-        toast(`Card #${card.id} is integrated into the plan.`, "info");
+        toast(tFlow("cardIntegrated", { id: card.id }), "info");
       } else if (result.outcome === "conflict") {
-        toast(`Card #${card.id} still does not fit into the plan (${result.files.join(", ")}).`, "warning");
+        toast(tFlow("cardStillConflicts", { id: card.id, files: result.files.join(", ") }), "warning");
       }
       await Promise.all([reloadBoard(), refreshAgents()]);
     });
@@ -171,7 +172,7 @@
     await act(async () => {
       closePanesOf(await invoke<number[]>("redo_card", { cardId: card.id }));
       await Promise.all([reloadBoard(), refreshAgents()]);
-      toast(`Card #${card.id} will be redone on the plan's new state.`, "info");
+      toast(tFlow("cardRedone", { id: card.id }), "info");
     });
   }
 
@@ -194,23 +195,23 @@
 
 <div class="graph-pane">
   <header>
-    <ul class="legend" aria-label="Farben">
-      <li class="idle">ready / waiting</li>
-      <li class="active">in progress</li>
-      <li class="attention">question</li>
-      <li class="review">in review</li>
-      <li class="done">checked / in the plan</li>
-      <li class="failed">failed</li>
+    <ul class="legend" aria-label={tFlow("legend")}>
+      <li class="idle">{tFlow("legendIdle")}</li>
+      <li class="active">{tFlow("legendActive")}</li>
+      <li class="attention">{tFlow("legendQuestion")}</li>
+      <li class="review">{tFlow("legendReview")}</li>
+      <li class="done">{tFlow("legendDone")}</li>
+      <li class="failed">{tFlow("legendFailed")}</li>
     </ul>
   </header>
 
   {#if !plan}
-    <EmptyState title="No plan yet" text="Create one under Planning; its cards appear here as a graph." />
+    <EmptyState title={tFlow("noPlanYet")} text={tFlow("noPlanYetText")} />
   {:else if cards.length === 0}
-    <EmptyState title="The plan has no cards yet" text="The planner creates them as proposals." />
+    <EmptyState title={tFlow("noCardsYet")} text={tFlow("noCardsYetText")} />
   {:else}
     <div class="canvas">
-      <svg width={graph.width} height={graph.height} role="img" aria-label="Graph des Plans {plan.name}">
+      <svg width={graph.width} height={graph.height} role="img" aria-label={tFlow("graphLabel", { name: plan.name })}>
         <defs>
           <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
             <path d="M 0 0 L 8 4 L 0 8 z" class="arrow-head" />
@@ -231,19 +232,19 @@
           {/if}
         {/each}
         {#if graph.start}
-          <g class="start" transform="translate({graph.start.x} {graph.start.y})" aria-label="Start des Plans">
+          <g class="start" transform="translate({graph.start.x} {graph.start.y})" aria-label={tFlow("startLabel")}>
             <rect width={graph.start.w} height={graph.start.h} rx={graph.start.h / 2} />
-            <text x={graph.start.w / 2} y={graph.start.h / 2 + 4} text-anchor="middle">Start</text>
+            <text x={graph.start.w / 2} y={graph.start.h / 2 + 4} text-anchor="middle">{tFlow("start")}</text>
           </g>
         {/if}
         {#if graph.end && goal}
           <g
             class="goal {goal.tone}"
             transform="translate({graph.end.x} {graph.end.y})"
-            aria-label="Goal of the plan: {goal.label}"
+            aria-label={tFlow("goalLabel", { label: goal.label })}
           >
             <rect width={graph.end.w} height={graph.end.h} rx={graph.end.h / 2} />
-            <text x={graph.end.w / 2} y="22" text-anchor="middle" class="goal-title">Goal</text>
+            <text x={graph.end.w / 2} y="22" text-anchor="middle" class="goal-title">{tFlow("goal")}</text>
             <text x={graph.end.w / 2} y="40" text-anchor="middle" class="goal-sub">{goal.label}</text>
           </g>
         {/if}
@@ -263,8 +264,8 @@
             role="button"
             tabindex="0"
             aria-label={review
-              ? `Review of card ${node.card.id}, ${reviewLabel(node.card)}`
-              : `Card ${node.card.id}, ${STATE_LABEL[node.card.state]}`}
+              ? tFlow("reviewNodeLabel", { id: node.card.id, state: reviewLabel(node.card) })
+              : tFlow("cardNodeLabel", { id: node.card.id, state: STATE_LABEL[node.card.state] })}
             aria-pressed={selectedId === node.card.id}
             onclick={() => (selectedId = selectedId === node.card.id ? null : node.card.id)}
             onkeydown={(e) => onKey(e, node.card.id)}
@@ -272,7 +273,9 @@
             <rect class="tile" width={NODE_W} height={NODE_H} rx="12" />
             <rect class="band" width="6" height={NODE_H} clip-path="url(#tile-clip)" />
             {#if review}
-              <text x="20" y="25" class="head"><tspan class="tag">REVIEW</tspan><tspan dx="8">#{node.card.id}</tspan></text>
+              <text x="20" y="25" class="head"
+                ><tspan class="tag">{tFlow("reviewTag")}</tspan><tspan dx="8">#{node.card.id}</tspan></text
+              >
               {#each wrapTitle(node.card.title) as line, i (i)}
                 <text x="20" y={52 + i * 19} class="title">{line}</text>
               {/each}
@@ -281,7 +284,7 @@
               {#if reviewedNow.has(node.card.id)}<circle cx={NODE_W - 18} cy="19" r="5" class="live" />{/if}
             {:else}
               <text x="20" y="25" class="head">
-                <tspan class="id">#{node.card.id}</tspan><tspan dx="8">{node.card.kind ?? "card"}</tspan>
+                <tspan class="id">#{node.card.id}</tspan><tspan dx="8">{node.card.kind ?? tFlow("cardKind")}</tspan>
               </text>
               {#each wrapTitle(node.card.title) as line, i (i)}
                 <text x="20" y={52 + i * 19} class="title">{line}</text>
@@ -299,32 +302,44 @@
       </svg>
     </div>
 
-    <section class="detail" aria-label="Card">
+    <section class="detail" aria-label={tFlow("card")}>
       {#if selected}
         <h3>#{selected.id} {selected.title}</h3>
         <p class="meta">
           <span class="chip {toneOf(selected.state)}">{STATE_LABEL[selected.state]}</span>
-          {#if selected.agent}<span class="muted">Role {selected.agent}{selected.tier ? ` · ${selected.tier}` : ""}</span>{/if}
+          {#if selected.agent}
+            <span class="muted"
+              >{tFlow("roleLine", { role: selected.agent })}{selected.tier ? ` · ${selected.tier}` : ""}</span
+            >
+          {/if}
           {#if selected.depends_on.length > 0}
-            <span class="muted">braucht zuerst: {selected.depends_on.map((id) => `#${id}`).join(", ")}</span>
+            <span class="muted"
+              >{tFlow("needsFirstList", { ids: selected.depends_on.map((id) => `#${id}`).join(", ") })}</span
+            >
           {/if}
         </p>
-        {#if selected.input_required}<p class="question" role="status">Fragt: {selected.input_required}</p>{/if}
+        {#if selected.input_required}
+          <p class="question" role="status">{tFlow("asks", { question: selected.input_required })}</p>
+        {/if}
         <div class="actions">
           {#each sessions as agent (agent.id)}
             <button class="ax-btn" type="button" onclick={() => showSession(agent.id)}>
-              Sitzung öffnen: {agent.name}
+              {tFlow("openSession", { name: agent.name })}
             </button>
           {/each}
           {#if leftForOwner.includes(selected.id)}
-            <span class="error" role="status">Does not fit the plan twice; the Studio gave up.</span>
-            <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(selected)}>Erneut integrieren</button>
-            <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(selected)}>Neu machen</button>
+            <span class="error" role="status">{tFlow("gaveUp")}</span>
+            <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(selected)}
+              >{tFlow("integrateAgain")}</button
+            >
+            <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(selected)}
+              >{tFlow("redo")}</button
+            >
           {/if}
         </div>
         {#if error}<p class="error" role="alert">{error}</p>{/if}
         {#if events.length > 0}
-          <ol class="events" aria-label="Verlauf">
+          <ol class="events" aria-label={tFlow("history")}>
             {#each [...events].reverse() as event (event.id)}
               <li>
                 <span class="muted">{relativeTime(event.at)}</span>
@@ -336,7 +351,7 @@
           </ol>
         {/if}
       {:else}
-        <p class="muted">Click a card to see its history and its sessions.</p>
+        <p class="muted">{tFlow("clickCard")}</p>
       {/if}
     </section>
   {/if}

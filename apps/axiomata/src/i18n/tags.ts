@@ -164,7 +164,7 @@ export const tTags = texts("tags", en, {
   problemLength: "Höchstens 64 Zeichen.",
   problemChars: "Nur Buchstaben, Ziffern, _ - und /.",
   problemDigits: "Nicht nur Ziffern.",
-  problemStart: "Fang mit einem Buchstaben oder einer Ziffer an.",
+  problemStart: "Fange mit einem Buchstaben oder einer Ziffer an.",
   problemSlash: "Ein / nur zwischen zwei Teilen.",
   problemTaken: "#{tag} steht schon auf der Liste.",
 

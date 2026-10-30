@@ -11,6 +11,7 @@
   import IconButton from "../ui/IconButton.svelte";
   import { glow } from "../ui/glow";
   import type { SidebarView } from "../fileapp/treeModel";
+  import { tStudio } from "../i18n/studio";
 
   let {
     view,
@@ -41,14 +42,21 @@
   const shown = (v: SidebarView) => open && view === v;
 </script>
 
-<nav class="rail" aria-label="Views">
+<nav class="rail" aria-label={tStudio("railViews")}>
   <!-- Working on the code: where it is, what is in it, what changed. -->
   <div class="group" role="tablist" aria-orientation="vertical">
-    <IconButton icon="folder-tree" size="xl" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
+    <IconButton
+      icon="folder-tree"
+      size="xl"
+      label={tStudio("viewFiles")}
+      tab
+      pressed={shown("files")}
+      onclick={() => onSelect("files")}
+    />
     <IconButton
       icon="search"
       size="xl"
-      label={keyHints("Search the project (⇧⌘F)", $platform)}
+      label={keyHints(tStudio("viewSearch"), $platform)}
       tab
       pressed={shown("search")}
       onclick={() => onSelect("search")}
@@ -57,7 +65,7 @@
       <IconButton
         icon="git-branch"
         size="xl"
-        label={gitCount > 0 ? `Git — ${gitCount} changed` : "Git"}
+        label={gitCount > 0 ? tStudio("gitChanged", { n: gitCount }) : tStudio("viewGit")}
         tab
         pressed={shown("git")}
         onclick={() => onSelect("git")}
@@ -68,13 +76,27 @@
   <span class="rule" aria-hidden="true"></span>
   <!-- Making things run: tasks and agents. -->
   <div class="group" role="tablist" aria-orientation="vertical">
-    <IconButton icon="play" size="xl" label="Run — build, test, start" tab pressed={shown("tasks")} onclick={() => onSelect("tasks")} />
-    <IconButton icon="bug" size="xl" label="Debug" tab pressed={shown("debug")} onclick={() => onSelect("debug")} />
+    <IconButton
+      icon="play"
+      size="xl"
+      label={tStudio("viewRun")}
+      tab
+      pressed={shown("tasks")}
+      onclick={() => onSelect("tasks")}
+    />
+    <IconButton
+      icon="bug"
+      size="xl"
+      label={tStudio("viewDebug")}
+      tab
+      pressed={shown("debug")}
+      onclick={() => onSelect("debug")}
+    />
     <span class="slot">
       <IconButton
         icon="bot"
         size="xl"
-        label={agentsRunning > 0 ? `Agents — ${agentsRunning} working` : "Agents"}
+        label={agentsRunning > 0 ? tStudio("agentsWorking", { n: agentsRunning }) : tStudio("viewAgents")}
         tab
         pressed={shown("agents")}
         onclick={() => onSelect("agents")}
@@ -84,8 +106,8 @@
   </div>
   <!-- Actions, not views: they never stay pressed. -->
   <div class="foot">
-    <IconButton icon="terminal" size="xl" label="New terminal" {disabled} onclick={onTerminal} />
-    <IconButton icon="folder-open" size="xl" label={keyHints("Open a file… (⌘O)", $platform)} onclick={onOpenFile} />
+    <IconButton icon="terminal" size="xl" label={tStudio("newTerminal")} {disabled} onclick={onTerminal} />
+    <IconButton icon="folder-open" size="xl" label={keyHints(tStudio("openFile"), $platform)} onclick={onOpenFile} />
   </div>
 </nav>
 

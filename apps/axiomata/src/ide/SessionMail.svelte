@@ -10,6 +10,7 @@
   import { messageOf } from "../core/errors";
   import { relativeTime } from "../core/format";
   import { toast } from "../core/toast";
+  import { tFlow } from "../i18n/flow";
 
   let { agentId, visible = true }: { agentId: number; visible?: boolean } = $props();
 
@@ -57,7 +58,7 @@
       const result = await invoke<OwnerSend>("ide_mailbox_send", { id: agentId, message: text });
       draft = "";
       if (result.outcome === "undeliverable") {
-        toast(`Gespeichert, aber niemand liest es: ${result.reason}`, "warning");
+        toast(tFlow("savedUnread", { reason: result.reason }), "warning");
       }
       lines = await read(agentId);
     } catch (err) {
@@ -65,6 +66,13 @@
     } finally {
       busy = false;
     }
+  }
+
+  /** A delivery status in words; one the app does not know yet is shown as the backend names it. */
+  function statusLabel(status: string): string {
+    if (status === "held") return tFlow("mailHeld");
+    if (status === "undeliverable") return tFlow("mailUndeliverable");
+    return status;
   }
 
   function onKey(event: KeyboardEvent): void {
@@ -75,10 +83,10 @@
   }
 </script>
 
-<section class="mail" aria-label="Messages">
-  <h4>Messages</h4>
+<section class="mail" aria-label={tFlow("messages")}>
+  <h4>{tFlow("messages")}</h4>
   {#if lines.length === 0}
-    <p class="muted">No messages yet.</p>
+    <p class="muted">{tFlow("noMessages")}</p>
   {:else}
     <ul>
       {#each lines as line (`${line.incoming ? "in" : "out"}-${line.id}`)}
@@ -86,8 +94,8 @@
           <span class="meta">
             <strong>{line.from}</strong> → {line.to}
             <span class="muted">· {relativeTime(line.at)}</span>
-            {#if line.incoming && !line.read}<span class="unread">ungelesen</span>{/if}
-            {#if line.status !== "delivered"}<span class="unread">{line.status}</span>{/if}
+            {#if line.incoming && !line.read}<span class="unread">{tFlow("unread")}</span>{/if}
+            {#if line.status !== "delivered"}<span class="unread">{statusLabel(line.status)}</span>{/if}
           </span>
           <span class="text">{line.text}</span>
         </li>
@@ -97,12 +105,14 @@
   <div class="write">
     <textarea
       rows="2"
-      placeholder={keyHints("Write to the session … (⌘↩ sends)", $platform)}
+      placeholder={keyHints(tFlow("writePlaceholder"), $platform)}
       bind:value={draft}
       onkeydown={onKey}
       disabled={busy}
     ></textarea>
-    <button class="ax-btn" type="button" disabled={busy || draft.trim() === ""} onclick={() => void send()}>Send</button>
+    <button class="ax-btn" type="button" disabled={busy || draft.trim() === ""} onclick={() => void send()}
+      >{tFlow("send")}</button
+    >
   </div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 </section>

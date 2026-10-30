@@ -11,6 +11,7 @@ import type { CompletionAnswer, CompletionItem } from "../editor/lsp/completion"
 import { pos, type Pos } from "../editor/position";
 import type { CompletionPort, CompletionSpan } from "./completionMenu";
 import { codeLines, codeSpans, fileStem, type NoteIndex } from "./noteLinks";
+import { tEditor } from "../i18n/editor";
 
 /** What a note name being typed after `[[` may hold: anything up to the `]]`, a `|` or a `#`. */
 const LINK_CHAR = /[^[\]|#\n]/;
@@ -72,10 +73,10 @@ export function tagItems(list: readonly TagEntry[], vault: readonly string[]): C
     if (!tag || listed.has(tag)) continue;
     listed.add(tag);
     // The description is the item's detail; the documentation beside the menu would only repeat it.
-    out.push(item(tag, entry.description || "tag list", KEY_KIND, tag, `0${tag}`));
+    out.push(item(tag, entry.description || tEditor("tagListed"), KEY_KIND, tag, `0${tag}`));
   }
   for (const tag of vault) {
-    if (!listed.has(tag)) out.push(item(tag, "in the vault", KEY_KIND, tag, `1${tag}`));
+    if (!listed.has(tag)) out.push(item(tag, tEditor("tagInVault"), KEY_KIND, tag, `1${tag}`));
   }
   return out;
 }

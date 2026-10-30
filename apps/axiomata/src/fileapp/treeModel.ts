@@ -7,6 +7,7 @@
  */
 
 import { getSetting, setSetting } from "../core/persist";
+import { tEditor } from "../i18n/editor";
 
 /** Hidden unless "show hidden" is on (W6); dotfiles too. */
 const HIDDEN = new Set([".git", "node_modules", "target"]);
@@ -33,9 +34,9 @@ export function baseName(rel: string): string {
 /** Why a typed file or folder name is not acceptable, or `null` if it is. */
 export function nameProblem(name: string): string | null {
   const trimmed = name.trim();
-  if (!trimmed) return "A name is needed.";
-  if (trimmed === "." || trimmed === "..") return "That name is taken by the file system.";
-  if (/[/\u0000]/.test(trimmed)) return "A name cannot contain / or a NUL.";
+  if (!trimmed) return tEditor("nameNeeded");
+  if (trimmed === "." || trimmed === "..") return tEditor("nameReserved");
+  if (/[/\u0000]/.test(trimmed)) return tEditor("nameBadChars");
   return null;
 }
 
@@ -57,10 +58,10 @@ export type MoveTarget = { to: string } | { refused: string } | null;
  * it cannot (another root, into itself), or `null` when it is already there.
  */
 export function moveTarget(from: { root: string; rel: string }, dir: { root: string; rel: string }): MoveTarget {
-  if (from.root !== dir.root) return { refused: "Moving between roots is not possible — only within one." };
+  if (from.root !== dir.root) return { refused: tEditor("moveAcrossRoots") };
   // Where it is already — or dropped back on itself, a drag let go where it began.
   if (parentOf(from.rel) === dir.rel || from.rel === dir.rel) return null;
-  if (isUnder(dir.rel, from.rel)) return { refused: "A folder cannot be moved into itself." };
+  if (isUnder(dir.rel, from.rel)) return { refused: tEditor("moveIntoItself") };
   return { to: joinRel(dir.rel, baseName(from.rel)) };
 }
 
