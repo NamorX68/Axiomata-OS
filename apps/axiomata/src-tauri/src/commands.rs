@@ -2994,7 +2994,7 @@ pub fn save_engine(
     Ok(())
 }
 
-/// Removes an engine unless an agent session or a role still uses it.
+/// Removes an own engine unless an agent session or a role still uses it; a tier default naming it is cleared with it.
 #[tauri::command]
 pub fn delete_engine(state: State<'_, CoreState>, id: String) -> Result<bool, String> {
     let mut config = read_config(&state.config);
@@ -3003,15 +3003,15 @@ pub fn delete_engine(state: State<'_, CoreState>, id: String) -> Result<bool, St
         axiomata_core::roster::delete_engine(&db, &mut config, &id)
             .map_err(|err| err.to_string())?
     };
-    if removed {
-        state
+    if removed.is_some() {
+        let mut live = state
             .config
             .write()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .agents
-            .engines = config.agents.engines;
+            .unwrap_or_else(|poison| poison.into_inner());
+        live.agents.engines = config.agents.engines;
+        live.agents.models = config.agents.models;
     }
-    Ok(removed)
+    Ok(removed.is_some())
 }
 
 // ---- Models, tiers and agents (agents-model.md, AM1) ----

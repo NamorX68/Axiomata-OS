@@ -2087,11 +2087,23 @@ fn engine_cmd(core: &AxiomataCore, action: EngineAction) -> Result<()> {
                 let db = core.db_lock();
                 roster::delete_engine(&db, &mut config, &id)?
             };
-            if !removed {
+            let Some(removed) = removed else {
                 bail!("no engine {id:?}");
-            }
+            };
+            let models = config.agents.models.clone();
             adopt_engines(core, config);
+            core.config
+                .write()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .agents
+                .models = models;
             println!("removed engine {id}");
+            for tier in removed.cleared_defaults {
+                println!(
+                    "it was the default engine of {}; that tier takes its cheapest engine now",
+                    tier.as_str()
+                );
+            }
             Ok(())
         }
     }

@@ -134,23 +134,19 @@ pub fn run(core: &AxiomataCore, action: ModelAction) -> Result<()> {
             tier,
             clear_tier,
         } => {
+            let tier = tier.as_deref().map(parse_tier).transpose()?;
             let mut config = snapshot(core);
-            let mut choice: ModelChoice = config
-                .agents
-                .models
-                .choices
-                .get(&key)
-                .copied()
-                .unwrap_or_default();
-            if enable || disable {
-                choice.enabled = Some(enable);
-            }
-            if let Some(raw) = tier {
-                choice.tier = Some(parse_tier(&raw)?);
-            } else if clear_tier {
-                choice.tier = None;
-            }
-            model_tiers::save_choice(&mut config, &key, choice)?;
+            // Only the fields asked for change, on the file config as it is now (read under its lock).
+            model_tiers::edit_choice(&mut config, &key, |choice: &mut ModelChoice| {
+                if enable || disable {
+                    choice.enabled = Some(enable);
+                }
+                if tier.is_some() {
+                    choice.tier = tier;
+                } else if clear_tier {
+                    choice.tier = None;
+                }
+            })?;
             adopt(core, config);
             println!("updated model {key}");
             Ok(())

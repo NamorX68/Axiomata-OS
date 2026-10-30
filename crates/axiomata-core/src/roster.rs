@@ -493,7 +493,15 @@ pub fn update_agent_on_engine(
     Ok(agent_store::get_agent(db, id)?)
 }
 
-/// Removes an own engine from the config file. `false` if there was no such engine.
+/// What removing an engine changed besides the engine itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Removed {
+    /// The tiers whose default engine it was; they fall back to the cheapest engine of the tier.
+    pub cleared_defaults: Vec<axiomata_roster::Tier>,
+}
+
+/// Removes an own engine from the config file. `None` if there was no such engine. A tier that had it as its default
+/// engine loses that default in the same write, so no default names an engine that is gone.
 ///
 /// The check and the removal happen under the same lock that serialises assignments, so a session cannot be given
 /// the engine between the two.
@@ -502,7 +510,7 @@ pub fn update_agent_on_engine(
 ///
 /// [`RosterError::Invalid`] while a session or a role still uses it, or for an automatic engine; a failing read or
 /// save.
-pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<bool> {
+pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<Option<Removed>> {
     let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
     if !disk.agents.engines.contains_key(id) {
@@ -511,7 +519,7 @@ pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<b
         if auto {
             return Err(auto_refusal(id));
         }
-        return Ok(false);
+        return Ok(None);
     }
     let roles = list_roles()?.roles;
     if let Some(user) = engine_user(db, &roles, id)? {
@@ -522,9 +530,18 @@ pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<b
         .into());
     }
     disk.agents.engines.remove(id);
+    let defaults = &mut disk.agents.models.default_engines;
+    let cleared_defaults: Vec<_> = axiomata_roster::Tier::ALL
+        .into_iter()
+        .filter(|tier| defaults.get(*tier) == Some(id))
+        .collect();
+    for tier in &cleared_defaults {
+        defaults.set(*tier, None);
+    }
     disk.save()?;
     config.agents.engines = disk.agents.engines;
-    Ok(true)
+    config.agents.models = disk.agents.models;
+    Ok(Some(Removed { cleared_defaults }))
 }
 
 /// The owner's roles (`~/.axiomata/agents/`), with the reasons for any that were skipped.
@@ -979,7 +996,11 @@ mod tests {
                 .unwrap_err()
                 .to_string();
             assert!(refused.contains("automatic engine"), "{refused}");
-            assert!(!delete_engine(&conn, &mut live, "never-was").unwrap());
+            assert!(
+                delete_engine(&conn, &mut live, "never-was")
+                    .unwrap()
+                    .is_none()
+            );
 
             let roles = vec![axiomata_roster::default_role()];
             let agent = create_agent_on_engine(
@@ -1024,6 +1045,41 @@ mod tests {
     }
 
     #[test]
+    fn deleting_an_engine_clears_the_tier_defaults_that_named_it() {
+        with_temp_home(|home| {
+            let (conn, _project, _dir) = fixture();
+            let mut live = Config {
+                workspace_root: home.join("workspace"),
+                ..Config::default()
+            };
+            live.save().unwrap();
+            save_engine(&mut live, engine("mine")).unwrap();
+            for tier in [axiomata_roster::Tier::Light, axiomata_roster::Tier::Heavy] {
+                crate::model_tiers::save_default_engine(&mut live, tier, Some("mine".into()))
+                    .unwrap();
+            }
+            crate::model_tiers::save_default_engine(
+                &mut live,
+                axiomata_roster::Tier::Medium,
+                Some(AUTO_SONNET.into()),
+            )
+            .unwrap();
+            let removed = delete_engine(&conn, &mut live, "mine").unwrap().unwrap();
+            assert_eq!(
+                removed.cleared_defaults,
+                [axiomata_roster::Tier::Light, axiomata_roster::Tier::Heavy]
+            );
+            let defaults = Config::load().unwrap().agents.models.default_engines;
+            assert_eq!(defaults.get(axiomata_roster::Tier::Light), None);
+            assert_eq!(
+                defaults.get(axiomata_roster::Tier::Medium),
+                Some(AUTO_SONNET)
+            );
+            assert_eq!(live.agents.models.default_engines, defaults);
+        });
+    }
+
+    #[test]
     fn deleting_a_used_engine_is_refused_and_an_unused_one_is_removed() {
         with_temp_home(|_| {
             let (conn, project, _dir) = fixture();
@@ -1038,8 +1094,8 @@ mod tests {
                 Err(AxiomataError::Roster(_))
             ));
             assert!(live.agents.engines.contains_key("used"));
-            assert!(delete_engine(&conn, &mut live, "free").unwrap());
-            assert!(!delete_engine(&conn, &mut live, "free").unwrap());
+            assert!(delete_engine(&conn, &mut live, "free").unwrap().is_some());
+            assert!(delete_engine(&conn, &mut live, "free").unwrap().is_none());
             assert!(!Config::load().unwrap().agents.engines.contains_key("free"));
         });
     }

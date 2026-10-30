@@ -88,11 +88,26 @@ fn harness_label(harness: Harness) -> &'static str {
 }
 
 /// The id of the automatic engine that runs `model` (as handed to the harness) on `harness`. See the module docs.
+///
+/// This is the id of a model alone; within a catalog, two models whose ids meet both take [`hashed_engine_id`] instead
+/// (see [`auto_engines`]).
 pub fn auto_engine_id(harness: Harness, model: &str) -> String {
-    let id = format!("{}-{}", harness_slug(harness), slug(model));
+    let id = plain_engine_id(harness, model);
     if id.len() <= MAX_IDENT_LEN {
         return id;
     }
+    hashed_engine_id(harness, model)
+}
+
+/// `<harness>-<slug of the model>`, of any length.
+fn plain_engine_id(harness: Harness, model: &str) -> String {
+    format!("{}-{}", harness_slug(harness), slug(model))
+}
+
+/// The plain id's head, cut to leave room, and eight hex digits of the model's SHA-256: unique per model string
+/// however its slug reads.
+pub fn hashed_engine_id(harness: Harness, model: &str) -> String {
+    let id = plain_engine_id(harness, model);
     let hash = Sha256::digest(model.as_bytes());
     let hex: String = hash
         .iter()
@@ -101,7 +116,7 @@ pub fn auto_engine_id(harness: Harness, model: &str) -> String {
         .map(|nibble| char::from_digit(u32::from(nibble), 16).unwrap_or('0'))
         .collect();
     // The id is ASCII, so cutting by bytes cuts at a character.
-    let head = id[..MAX_IDENT_LEN - ID_HASH_HEX - 1].trim_end_matches('-');
+    let head = id[..id.len().min(MAX_IDENT_LEN - ID_HASH_HEX - 1)].trim_end_matches('-');
     format!("{head}-{hex}")
 }
 
@@ -179,8 +194,11 @@ fn describe(
 }
 
 /// The automatic engines, in the models' order, without the ids an own engine has.
+///
+/// Two models whose ids slug alike (`x/y.z` and `x/y-z`) both take [`hashed_engine_id`]: neither may own the plain id,
+/// or a lookalike entry arriving in a remote catalog could take over an id that roles, defaults and sessions name.
 fn auto_engines(config: &Config, sources: &ModelSources) -> Vec<Engine> {
-    let mut out: Vec<Engine> = Vec::new();
+    let mut candidates = Vec::new();
     for provider in ProviderId::ALL {
         for model in model_tiers::enabled_models(config, &sources.catalog, provider) {
             // The id reaches a harness's argument list or its spec: one the app would not take as a model name (a
@@ -190,31 +208,48 @@ fn auto_engines(config: &Config, sources: &ModelSources) -> Vec<Engine> {
             }
             let (harness, handed) = auto_profile(provider, &model.id);
             let id = auto_engine_id(harness, &handed);
-            // Own wins; and two models whose slugs meet keep the first (the catalog's order is stable).
-            if config.agents.engines.contains_key(&id) || out.iter().any(|engine| engine.id == id) {
-                continue;
-            }
-            let mut label = format!("{} · {}", harness_label(harness), model.name.trim());
-            if label.chars().count() > MAX_LABEL_CHARS {
-                label = label.chars().take(MAX_LABEL_CHARS - 1).collect::<String>() + "…";
-            }
-            let engine = Engine {
-                id,
-                label,
-                harness,
-                command: String::new(),
-                model: Some(handed),
-                env: String::new(),
-                billing: if harness == Harness::ClaudeCode {
-                    Billing::Subscription
-                } else {
-                    Billing::Metered
-                },
-                tier: None,
-            };
-            if engine.validate().is_ok() {
-                out.push(engine);
-            }
+            candidates.push((id, harness, handed, model));
+        }
+    }
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (id, ..) in &candidates {
+        *seen.entry(id.clone()).or_default() += 1;
+    }
+    let mut out: Vec<Engine> = Vec::new();
+    for (id, harness, handed, model) in candidates {
+        let id = if seen[&id] > 1 {
+            hashed_engine_id(harness, &handed)
+        } else {
+            id
+        };
+        // Own wins.
+        if config.agents.engines.contains_key(&id) || out.iter().any(|engine| engine.id == id) {
+            continue;
+        }
+        let mut label = format!(
+            "{} · {}",
+            harness_label(harness),
+            model_tiers::display_text(&model.name)
+        );
+        if label.chars().count() > MAX_LABEL_CHARS {
+            label = label.chars().take(MAX_LABEL_CHARS - 1).collect::<String>() + "…";
+        }
+        let engine = Engine {
+            id,
+            label,
+            harness,
+            command: String::new(),
+            model: Some(handed),
+            env: String::new(),
+            billing: if harness == Harness::ClaudeCode {
+                Billing::Subscription
+            } else {
+                Billing::Metered
+            },
+            tier: None,
+        };
+        if engine.validate().is_ok() {
+            out.push(engine);
         }
     }
     out
@@ -445,6 +480,41 @@ mod tests {
         assert_eq!(
             auto_engine_id(Harness::Glut, "openrouter/deepseek/v4"),
             "glut-openrouter-deepseek-v4"
+        );
+    }
+
+    #[test]
+    fn models_whose_ids_slug_alike_both_take_a_hashed_id() {
+        let mut sources = sources();
+        let open_router = sources
+            .catalog
+            .providers
+            .get_mut(&ProviderId::OpenRouter)
+            .unwrap();
+        open_router
+            .models
+            .push(listed("x/y.z", "Dotted", Some(1.0)));
+        open_router
+            .models
+            .push(listed("x-y-z", "Dashed", Some(1.0)));
+        let infos = all(&config(), &sources);
+        let id_of = |model: &str| {
+            infos
+                .iter()
+                .find(|info| info.engine.model.as_deref() == Some(model))
+                .map(|info| info.engine.id.clone())
+                .unwrap()
+        };
+        let (dotted, dashed) = (id_of("openrouter/x/y.z"), id_of("openrouter/x-y-z"));
+        assert_ne!(dotted, dashed);
+        assert_ne!(dotted, "glut-openrouter-x-y-z", "neither owns the plain id");
+        assert_ne!(dashed, "glut-openrouter-x-y-z");
+        assert!(dotted.starts_with("glut-openrouter-x-y-z-"));
+        assert!(infos.iter().all(|info| info.engine.validate().is_ok()));
+        // Alone, a model keeps its plain id.
+        assert_eq!(
+            id_of("openrouter/z-ai/glm-5.3"),
+            "glut-openrouter-z-ai-glm-5-3"
         );
     }
 

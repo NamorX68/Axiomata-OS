@@ -54,12 +54,12 @@ pub fn role_label(name: &str) -> String {
 /// provider prefix, else "default" (the harness picks).
 pub fn model_label(engine: &EngineInfo) -> String {
     if let Some(name) = engine.model_name.as_deref().filter(|name| !name.is_empty()) {
-        return name.to_owned();
+        return crate::model_tiers::display_text(name);
     }
     match engine.engine.model.as_deref().map(str::trim) {
-        Some(model) if !model.is_empty() => crate::model_tiers::parse_model_key(model)
-            .map_or(model, |(_, id)| id)
-            .to_owned(),
+        Some(model) if !model.is_empty() => crate::model_tiers::display_text(
+            crate::model_tiers::parse_model_key(model).map_or(model, |(_, id)| id),
+        ),
         _ => "default".to_owned(),
     }
 }

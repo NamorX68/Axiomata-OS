@@ -47,6 +47,12 @@ const MAX_SOURCE_CHARS: usize = 200;
 /// Longest model key accepted, in characters: the provider prefix plus the catalog's longest id.
 const MAX_KEY_CHARS: usize = 240;
 
+/// Digits from which a part of an Anthropic model id is a date (`20260101`), not a version number.
+const DATE_PART_DIGITS: usize = 6;
+
+/// Longest model name shown in an agent's name, in characters (the catalog's names come from a remote list).
+pub const MAX_MODEL_NAME_CHARS: usize = 60;
+
 /// Serialises the read-modify-write of `model-tiers.json` in this process.
 static PROPOSALS_LOCK: Mutex<()> = Mutex::new(());
 
@@ -245,11 +251,14 @@ pub fn parse_model_key(key: &str) -> Option<(ProviderId, &str)> {
 /// `claude-sonnet-5-5` → `("sonnet", [5, 5])`; `None` for an id not in that shape.
 fn anthropic_family(id: &str) -> Option<(&str, Vec<u32>)> {
     let (family, version) = id.strip_prefix("claude-")?.split_once('-')?;
+    // A dated snapshot (`claude-sonnet-5-20260101`) ends its version at the date: the date is no part of it, else it
+    // would outrank every real version.
     let version = version
         .split('-')
+        .take_while(|part| part.len() < DATE_PART_DIGITS)
         .map(|part| part.parse().ok())
         .collect::<Option<Vec<u32>>>()?;
-    Some((family, version))
+    (!version.is_empty()).then_some((family, version))
 }
 
 /// Anthropic's models as Claude Code offers them (Q9): only the newest of each family (Fable, Opus, Sonnet, Haiku), by
@@ -380,13 +389,42 @@ impl Default for TierProposals {
 
 /// The stored proposals; none when the file is missing or unreadable (a proposal is advice, not state to lose sleep
 /// over: the next research run writes it again).
+///
+/// Each entry is checked on its own — a key that is no model key, a tier that does not parse, a text over its bound —
+/// and one that fails is skipped with a warning: the file is written by a skill (AM2), so it is read as untrusted.
 pub fn load_proposals() -> TierProposals {
-    json_state::load(&paths::model_tiers_path(), || {
+    /// The file as stored, each entry still unread.
+    #[derive(Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        proposals: BTreeMap<String, serde_json::Value>,
+    }
+    let Some(raw) = json_state::load(&paths::model_tiers_path(), || {
         serde_json::to_string(&TierProposals::default()).unwrap_or_default()
     })
     .ok()
-    .and_then(|state| serde_json::from_str::<TierProposals>(&state.json).ok())
-    .unwrap_or_default()
+    .and_then(|state| serde_json::from_str::<Raw>(&state.json).ok()) else {
+        return TierProposals::default();
+    };
+    let mut proposals = TierProposals::default();
+    for (key, value) in raw.proposals {
+        let read = serde_json::from_value::<TierProposal>(value)
+            .map_err(|err| err.to_string())
+            .and_then(|proposal| {
+                if parse_model_key(&key).is_none() {
+                    return Err("no model key".to_owned());
+                }
+                proposal.validate().map_err(|err| err.to_string())?;
+                Ok(proposal)
+            });
+        match read {
+            Ok(proposal) => {
+                proposals.proposals.insert(key, proposal);
+            }
+            Err(err) => tracing::warn!(model = %key, %err, "a tier proposal was skipped"),
+        }
+    }
+    proposals
 }
 
 fn write_proposals(proposals: &TierProposals) -> Result<()> {
@@ -443,7 +481,14 @@ pub struct ModelSources {
 
 impl ModelSources {
     /// Both files, as stored.
+    ///
+    /// In this crate's tests only under a scratch `AXIOMATA_HOME`: without one a test gets the built-in catalog and no
+    /// proposals, so a test that resolves an engine id never reads — or, through a corrupt file's `.bak`, writes —
+    /// the owner's `~/.axiomata`.
     pub fn load() -> Self {
+        if cfg!(test) && std::env::var_os(paths::AXIOMATA_HOME_ENV).is_none() {
+            return Self::default();
+        }
         Self {
             catalog: model_catalog::load(),
             proposals: load_proposals(),
@@ -558,8 +603,29 @@ pub fn short_name(name: &str) -> String {
         .split_once(": ")
         .map_or(name, |(_, rest)| rest.trim())
         .trim();
-    let name = name.strip_prefix("Claude ").unwrap_or(name).trim();
-    name.to_owned()
+    display_text(name.strip_prefix("Claude ").unwrap_or(name))
+}
+
+/// Whether `ch` changes how text around it reads without being seen: bidi overrides and isolates, zero-width marks.
+fn is_invisible_format(ch: char) -> bool {
+    matches!(ch, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+}
+
+/// `text` fit to stand in an agent's name: printable characters only (no control or invisible format characters),
+/// runs of space as one, at most [`MAX_MODEL_NAME_CHARS`] characters (cut with "…"). Model names come from a remote
+/// catalog, and a session's name is built from them.
+pub fn display_text(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .map(|ch| if ch.is_whitespace() { ' ' } else { ch })
+        .filter(|ch| !ch.is_control() && !is_invisible_format(*ch))
+        .collect();
+    let joined = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if joined.chars().count() <= MAX_MODEL_NAME_CHARS {
+        return joined;
+    }
+    let head: String = joined.chars().take(MAX_MODEL_NAME_CHARS - 1).collect();
+    format!("{}…", head.trim_end())
 }
 
 // ---- The list the Models tab and `ide models list` show ----
@@ -669,6 +735,20 @@ fn edit_models(
 ///
 /// A refusal for a bad key; a failing read or save (then `config` is unchanged).
 pub fn save_choice(config: &mut Config, key: &str, choice: ModelChoice) -> Result<()> {
+    edit_choice(config, key, |current| *current = choice)
+}
+
+/// Changes the owner's word on model `key` as it stands in the file config, read under the config lock — so a change
+/// of one field (the CLI's `--enable`) never writes back a stale value of the other.
+///
+/// # Errors
+///
+/// As [`save_choice`].
+pub fn edit_choice(
+    config: &mut Config,
+    key: &str,
+    change: impl FnOnce(&mut ModelChoice),
+) -> Result<()> {
     if parse_model_key(key).is_none() {
         return Err(refusal(
             "model",
@@ -676,6 +756,8 @@ pub fn save_choice(config: &mut Config, key: &str, choice: ModelChoice) -> Resul
         ));
     }
     edit_models(config, |_, models| {
+        let mut choice = models.choices.get(key).copied().unwrap_or_default();
+        change(&mut choice);
         if choice.is_default() {
             models.choices.remove(key);
         } else {
@@ -778,6 +860,34 @@ mod tests {
             .map(|model| model.id.as_str())
             .collect();
         assert_eq!(ids, ["claude-opus-5-5", "something-else"]);
+    }
+
+    #[test]
+    fn a_dated_snapshot_does_not_outrank_a_newer_version() {
+        let models = vec![
+            listed("claude-sonnet-5-20260101", "Sonnet 5 (dated)", None),
+            listed("claude-sonnet-5-5", "Sonnet 5.5", None),
+        ];
+        let ids: Vec<&str> = anthropic_offered(&models)
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(ids, ["claude-sonnet-5-5"]);
+        assert_eq!(
+            anthropic_family("claude-sonnet-5-20260101"),
+            Some(("sonnet", vec![5]))
+        );
+    }
+
+    #[test]
+    fn a_remote_name_is_bounded_and_printable_before_it_names_an_agent() {
+        assert_eq!(
+            short_name("Evil: Mo\u{202E}del\u{200B} \n\tX\u{7}"),
+            "Model X"
+        );
+        let long = short_name(&"y".repeat(200));
+        assert_eq!(long.chars().count(), MAX_MODEL_NAME_CHARS);
+        assert!(long.ends_with('…'));
     }
 
     #[test]
@@ -1056,6 +1166,58 @@ mod tests {
             );
             assert!(forget_proposal("ollama/qwen3:32b").unwrap());
             assert!(!forget_proposal("ollama/qwen3:32b").unwrap());
+        });
+    }
+
+    #[test]
+    fn a_bad_proposal_in_the_file_is_skipped_and_the_good_ones_stay() {
+        with_temp_home(|_| {
+            let good = serde_json::to_value(proposal(Tier::Light)).unwrap();
+            let mut bad_tier = good.clone();
+            bad_tier["tier"] = "huge".into();
+            let mut long_reason = good.clone();
+            long_reason["reason"] = "x".repeat(MAX_REASON_CHARS + 1).into();
+            let file = serde_json::json!({ "version": PROPOSALS_VERSION, "proposals": {
+                "ollama/good": good.clone(),
+                "ollama/bad-tier": bad_tier,
+                "ollama/long": long_reason,
+                "nokey": good,
+            }});
+            std::fs::write(paths::model_tiers_path(), file.to_string()).unwrap();
+            let keys: Vec<String> = load_proposals().proposals.into_keys().collect();
+            assert_eq!(keys, ["ollama/good"]);
+        });
+    }
+
+    #[test]
+    fn a_change_of_one_field_keeps_the_other_as_the_file_has_it() {
+        with_temp_home(|home| {
+            let mut stale = Config {
+                workspace_root: home.join("live"),
+                ..Config::default()
+            };
+            let mut other = stale.clone();
+            save_choice(
+                &mut other,
+                "anthropic/claude-opus-5-5",
+                ModelChoice {
+                    enabled: None,
+                    tier: Some(Tier::Medium),
+                },
+            )
+            .unwrap();
+            // `stale` never saw the tier; switching the model off through it keeps the tier on disk.
+            edit_choice(&mut stale, "anthropic/claude-opus-5-5", |choice| {
+                choice.enabled = Some(false);
+            })
+            .unwrap();
+            assert_eq!(
+                Config::load().unwrap().agents.models.choices["anthropic/claude-opus-5-5"],
+                ModelChoice {
+                    enabled: Some(false),
+                    tier: Some(Tier::Medium)
+                }
+            );
         });
     }
 }
