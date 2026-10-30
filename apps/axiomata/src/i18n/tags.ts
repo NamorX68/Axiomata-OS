@@ -38,7 +38,8 @@ const en = {
   saveFailed: "Could not save the tag list: {error}",
   added: "#{tag} added",
   descriptionSaved: "#{tag}: description saved",
-  confirmRemove: "Take #{tag} off the list? Notes that carry it keep it; agents no longer choose it.",
+  confirmRemove:
+    "Take #{tag} off the list? Notes that carry it keep it; agents no longer choose it.",
   removed: "#{tag} is off the list",
   countFailed: "Could not count the uses: {error}",
   renamed: {
@@ -46,13 +47,19 @@ const en = {
     other: "#{from} is #{to} now — {links} uses in {n} notes rewritten",
   },
   renameFailed: "Renaming failed: {error}",
-  acceptedOn: { one: "#{tag} is on the list and set on 1 note", other: "#{tag} is on the list and set on {n} notes" },
+  acceptedOn: {
+    one: "#{tag} is on the list and set on 1 note",
+    other: "#{tag} is on the list and set on {n} notes",
+  },
   notSet: "#{tag} not set: {failure}",
   turnedDown: "#{tag} turned down",
   answerFailed: "Could not answer the proposal: {error}",
 
   // The badge (`core/tagProposals.ts`).
-  waiting: { one: "A tag proposal waits for you", other: "{n} tag proposals wait for you" },
+  waiting: {
+    one: "A tag proposal waits for you",
+    other: "{n} tag proposals wait for you",
+  },
 
   // What is wrong with a typed tag (`core/tagProposals.ts`).
   problemEmpty: "Type a tag.",
@@ -65,7 +72,8 @@ const en = {
 
   // The run over the whole vault.
   vaultTitle: "Tag the whole vault",
-  vaultHint: "Once, for the notes there already are. Each step says first what it reads and costs.",
+  vaultHint:
+    "Once, for the notes there already are. Each step says first what it reads and costs.",
   stepList: "1 · Propose a tag list",
   stepNotes: "2 · Plan tags and links for every note",
   running: "running",
@@ -74,23 +82,27 @@ const en = {
   planning: "Planning…",
   planRest: "Plan the rest",
   plan: "Plan",
-  stale: "A step is marked as running, but not from this window (the app was closed during it).",
+  stale:
+    "A step is marked as running, but not from this window (the app was closed during it).",
   endIt: "End it",
   preview: { one: "Preview (1 note)", other: "Preview ({n} notes)" },
-  proposedChip: "Proposed to you when the plan is written; set once you accept it",
+  proposedChip:
+    "Proposed to you when the plan is written; set once you accept it",
   leftOut: "left out: {reason}",
   nothing: "nothing",
   showAll: "Show all {n}",
   writeInto: { one: "Write into 1 note", other: "Write into {n} notes" },
   discard: "Discard",
-  confirmList: "Propose a tag list? The agent reads the notes and proposes 30–60 tags; you accept or turn down each.",
+  confirmList:
+    "Propose a tag list? The agent reads the notes and proposes 30–60 tags; you accept or turn down each.",
   confirmNotes:
     "Plan tags for every note? The agent reads each note; nothing is written until you look at the preview.",
   runStatus: "vault-tagging: {status}",
   runFailed: "The vault run failed: {error}",
   confirmApply: {
     one: "Write the planned tags and links into 1 note? Only its tags: and ## Related change.",
-    other: "Write the planned tags and links into {n} notes? Only their tags: and ## Related change.",
+    other:
+      "Write the planned tags and links into {n} notes? Only their tags: and ## Related change.",
   },
   written: { one: "Written into 1 note", other: "Written into {n} notes" },
   writtenUnchanged: {
@@ -147,7 +159,8 @@ export const tTags = texts("tags", en, {
   countFailed: "Die Stellen ließen sich nicht zählen: {error}",
   renamed: {
     one: "#{from} heißt jetzt #{to} — {links} Stellen in 1 Notiz umgeschrieben",
-    other: "#{from} heißt jetzt #{to} — {links} Stellen in {n} Notizen umgeschrieben",
+    other:
+      "#{from} heißt jetzt #{to} — {links} Stellen in {n} Notizen umgeschrieben",
   },
   renameFailed: "Umbenennen fehlgeschlagen: {error}",
   acceptedOn: {
@@ -158,7 +171,10 @@ export const tTags = texts("tags", en, {
   turnedDown: "#{tag} abgelehnt",
   answerFailed: "Der Vorschlag ließ sich nicht beantworten: {error}",
 
-  waiting: { one: "Ein Tag-Vorschlag wartet auf dich", other: "{n} Tag-Vorschläge warten auf dich" },
+  waiting: {
+    one: "Ein Tag-Vorschlag wartet auf dich",
+    other: "{n} Tag-Vorschläge warten auf dich",
+  },
 
   problemEmpty: "Gib ein Tag ein.",
   problemLength: "Höchstens 64 Zeichen.",
@@ -169,7 +185,8 @@ export const tTags = texts("tags", en, {
   problemTaken: "#{tag} steht schon auf der Liste.",
 
   vaultTitle: "Den ganzen Vault taggen",
-  vaultHint: "Einmal, für die Notizen, die es schon gibt. Jeder Schritt sagt vorher, was er liest und kostet.",
+  vaultHint:
+    "Einmal, für die Notizen, die es schon gibt. Jeder Schritt sagt vorher, was er liest und kostet.",
   stepList: "1 · Eine Tag-Liste vorschlagen",
   stepNotes: "2 · Tags und Links für jede Notiz planen",
   running: "läuft",
@@ -182,7 +199,8 @@ export const tTags = texts("tags", en, {
     "Ein Schritt ist als laufend markiert, aber nicht aus diesem Fenster (die App wurde währenddessen geschlossen).",
   endIt: "Beenden",
   preview: { one: "Vorschau (1 Notiz)", other: "Vorschau ({n} Notizen)" },
-  proposedChip: "Wird dir vorgeschlagen, wenn der Plan geschrieben wird; gesetzt, sobald du es annimmst",
+  proposedChip:
+    "Wird dir vorgeschlagen, wenn der Plan geschrieben wird; gesetzt, sobald du es annimmst",
   leftOut: "ausgelassen: {reason}",
   nothing: "nichts",
   showAll: "Alle {n} zeigen",
@@ -198,9 +216,13 @@ export const tTags = texts("tags", en, {
   runFailed: "Der Vault-Lauf ist fehlgeschlagen: {error}",
   confirmApply: {
     one: "Die geplanten Tags und Links in 1 Notiz schreiben? Nur ihr tags: und ## Related ändern sich.",
-    other: "Die geplanten Tags und Links in {n} Notizen schreiben? Nur ihr tags: und ## Related ändern sich.",
+    other:
+      "Die geplanten Tags und Links in {n} Notizen schreiben? Nur ihr tags: und ## Related ändern sich.",
   },
-  written: { one: "In 1 Notiz geschrieben", other: "In {n} Notizen geschrieben" },
+  written: {
+    one: "In 1 Notiz geschrieben",
+    other: "In {n} Notizen geschrieben",
+  },
   writtenUnchanged: {
     one: "In 1 Notiz geschrieben, {unchanged} unverändert",
     other: "In {n} Notizen geschrieben, {unchanged} unverändert",
@@ -215,5 +237,6 @@ export const tTags = texts("tags", en, {
   estimateTokens: "etwa {input} Tokens rein, {output} raus",
   estimateCost: "etwa {cost}",
   estimateNoPrice: "kein Preis für {model} in deiner Preistabelle",
-  estimateNoPriceSkill: "kein Preis für das Skills-Modell in deiner Preistabelle",
+  estimateNoPriceSkill:
+    "kein Preis für das Skills-Modell in deiner Preistabelle",
 });

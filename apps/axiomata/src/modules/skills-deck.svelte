@@ -21,6 +21,7 @@
   import { ring } from "../ui/glow";
   import Notice from "../ui/Notice.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
+  import { tCanvas } from "../i18n/canvas";
   import { bundledFocus, bundledSkills, noticeText } from "./bundledSkills";
 
   const POLL_MS = 5000;
@@ -75,7 +76,7 @@
     try {
       await ctx.invoke<RunSummary>("run_skill", { name });
     } catch (err) {
-      error = `run ${name}: ${String(err)}`;
+      error = tCanvas("errRun", { name, error: String(err) });
     } finally {
       running = running.filter((n) => n !== name);
       await refresh();
@@ -89,7 +90,7 @@
     try {
       await ctx.invoke<RunSummary>("resume_run", { id });
     } catch (err) {
-      error = `resume ${name}: ${String(err)}`;
+      error = tCanvas("errResume", { name, error: String(err) });
     } finally {
       running = running.filter((n) => n !== name);
       await refresh();
@@ -101,12 +102,28 @@
     try {
       await ctx.invoke("discard_run", { id });
     } catch (err) {
-      error = `drop ${name}: ${String(err)}`;
+      error = tCanvas("errDrop", { name, error: String(err) });
     }
     await refresh();
   }
 
   const bundledNotice = $derived(noticeText($bundledSkills));
+
+  /** A run's status as the deck says it; an unknown one as it came. */
+  function statusLabel(status: RunSummary["status"]): string {
+    switch (status) {
+      case "success":
+        return tCanvas("statusSuccess");
+      case "failed":
+        return tCanvas("statusFailed");
+      case "running":
+        return tCanvas("statusRunning");
+      case "interrupted":
+        return tCanvas("statusInterrupted");
+      default:
+        return status;
+    }
+  }
 
   /** Turns the tile to its settings and asks them to show the "Bundled skills" section. */
   function showBundled() {
@@ -136,20 +153,20 @@
     <div class="bundled">
       <Notice title={bundledNotice} tone="neutral">
         {#snippet action()}
-          <button type="button" class="ax-btn" onclick={showBundled}>Review</button>
+          <button type="button" class="ax-btn" onclick={showBundled}>{tCanvas("review")}</button>
         {/snippet}
       </Notice>
     </div>
   {/if}
   {#if skipped.length > 0}
-    <ul class="skipped" title="A skill directory with a broken or missing SKILL.md — see ~/.axiomata/skills/">
+    <ul class="skipped" title={tCanvas("skippedTitle")}>
       {#each skipped as s (s.name)}
-        <li>⚠ skipped <strong>{s.name}</strong>: {s.reason}</li>
+        <li>{"⚠"} {tCanvas("skipped")} <strong>{s.name}</strong>: {s.reason}</li>
       {/each}
     </ul>
   {/if}
   {#if visible.length === 0 && !error}
-    <p class="muted">{skills.length === 0 ? "No skills in ~/.axiomata/skills/." : "No skills match the filter."}</p>
+    <p class="muted">{skills.length === 0 ? tCanvas("noSkills") : tCanvas("noSkillsMatch")}</p>
   {:else}
     <ul class="grid">
       {#each visible as s (s.name)}
@@ -163,29 +180,29 @@
           </span>
           <span class="name">/{s.name}</span>
           <span class="meta">
-            <span class="backend" title={s.backend ? "set in the skill" : "the skill harness of the settings"}>
+            <span class="backend" title={s.backend ? tCanvas("backendSet") : tCanvas("backendDefault")}>
               {backendLabel(s.harness)}
             </span>
             {#if busy}
-              <span class="running">running</span>
+              <span class="running">{tCanvas("running")}</span>
             {:else if last}
               <StatusMark
                 tone={last.status === "running" ? "live" : runFailed(last.status) ? "bad" : "ok"}
-                label={last.status}
-                title="{last.status} · {relativeTime(last.started_at)}"
+                label={statusLabel(last.status)}
+                title="{statusLabel(last.status)} · {relativeTime(last.started_at)}"
               />
               {#if last.resumable}
                 <button
                   type="button"
                   class="link"
-                  title="Go on from where the run stopped"
-                  onclick={() => resume(s.name, last.id)}>resume</button
+                  title={tCanvas("resumeTitle")}
+                  onclick={() => resume(s.name, last.id)}>{tCanvas("resume")}</button
                 >
                 <button
                   type="button"
                   class="link"
-                  title="Give the interrupted run up"
-                  onclick={() => discard(s.name, last.id)}>drop</button
+                  title={tCanvas("dropTitle")}
+                  onclick={() => discard(s.name, last.id)}>{tCanvas("drop")}</button
                 >
               {/if}
             {/if}
@@ -194,9 +211,9 @@
             type="button"
             class="run"
             disabled={busy}
-            aria-label="Run {s.name}"
+            aria-label={tCanvas("runSkill", { name: s.name })}
             aria-busy={busy}
-            title={busy ? "Running…" : "Run"}
+            title={busy ? tCanvas("runningEllipsis") : tCanvas("run")}
             onclick={() => run(s.name)}
           >
             {#if busy}

@@ -12,6 +12,7 @@
  * `reminders-digest` run, never a timer.
  */
 
+import { tModules } from "../i18n/modules";
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
 import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke, type SkippedRun } from "./skillRun";
@@ -67,10 +68,10 @@ export function parseReminderDigest(stdout: string): ReminderDigest {
   try {
     raw = JSON.parse(object);
   } catch (err) {
-    throw new Error(`reminders-digest output was not valid JSON: ${(err as Error).message}`);
+    throw new Error(tModules("outputNotJson", { skill: "reminders-digest", reason: (err as Error).message }));
   }
   if (!raw || typeof raw !== "object") {
-    throw new Error("reminders-digest output was not a JSON object");
+    throw new Error(tModules("outputNotObject", { skill: "reminders-digest" }));
   }
   const obj = raw as Record<string, unknown>;
   const lists = Array.isArray(obj.lists) ? obj.lists.filter((l): l is string => typeof l === "string") : [];

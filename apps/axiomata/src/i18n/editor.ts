@@ -26,13 +26,17 @@ const en = {
 
   // Previews.
   svgBroken: "This SVG does not draw — check its source.",
-  imageUndecodable: "This image cannot be shown here (the web view does not decode its format).",
+  imageUndecodable:
+    "This image cannot be shown here (the web view does not decode its format).",
   actualSize: "Actual size",
   fit: "Fit",
   imagePixels: "{w} × {h} px",
   loadingPreview: "Loading preview…",
   previewUnavailable: "Preview unavailable: {message}",
-  peekCut: { one: "The first line — Open shows all of it.", other: "The first {n} lines — Open shows all of it." },
+  peekCut: {
+    one: "The first line — Open shows all of it.",
+    other: "The first {n} lines — Open shows all of it.",
+  },
   tags: "Tags",
   showTagged: "Show the notes tagged #{tag} in the Second Brain",
 
@@ -61,7 +65,8 @@ const en = {
   scOnePageUpDown: "One page up / down",
   scExtendTheSelection: "Extend the selection",
   scgEditing: "Editing",
-  scDeleteACharacterWordTo: "Delete a character / word / to the line start backwards",
+  scDeleteACharacterWordTo:
+    "Delete a character / word / to the line start backwards",
   scDeleteACharacterWordBackwards: "Delete a character / word backwards",
   scDeleteACharacterWordForwards: "Delete a character / word forwards",
   scNewLine: "New line",
@@ -72,10 +77,12 @@ const en = {
   scUndoRedo: "Undo / redo",
   scCutCopyPaste: "Cut / copy / paste",
   scSelectEverything: "Select everything",
-  scSelectTheLineAgainThe: "Select the line (again: the next one too) — code actions where a language server runs",
+  scSelectTheLineAgainThe:
+    "Select the line (again: the next one too) — code actions where a language server runs",
   scSaveFormatsFirstWhereThat: "Save (formats first where that is on)",
   scOpenAFile: "Open a file",
-  scSourcePreviewSideBySide: "Source / preview / side by side (Markdown, HTML, SVG)",
+  scSourcePreviewSideBySide:
+    "Source / preview / side by side (Markdown, HTML, SVG)",
   scWrapLongLinesOnOff: "Wrap long lines on / off",
   scBackToOneCursor: "Back to one cursor",
   scgMultipleCursors: "Multiple cursors",
@@ -97,14 +104,17 @@ const en = {
   scAllUses: "All uses",
   scWhatTheServerSaysAbout: "What the server says about the symbol",
   scNextPreviousProblem: "Next / previous problem",
-  scCodeActionsQuickFixesRefactorings: "Code actions (quick fixes, refactorings)",
+  scCodeActionsQuickFixesRefactorings:
+    "Code actions (quick fixes, refactorings)",
   scRenameTheSymbol: "Rename the symbol",
   scFormatTheFile: "Format the file",
   scComplete: "Complete",
   scShowTheCallSSignature: "Show the call's signature",
   scgNotesWikilinksAndTags: "Notes (wikilinks and tags)",
-  scFollowAWikilinkIntoNothing: "Follow a [[wikilink]] (into nothing: create the note beside this one), or show a #tag",
-  scInTheReadingViewFollow: "In the reading view: follow a wikilink or show a tag",
+  scFollowAWikilinkIntoNothing:
+    "Follow a [[wikilink]] (into nothing: create the note beside this one), or show a #tag",
+  scInTheReadingViewFollow:
+    "In the reading view: follow a wikilink or show a tag",
   scBackForwardAlongTheJumps: "Back / forward along the jumps across files",
   scCompleteANoteNameA: "Complete a note name / a tag",
   scgCompletionAndCodeActionMenus: "Completion and code-action menus",
@@ -116,17 +126,23 @@ const en = {
   scgEverywhereInTheApp: "Everywhere in the app",
   scOpenCloseTheSearchThe: "Open / close the search (the spotlight)",
   scOpenTheSettings: "Open the settings",
-  scInTheChatInputA: "In the chat input: a new conversation (the Studio's new note elsewhere)",
+  scInTheChatInputA:
+    "In the chat input: a new conversation (the Studio's new note elsewhere)",
   scInTheChatInputSwitch: "In the chat input: switch between Plan and Build",
-  scCloseTheTopmostWindowThe: "Close the topmost window (the spotlight, else the top panel); not in a terminal",
-  scCloseTheTopmostWindowIn: "Close the topmost window — in a file window only on a rendered page or a picture",
-  scWhileTheDebuggerIsStopped: "While the debugger is stopped: continue, step over, out, into",
-  scInATerminalPaneEvery: "In a terminal pane every app shortcut takes Ctrl+Shift — plain Ctrl belongs to the shell",
+  scCloseTheTopmostWindowThe:
+    "Close the topmost window (the spotlight, else the top panel); not in a terminal",
+  scCloseTheTopmostWindowIn:
+    "Close the topmost window — in a file window only on a rendered page or a picture",
+  scWhileTheDebuggerIsStopped:
+    "While the debugger is stopped: continue, step over, out, into",
+  scInATerminalPaneEvery:
+    "In a terminal pane every app shortcut takes Ctrl+Shift — plain Ctrl belongs to the shell",
   scCopyPasteInATerminal: "Copy / paste in a terminal pane",
   scgStudio: "Studio",
   scOpenAFileByName: "Open a file by name (name:12 goes to line 12)",
   scOpenAFileWithThe: "Open a file with the file dialog",
-  scSearchTheProjectTheSidebar: "Search the project (the sidebar's Search view)",
+  scSearchTheProjectTheSidebar:
+    "Search the project (the sidebar's Search view)",
   scNewNote: "New note",
   scCloseTheFileTab: "Close the file tab",
   scGoToTab19: "Go to tab 1–9",
@@ -138,24 +154,29 @@ const en = {
   scgViMoving: "Vi — moving",
   scLeftDownUpRight: "Left, down, up, right",
   scTheSameByOtherKeys: "The same, by other keys",
-  scWordsForwardBackToThe: "Words forward, back, to the end (W: separated by spaces only)",
-  scLineStartFirstCharacterEnd: "Line start, first character, end, last character, column",
+  scWordsForwardBackToThe:
+    "Words forward, back, to the end (W: separated by spaces only)",
+  scLineStartFirstCharacterEnd:
+    "Line start, first character, end, last character, column",
   scLineStartEnd: "Line start / end",
   scFirstLastLineWithA: "First / last line (with a count: that line)",
-  scFirstCharacterOfTheNext: "First character of the next / previous / this line",
+  scFirstCharacterOfTheNext:
+    "First character of the next / previous / this line",
   scParagraphsAndSentences: "Paragraphs and sentences",
   scTheMatchingBracket: "The matching bracket",
   scTopMiddleBottomOfThe: "Top, middle, bottom of the screen",
   scDownUpByScreenRows: "Down / up by screen rows",
   scToBeforeACharacterAgain: "To / before a character, again, back",
-  scSearchForwardBackNextPrevious: "Search forward / back, next, previous, the word under the cursor",
+  scSearchForwardBackNextPrevious:
+    "Search forward / back, next, previous, the word under the cursor",
   scToAMarkItsLine: "To a mark (its line / its exact place)",
   scgViChanging: "Vi — changing",
   scDeleteChangeCopyIndentOutdent:
     "Delete, change, copy, indent, outdent, reindent, case, comment — then a motion or object",
   scTheSameForTheWhole: "The same for the whole line",
   scSurroundAddChangeDelete: "Surround: add, change, delete",
-  scInsertBeforeAfterLineStart: "Insert before, after, line start, line end, new line below, above, where last",
+  scInsertBeforeAfterLineStart:
+    "Insert before, after, line start, line end, new line below, above, where last",
   scDeleteCharacterBeforeSubstituteLine:
     "Delete character, before, substitute, line, to the end, change to the end, copy line",
   scReplaceACharacterReplaceMode: "Replace a character / Replace mode",
@@ -164,8 +185,10 @@ const en = {
   scToggleCaseVisualUUpper: "Toggle case (Visual U: upper case)",
   scAddSubtractTheCount: "Add / subtract the count",
   scUndoRedoRepeatTheLast: "Undo, redo, repeat the last change",
-  scRepeatSRepeatMacroRecord: "Repeat :s, repeat macro, record / play a macro, set a mark",
-  scSelectTheNextPreviousMatch: "Select the next / previous match (cgn: change it)",
+  scRepeatSRepeatMacroRecord:
+    "Repeat :s, repeat macro, record / play a macro, set a mark",
+  scSelectTheNextPreviousMatch:
+    "Select the next / previous match (cgn: change it)",
   scgViTextObjectsAfterI: "Vi — text objects (after i / a)",
   scWordWORDSentenceParagraph: "Word, WORD, sentence, paragraph",
   scQuotedString: "Quoted string",
@@ -173,16 +196,20 @@ const en = {
   scHTMLXMLTag: "HTML/XML tag",
   scFunctionClassArgumentTreeSitter: "Function, class, argument (tree-sitter)",
   scgViModesViewsAndThe: "Vi — modes, views and the rest",
-  scVisualByCharacterLineBlock: "Visual by character, line, block; again; other end",
+  scVisualByCharacterLineBlock:
+    "Visual by character, line, block; again; other end",
   scBackToNormal: "Back to Normal",
   scScrollTheCursorLineTo: "Scroll the cursor line to the top, middle, bottom",
   scScrollByLinesHalfPages: "Scroll by lines, half pages, pages",
-  scBackForwardInTheJump: "Back / forward in the jump list (past its ends: across files)",
+  scBackForwardInTheJump:
+    "Back / forward in the jump list (past its ends: across files)",
   scCloseOpenToggleAFold: "Close, open, toggle a fold; open / close all",
   scNextPreviousChangeInA: "Next / previous change in a diff",
-  scDefinitionOnANoteS: "Definition (on a note's wikilink: follow it), hover, open the path under the cursor",
+  scDefinitionOnANoteS:
+    "Definition (on a note's wikilink: follow it), hover, open the path under the cursor",
   scImplementationsTypeDefinitionUses: "Implementations, type definition, uses",
-  scRenameCodeActionsVisualFor: "Rename, code actions (Visual: for the selection)",
+  scRenameCodeActionsVisualFor:
+    "Rename, code actions (Visual: for the selection)",
   scSaveAndCloseCloseWithout: "Save and close / close without saving",
   scCommandLineVisualForThe: "Command line (Visual: for the selected lines)",
   scgViCommands: "Vi — commands",
@@ -191,7 +218,8 @@ const en = {
   scReplaceCAskEachTime: "Replace (c: ask each time); repeat",
   scRunACommandOnThe: "Run a command on the lines that match / do not match",
   scDeleteLinesTypeKeysOn: "Delete lines; type keys on every line",
-  scWrappingNumbersRelativeNumbersWhitespace: "Wrapping, numbers, relative numbers, whitespace",
+  scWrappingNumbersRelativeNumbersWhitespace:
+    "Wrapping, numbers, relative numbers, whitespace",
   scHideTheSearchHighlight: "Hide the search highlight",
   scFormatRenameCodeActions: "Format, rename, code actions",
   scGoToLineN: "Go to line n",
@@ -202,7 +230,8 @@ const en = {
   showHidden: "Show dotfiles, .git, node_modules, target",
   rereadFolders: "Read the folders again",
   projectFolderMissing: "The project folder is not available.",
-  noProjectOpenHint: "No project open. Open a folder or start a new project from the bar above.",
+  noProjectOpenHint:
+    "No project open. Open a folder or start a new project from the bar above.",
   outlineHeight: "Outline height",
   sidebarWidth: "Sidebar width",
   outline: "Outline",
@@ -265,7 +294,8 @@ const en = {
   filesToExclude: "Files to exclude",
   placeCount: { one: "1 place", other: "{n} places" },
   closeList: "Close the list",
-  unsavedSearchHint: "Unsaved changes in an editor — these results are the file on disk",
+  unsavedSearchHint:
+    "Unsaved changes in an editor — these results are the file on disk",
   searchFailed: "The search failed.",
   invalidGlob: "Invalid {detail}",
   invalidPattern: "Invalid pattern: {detail}",
@@ -276,7 +306,8 @@ const en = {
   foundStopped: "{found} — stopped at {limit} results; narrow the search",
 
   // Git changes of one file.
-  discardHunkConfirm: "Throw this change away? It is not saved anywhere and cannot be brought back.",
+  discardHunkConfirm:
+    "Throw this change away? It is not saved anywhere and cannot be brought back.",
   changeOf: "Change of {path}",
   gitStaged: "Staged",
   gitChanges: "Changes",
@@ -298,7 +329,8 @@ const en = {
   moveAcrossRoots: "Moving between roots is not possible — only within one.",
   moveIntoItself: "A folder cannot be moved into itself.",
   linksNotChecked: "The links to {name} were not checked: {error}",
-  folderLinksKept: "Links into the renamed folder by path were not updated — links by note name still work",
+  folderLinksKept:
+    "Links into the renamed folder by path were not updated — links by note name still work",
   linksUpdated: "Updated {links} in {notes}",
   linksNotUpdated: "The links were not updated: {error}",
   linkCount: { one: "1 link", other: "{n} links" },
@@ -327,7 +359,8 @@ const en = {
   projectNameTooLong: "That name is too long.",
   projectNameDot: "The name must not start with a dot.",
   projectNameChars: "The name must not contain / \\ or :.",
-  removeProjectConfirm: "Remove “{name}” from the list? The folder itself is left alone.",
+  removeProjectConfirm:
+    "Remove “{name}” from the list? The folder itself is left alone.",
   folderMissing: "folder missing",
   noProject: "No project",
   changeFolderOf: "Change the folder of {name}…",
@@ -369,13 +402,14 @@ const en = {
   keysNormal: "Normal (Mac)",
   viClipboard: "Vi clipboard",
   viClipboardShared: "Shared with the system (y and p use ⌘C/⌘V's clipboard)",
-  viClipboardSeparate: "Separate (\"+y and \"+p reach the Mac)",
+  viClipboardSeparate: 'Separate ("+y and "+p reach the Mac)',
   font: "Font",
   fontsBundled: "Bundled",
   fontsInstalled: "Installed on this Mac",
   fontNotInstalled: "{font} (not installed)",
   monospaceOnly: "Only monospaced fonts",
-  fontMissing: "{font} is not installed on this Mac — the editor shows {fallback}.",
+  fontMissing:
+    "{font} is not installed on this Mac — the editor shows {fallback}.",
   weight: "Weight",
   weightMissing: "{font} has no {weight} — shows {shown}. It has {weights}.",
   size: "Size",
@@ -399,9 +433,11 @@ const en = {
   followAppTheme: "Follow the app theme",
   themeLight: "{name} (light)",
   fileIcons: "File icons",
-  reduceMotionNote: "With macOS \"Reduce motion\" on, the cursor does not glide and nothing scrolls smoothly.",
+  reduceMotionNote:
+    'With macOS "Reduce motion" on, the cursor does not glide and nothing scrolls smoothly.',
   autosave: "Autosave",
-  autosaveNote: "Autosave never overwrites a change made on disk; it stops and asks instead.",
+  autosaveNote:
+    "Autosave never overwrites a change made on disk; it stops and asks instead.",
   formatOnSaveBefore: "Format on save (⌘S,",
   formatOnSaveAfter: ")",
   except: "Except",
@@ -433,7 +469,8 @@ const en = {
   noHeading: "No heading “{heading}” in this note",
   vaultUnreadable: "The vault's notes could not be read",
   severalNotes: "“{target}” fits several notes — name its folder: {names}",
-  fileNoteFirst: "File this note first (⌘S) — a linked note is created beside it",
+  fileNoteFirst:
+    "File this note first (⌘S) — a linked note is created beside it",
   unusableFileName: "“{target}” is no usable file name",
   couldNotCreate: "Could not create {path}: {error}",
   created: "Created {path}",
@@ -463,7 +500,8 @@ const en = {
   reload: "Reload",
   keepMine: "Keep mine",
   compare: "Compare",
-  overwriteQuestion: "The file was changed on disk. Save anyway and overwrite it?",
+  overwriteQuestion:
+    "The file was changed on disk. Save anyway and overwrite it?",
   overwrite: "Overwrite",
   deletedOnDisk: "The file was deleted on disk. Saving creates it again.",
   reloaded: "Reloaded — the file changed on disk.",
@@ -475,14 +513,18 @@ const en = {
   newNoteHint: "New note — ⌘S files it",
   largeFileTitle: "Over 2 MB: no syntax colours",
   largeFile: "Large file — light mode",
-  readOnlyOutside: "Read-only — outside the project, shown by the language server",
+  readOnlyOutside:
+    "Read-only — outside the project, shown by the language server",
   problemsTitle: "Problems from the language server — F8 / ⇧F8 to step through",
   modeSource: "Source",
   modePreview: "Preview",
   modeSplit: "Side by side",
   eolWasMixed: "LF (was mixed)",
   indentSpaces: { one: "1 space", other: "{n} spaces" },
-  indentSpacesDefault: { one: "1 space (default)", other: "{n} spaces (default)" },
+  indentSpacesDefault: {
+    one: "1 space (default)",
+    other: "{n} spaces (default)",
+  },
   cursorPosition: "Ln {line}, Col {col}",
   settingsReadFailed: "Could not read editor-settings.json: {error}",
   settingsSaveFailed: "Could not save editor-settings.json: {error}",
@@ -501,7 +543,8 @@ const en = {
   },
 
   // Helpers: language servers, workspace edits, note completion.
-  serverMissing: "No {server} language server found — install it with: {install}",
+  serverMissing:
+    "No {server} language server found — install it with: {install}",
   editOutsideProject: "outside the project",
   editWouldCreate: "it would create {file}",
   editCannotRead: "it cannot read {file}",
@@ -511,7 +554,8 @@ const en = {
 
   // The Git panel.
   git: "Git",
-  deleteUntrackedConfirm: "Delete {name}? It is not in git, so it cannot be brought back.",
+  deleteUntrackedConfirm:
+    "Delete {name}? It is not in git, so it cannot be brought back.",
   discardChangesConfirm:
     "Throw away the unstaged changes in {name}? They are not saved anywhere and cannot be brought back.",
   committedNotPushed: "Committed, but not pushed: {error}",
@@ -569,7 +613,7 @@ const de: Shape<typeof en> = {
   cancel: "Abbrechen",
   close: "Schließen",
   dismiss: "Ausblenden",
-  loading: "Lädt…",
+  loading: "Lade…",
   noMatch: "Kein Treffer",
 
   unsavedChanges: "Ungespeicherte Änderungen",
@@ -578,7 +622,8 @@ const de: Shape<typeof en> = {
   fileIt: "Ablegen",
 
   svgBroken: "Dieses SVG zeichnet nichts — prüfe seinen Quelltext.",
-  imageUndecodable: "Dieses Bild lässt sich hier nicht zeigen (die Web-Ansicht kann sein Format nicht lesen).",
+  imageUndecodable:
+    "Dieses Bild lässt sich hier nicht zeigen (die Web-Ansicht kann sein Format nicht lesen).",
   actualSize: "Originalgröße",
   fit: "Einpassen",
   imagePixels: "{w} × {h} px",
@@ -613,7 +658,8 @@ const de: Shape<typeof en> = {
   scOnePageUpDown: "Eine Seite hoch / runter",
   scExtendTheSelection: "Die Auswahl erweitern",
   scgEditing: "Bearbeiten",
-  scDeleteACharacterWordTo: "Ein Zeichen / Wort / bis zum Zeilenanfang rückwärts löschen",
+  scDeleteACharacterWordTo:
+    "Ein Zeichen / Wort / bis zum Zeilenanfang rückwärts löschen",
   scDeleteACharacterWordBackwards: "Ein Zeichen / Wort rückwärts löschen",
   scDeleteACharacterWordForwards: "Ein Zeichen / Wort vorwärts löschen",
   scNewLine: "Neue Zeile",
@@ -628,7 +674,8 @@ const de: Shape<typeof en> = {
     "Die Zeile auswählen (nochmal: auch die nächste) — Code-Aktionen, wo ein Language-Server läuft",
   scSaveFormatsFirstWhereThat: "Speichern (formatiert vorher, wo das an ist)",
   scOpenAFile: "Eine Datei öffnen",
-  scSourcePreviewSideBySide: "Quelltext / Vorschau / nebeneinander (Markdown, HTML, SVG)",
+  scSourcePreviewSideBySide:
+    "Quelltext / Vorschau / nebeneinander (Markdown, HTML, SVG)",
   scWrapLongLinesOnOff: "Lange Zeilen umbrechen an / aus",
   scBackToOneCursor: "Zurück zu einem Cursor",
   scgMultipleCursors: "Mehrere Cursor",
@@ -650,7 +697,8 @@ const de: Shape<typeof en> = {
   scAllUses: "Alle Verwendungen",
   scWhatTheServerSaysAbout: "Was der Server über das Symbol sagt",
   scNextPreviousProblem: "Nächstes / vorheriges Problem",
-  scCodeActionsQuickFixesRefactorings: "Code-Aktionen (schnelle Korrekturen, Refactorings)",
+  scCodeActionsQuickFixesRefactorings:
+    "Code-Aktionen (schnelle Korrekturen, Refactorings)",
   scRenameTheSymbol: "Das Symbol umbenennen",
   scFormatTheFile: "Die Datei formatieren",
   scComplete: "Vervollständigen",
@@ -658,34 +706,44 @@ const de: Shape<typeof en> = {
   scgNotesWikilinksAndTags: "Notizen (Wikilinks und Tags)",
   scFollowAWikilinkIntoNothing:
     "Einem [[Wikilink]] folgen (ins Leere: die Notiz neben dieser anlegen) oder einen #Tag zeigen",
-  scInTheReadingViewFollow: "In der Leseansicht: einem Wikilink folgen oder einen Tag zeigen",
-  scBackForwardAlongTheJumps: "Zurück / vor entlang der Sprünge über Dateien hinweg",
+  scInTheReadingViewFollow:
+    "In der Leseansicht: einem Wikilink folgen oder einen Tag zeigen",
+  scBackForwardAlongTheJumps:
+    "Zurück / vor entlang der Sprünge über Dateien hinweg",
   scCompleteANoteNameA: "Einen Notiznamen / einen Tag vervollständigen",
   scgCompletionAndCodeActionMenus: "Vervollständigungs- und Code-Aktions-Menüs",
   scChoose: "Wählen",
-  scTakeAndInCompletionOnly: "Übernehmen (⏎ und ⇥ in der Vervollständigung nur ohne Vi)",
+  scTakeAndInCompletionOnly:
+    "Übernehmen (⏎ und ⇥ in der Vervollständigung nur ohne Vi)",
   scTakeThatCodeAction: "Diese Code-Aktion übernehmen",
   scNarrowWidenTheCodeActions: "Die Code-Aktionen eingrenzen / erweitern",
   scClose: "Schließen",
   scgEverywhereInTheApp: "Überall in der App",
   scOpenCloseTheSearchThe: "Die Suche (das Spotlight) öffnen / schließen",
   scOpenTheSettings: "Die Einstellungen öffnen",
-  scInTheChatInputA: "Im Chat-Feld: eine neue Unterhaltung (sonst die neue Notiz des Studio)",
+  scInTheChatInputA:
+    "Im Chat-Feld: eine neue Unterhaltung (sonst die neue Notiz des Studio)",
   scInTheChatInputSwitch: "Im Chat-Feld: zwischen Plan und Build wechseln",
-  scCloseTheTopmostWindowThe: "Das oberste Fenster schließen (das Spotlight, sonst das obere Panel); nicht im Terminal",
+  scCloseTheTopmostWindowThe:
+    "Das oberste Fenster schließen (das Spotlight, sonst das obere Panel); nicht im Terminal",
   scCloseTheTopmostWindowIn:
     "Das oberste Fenster schließen — im Dateifenster nur auf einer gerenderten Seite oder einem Bild",
-  scWhileTheDebuggerIsStopped: "Solange der Debugger hält: weiter, überspringen, hinaus, hinein",
-  scInATerminalPaneEvery: "In einem Terminal-Pane nimmt jedes App-Kürzel Ctrl+Shift — das bloße Ctrl gehört der Shell",
+  scWhileTheDebuggerIsStopped:
+    "Solange der Debugger hält: weiter, überspringen, hinaus, hinein",
+  scInATerminalPaneEvery:
+    "In einem Terminal-Pane nimmt jedes App-Kürzel Ctrl+Shift — das bloße Ctrl gehört der Shell",
   scCopyPasteInATerminal: "Kopieren / einfügen in einem Terminal-Pane",
   scgStudio: "Studio",
-  scOpenAFileByName: "Eine Datei nach Namen öffnen (name:12 springt zu Zeile 12)",
+  scOpenAFileByName:
+    "Eine Datei nach Namen öffnen (name:12 springt zu Zeile 12)",
   scOpenAFileWithThe: "Eine Datei mit dem Dateidialog öffnen",
-  scSearchTheProjectTheSidebar: "Das Projekt durchsuchen (die Suche in der Seitenleiste)",
+  scSearchTheProjectTheSidebar:
+    "Das Projekt durchsuchen (die Suche in der Seitenleiste)",
   scNewNote: "Neue Notiz",
   scCloseTheFileTab: "Den Datei-Tab schließen",
   scGoToTab19: "Zu Tab 1–9 springen",
-  scNextPreviousTabInThe: "Nächster / vorheriger Tab (in der Gruppe mit dem Fokus)",
+  scNextPreviousTabInThe:
+    "Nächster / vorheriger Tab (in der Gruppe mit dem Fokus)",
   scMoveTheTabIntoA: "Den Tab in eine neue Gruppe rechts / darunter schieben",
   scOntoAGroupJoinIt: "Auf eine Gruppe: ihr beitreten — an einen Rand: teilen",
   scResizeTheGroupsBesideIt: "Die Gruppen daneben in der Größe ändern",
@@ -693,17 +751,21 @@ const de: Shape<typeof en> = {
   scgViMoving: "Vi — bewegen",
   scLeftDownUpRight: "Links, runter, hoch, rechts",
   scTheSameByOtherKeys: "Dasselbe mit anderen Tasten",
-  scWordsForwardBackToThe: "Wörter vor, zurück, ans Ende (W: nur durch Leerraum getrennt)",
-  scLineStartFirstCharacterEnd: "Zeilenanfang, erstes Zeichen, Ende, letztes Zeichen, Spalte",
+  scWordsForwardBackToThe:
+    "Wörter vor, zurück, ans Ende (W: nur durch Leerraum getrennt)",
+  scLineStartFirstCharacterEnd:
+    "Zeilenanfang, erstes Zeichen, Ende, letztes Zeichen, Spalte",
   scLineStartEnd: "Zeilenanfang / -ende",
   scFirstLastLineWithA: "Erste / letzte Zeile (mit Zahl: diese Zeile)",
-  scFirstCharacterOfTheNext: "Erstes Zeichen der nächsten / vorherigen / dieser Zeile",
+  scFirstCharacterOfTheNext:
+    "Erstes Zeichen der nächsten / vorherigen / dieser Zeile",
   scParagraphsAndSentences: "Absätze und Sätze",
   scTheMatchingBracket: "Die passende Klammer",
   scTopMiddleBottomOfThe: "Oben, Mitte, unten auf dem Bildschirm",
   scDownUpByScreenRows: "Runter / hoch um Bildschirmzeilen",
   scToBeforeACharacterAgain: "Zu / vor ein Zeichen, nochmal, zurück",
-  scSearchForwardBackNextPrevious: "Vorwärts / rückwärts suchen, nächster, vorheriger, das Wort unter dem Cursor",
+  scSearchForwardBackNextPrevious:
+    "Vorwärts / rückwärts suchen, nächster, vorheriger, das Wort unter dem Cursor",
   scToAMarkItsLine: "Zu einer Marke (ihre Zeile / ihre genaue Stelle)",
   scgViChanging: "Vi — ändern",
   scDeleteChangeCopyIndentOutdent:
@@ -716,13 +778,17 @@ const de: Shape<typeof en> = {
   scDeleteCharacterBeforeSubstituteLine:
     "Zeichen löschen, davor, ersetzen, Zeile, bis zum Ende, bis zum Ende ändern, Zeile kopieren",
   scReplaceACharacterReplaceMode: "Ein Zeichen ersetzen / Replace-Modus",
-  scPasteAfterBeforeGCursor: "Danach / davor einfügen (g: Cursor hinter den Text)",
+  scPasteAfterBeforeGCursor:
+    "Danach / davor einfügen (g: Cursor hinter den Text)",
   scJoinLinesWithoutSpaces: "Zeilen verbinden (ohne Leerzeichen)",
   scToggleCaseVisualUUpper: "Groß/klein umschalten (Visual U: groß)",
   scAddSubtractTheCount: "Die Zahl addieren / abziehen",
-  scUndoRedoRepeatTheLast: "Rückgängig, wiederholen, die letzte Änderung wiederholen",
-  scRepeatSRepeatMacroRecord: ":s wiederholen, Makro wiederholen, ein Makro aufnehmen / abspielen, eine Marke setzen",
-  scSelectTheNextPreviousMatch: "Den nächsten / vorherigen Treffer auswählen (cgn: ihn ändern)",
+  scUndoRedoRepeatTheLast:
+    "Rückgängig, wiederholen, die letzte Änderung wiederholen",
+  scRepeatSRepeatMacroRecord:
+    ":s wiederholen, Makro wiederholen, ein Makro aufnehmen / abspielen, eine Marke setzen",
+  scSelectTheNextPreviousMatch:
+    "Den nächsten / vorherigen Treffer auswählen (cgn: ihn ändern)",
   scgViTextObjectsAfterI: "Vi — Textobjekte (nach i / a)",
   scWordWORDSentenceParagraph: "Wort, WORT, Satz, Absatz",
   scQuotedString: "Text in Anführungszeichen",
@@ -730,26 +796,36 @@ const de: Shape<typeof en> = {
   scHTMLXMLTag: "HTML/XML-Tag",
   scFunctionClassArgumentTreeSitter: "Funktion, Klasse, Argument (tree-sitter)",
   scgViModesViewsAndThe: "Vi — Modi, Ansichten und der Rest",
-  scVisualByCharacterLineBlock: "Visual nach Zeichen, Zeile, Block; nochmal; anderes Ende",
+  scVisualByCharacterLineBlock:
+    "Visual nach Zeichen, Zeile, Block; nochmal; anderes Ende",
   scBackToNormal: "Zurück zu Normal",
-  scScrollTheCursorLineTo: "Die Cursorzeile nach oben, in die Mitte, nach unten scrollen",
+  scScrollTheCursorLineTo:
+    "Die Cursorzeile nach oben, in die Mitte, nach unten scrollen",
   scScrollByLinesHalfPages: "Um Zeilen, halbe Seiten, Seiten scrollen",
-  scBackForwardInTheJump: "Zurück / vor in der Sprungliste (über ihre Enden: über Dateien hinweg)",
-  scCloseOpenToggleAFold: "Eine Faltung schließen, öffnen, umschalten; alle öffnen / schließen",
+  scBackForwardInTheJump:
+    "Zurück / vor in der Sprungliste (über ihre Enden: über Dateien hinweg)",
+  scCloseOpenToggleAFold:
+    "Eine Faltung schließen, öffnen, umschalten; alle öffnen / schließen",
   scNextPreviousChangeInA: "Nächste / vorherige Änderung in einem Diff",
   scDefinitionOnANoteS:
     "Definition (auf dem Wikilink einer Notiz: ihm folgen), Hover, den Pfad unter dem Cursor öffnen",
-  scImplementationsTypeDefinitionUses: "Implementierungen, Typdefinition, Verwendungen",
-  scRenameCodeActionsVisualFor: "Umbenennen, Code-Aktionen (Visual: für die Auswahl)",
-  scSaveAndCloseCloseWithout: "Speichern und schließen / schließen ohne Speichern",
-  scCommandLineVisualForThe: "Befehlszeile (Visual: für die ausgewählten Zeilen)",
+  scImplementationsTypeDefinitionUses:
+    "Implementierungen, Typdefinition, Verwendungen",
+  scRenameCodeActionsVisualFor:
+    "Umbenennen, Code-Aktionen (Visual: für die Auswahl)",
+  scSaveAndCloseCloseWithout:
+    "Speichern und schließen / schließen ohne Speichern",
+  scCommandLineVisualForThe:
+    "Befehlszeile (Visual: für die ausgewählten Zeilen)",
   scgViCommands: "Vi — Befehle",
   scSaveSaveAndCloseClose: "Speichern, speichern und schließen, schließen",
   scBackToTheFileOn: "Zurück zur Datei auf der Festplatte",
   scReplaceCAskEachTime: "Ersetzen (c: jedes Mal fragen); wiederholen",
-  scRunACommandOnThe: "Einen Befehl auf den passenden / nicht passenden Zeilen ausführen",
+  scRunACommandOnThe:
+    "Einen Befehl auf den passenden / nicht passenden Zeilen ausführen",
   scDeleteLinesTypeKeysOn: "Zeilen löschen; Tasten auf jeder Zeile tippen",
-  scWrappingNumbersRelativeNumbersWhitespace: "Umbruch, Nummern, relative Nummern, Leerraum",
+  scWrappingNumbersRelativeNumbersWhitespace:
+    "Umbruch, Nummern, relative Nummern, Leerraum",
   scHideTheSearchHighlight: "Die Suchmarkierung ausblenden",
   scFormatRenameCodeActions: "Formatieren, umbenennen, Code-Aktionen",
   scGoToLineN: "Zu Zeile n springen",
@@ -759,7 +835,8 @@ const de: Shape<typeof en> = {
   showHidden: "Dotfiles, .git, node_modules, target zeigen",
   rereadFolders: "Die Ordner neu lesen",
   projectFolderMissing: "Der Projektordner ist nicht da.",
-  noProjectOpenHint: "Kein Projekt offen. Öffne einen Ordner oder lege oben in der Leiste ein neues Projekt an.",
+  noProjectOpenHint:
+    "Kein Projekt offen. Öffne einen Ordner oder lege oben in der Leiste ein neues Projekt an.",
   outlineHeight: "Höhe der Gliederung",
   sidebarWidth: "Breite der Seitenleiste",
   outline: "Gliederung",
@@ -778,7 +855,8 @@ const de: Shape<typeof en> = {
   fileName: "Dateiname",
   readingFolders: "Die Ordner werden gelesen…",
   noFileMatches: "Keine Datei passt.",
-  quickOpenTruncated: "Manche Ordner haben mehr Dateien, als die Schnellsuche liest.",
+  quickOpenTruncated:
+    "Manche Ordner haben mehr Dateien, als die Schnellsuche liest.",
 
   couldNotOpen: "{rel} ließ sich nicht öffnen: {message}",
   newNote: "Neue Notiz",
@@ -793,7 +871,7 @@ const de: Shape<typeof en> = {
   find: "Suchen",
   search: "Suchen",
   searching: "Sucht",
-  searchingDots: "Sucht…",
+  searchingDots: "Suche…",
   invalid: "Ungültig",
   noResults: "Keine Treffer",
   foundTotal: "{total} gefunden",
@@ -820,7 +898,8 @@ const de: Shape<typeof en> = {
   filesToExclude: "Auszuschließende Dateien",
   placeCount: { one: "1 Stelle", other: "{n} Stellen" },
   closeList: "Die Liste schließen",
-  unsavedSearchHint: "Ungespeicherte Änderungen in einem Editor — diese Treffer zeigen die Datei auf der Festplatte",
+  unsavedSearchHint:
+    "Ungespeicherte Änderungen in einem Editor — diese Treffer zeigen die Datei auf der Festplatte",
   searchFailed: "Die Suche ist fehlgeschlagen.",
   invalidGlob: "Ungültig: {detail}",
   invalidPattern: "Ungültiges Muster: {detail}",
@@ -828,9 +907,11 @@ const de: Shape<typeof en> = {
   fileCount: { one: "{count} Datei", other: "{count} Dateien" },
   resultsInFiles: "{results} in {files}",
   foundSearching: "{found} — sucht…",
-  foundStopped: "{found} — bei {limit} Treffern angehalten; grenze die Suche ein",
+  foundStopped:
+    "{found} — bei {limit} Treffern angehalten; grenze die Suche ein",
 
-  discardHunkConfirm: "Diese Änderung verwerfen? Sie ist nirgends gespeichert und lässt sich nicht zurückholen.",
+  discardHunkConfirm:
+    "Diese Änderung verwerfen? Sie ist nirgends gespeichert und lässt sich nicht zurückholen.",
   changeOf: "Änderung an {path}",
   gitStaged: "Vorgemerkt",
   gitChanges: "Änderungen",
@@ -848,7 +929,8 @@ const de: Shape<typeof en> = {
   nameNeeded: "Ein Name fehlt.",
   nameReserved: "Diesen Namen belegt das Dateisystem.",
   nameBadChars: "Ein Name darf kein / und kein NUL enthalten.",
-  moveAcrossRoots: "Verschieben geht nur innerhalb eines Ortes — nicht zwischen Workspace, Projekten und Worktrees.",
+  moveAcrossRoots:
+    "Verschieben geht nur innerhalb eines Ortes — nicht zwischen Workspace, Projekten und Worktrees.",
   moveIntoItself: "Ein Ordner lässt sich nicht in sich selbst verschieben.",
   linksNotChecked: "Die Links auf {name} wurden nicht geprüft: {error}",
   folderLinksKept:
@@ -863,7 +945,7 @@ const de: Shape<typeof en> = {
   name: "Name",
   aLink: "{path} (ein Link)",
   actionsFor: "Aktionen für {name}",
-  counting: "Zählt…",
+  counting: "Zähle…",
   entryCount: { one: "1 Eintrag", other: "{n} Einträge" },
   deleteFolder: "{name} und {entries} darin löschen?",
   deleteFile: "{name} löschen?",
@@ -880,7 +962,8 @@ const de: Shape<typeof en> = {
   projectNameTooLong: "Dieser Name ist zu lang.",
   projectNameDot: "Der Name darf nicht mit einem Punkt beginnen.",
   projectNameChars: "Der Name darf kein /, \\ oder : enthalten.",
-  removeProjectConfirm: "„{name}“ aus der Liste entfernen? Der Ordner selbst bleibt, wie er ist.",
+  removeProjectConfirm:
+    "„{name}“ aus der Liste entfernen? Der Ordner selbst bleibt, wie er ist.",
   folderMissing: "Ordner fehlt",
   noProject: "Kein Projekt",
   changeFolderOf: "Den Ordner von {name} ändern…",
@@ -920,16 +1003,19 @@ const de: Shape<typeof en> = {
   keys: "Tasten",
   keysNormal: "Normal (Mac)",
   viClipboard: "Vi-Zwischenablage",
-  viClipboardShared: "Mit dem System geteilt (y und p nutzen die Zwischenablage von ⌘C/⌘V)",
-  viClipboardSeparate: "Getrennt (\"+y und \"+p erreichen den Mac)",
+  viClipboardShared:
+    "Mit dem System geteilt (y und p nutzen die Zwischenablage von ⌘C/⌘V)",
+  viClipboardSeparate: 'Getrennt ("+y und "+p erreichen den Mac)',
   font: "Schrift",
   fontsBundled: "Mitgeliefert",
   fontsInstalled: "Auf diesem Mac installiert",
   fontNotInstalled: "{font} (nicht installiert)",
   monospaceOnly: "Nur Festbreitenschriften",
-  fontMissing: "{font} ist auf diesem Mac nicht installiert — der Editor zeigt {fallback}.",
+  fontMissing:
+    "{font} ist auf diesem Mac nicht installiert — der Editor zeigt {fallback}.",
   weight: "Stärke",
-  weightMissing: "{font} hat kein {weight} — zeigt {shown}. Vorhanden: {weights}.",
+  weightMissing:
+    "{font} hat kein {weight} — zeigt {shown}. Vorhanden: {weights}.",
   size: "Größe",
   lineHeight: "Zeilenhöhe",
   ligatures: "Ligaturen",
@@ -951,9 +1037,11 @@ const de: Shape<typeof en> = {
   followAppTheme: "Dem Theme der App folgen",
   themeLight: "{name} (hell)",
   fileIcons: "Datei-Symbole",
-  reduceMotionNote: "Ist „Bewegung reduzieren“ in macOS an, gleitet der Cursor nicht und nichts scrollt weich.",
+  reduceMotionNote:
+    "Ist „Bewegung reduzieren“ in macOS an, gleitet der Cursor nicht und nichts scrollt weich.",
   autosave: "Automatisch speichern",
-  autosaveNote: "Automatisches Speichern überschreibt nie eine Änderung auf der Festplatte; es hält an und fragt.",
+  autosaveNote:
+    "Automatisches Speichern überschreibt nie eine Änderung auf der Festplatte; es hält an und fragt.",
   formatOnSaveBefore: "Beim Speichern formatieren (⌘S,",
   formatOnSaveAfter: ")",
   except: "Außer",
@@ -964,10 +1052,12 @@ const de: Shape<typeof en> = {
   serverNoCodeActions: "Dieser Language-Server bietet keine Code-Aktionen",
   fileReadOnly: "Diese Datei ist schreibgeschützt",
   actionCouldNotRun: "„{title}“ ließ sich nicht ausführen: {error}",
-  actionTextChanged: "Der Text hat sich inzwischen geändert — die Aktion lief nicht",
+  actionTextChanged:
+    "Der Text hat sich inzwischen geändert — die Aktion lief nicht",
   actionChangesNothing: "„{title}“ ändert nichts",
   actionFailed: "„{title}“ ist fehlgeschlagen: {error}",
-  actionMovesFiles: "„{title}“ würde Dateien verschieben — mache das im Dateibaum",
+  actionMovesFiles:
+    "„{title}“ würde Dateien verschieben — mache das im Dateibaum",
   actionNotApplied: "„{title}“ wurde nicht angewendet: {reason}",
   actionNotChanged: "„{title}“: nicht geändert: {list}",
   definitionsOf: "Definitionen von {symbol}",
@@ -983,16 +1073,20 @@ const de: Shape<typeof en> = {
   wikilinksWorkspaceOnly: "Wikilinks führen zu Notizen im Workspace",
   noHeading: "Keine Überschrift „{heading}“ in dieser Notiz",
   vaultUnreadable: "Die Notizen im Vault ließen sich nicht lesen",
-  severalNotes: "„{target}“ passt zu mehreren Notizen — nenne den Ordner: {names}",
-  fileNoteFirst: "Lege diese Notiz zuerst ab (⌘S) — eine verlinkte Notiz entsteht daneben",
+  severalNotes:
+    "„{target}“ passt zu mehreren Notizen — nenne den Ordner: {names}",
+  fileNoteFirst:
+    "Lege diese Notiz zuerst ab (⌘S) — eine verlinkte Notiz entsteht daneben",
   unusableFileName: "„{target}“ taugt nicht als Dateiname",
   couldNotCreate: "{path} ließ sich nicht anlegen: {error}",
   created: "{path} angelegt",
   serverNoRename: "Dieser Language-Server benennt nicht um",
   nothingToRename: "Hier gibt es nichts umzubenennen",
-  renameMovesFiles: "Diese Umbenennung würde Dateien verschieben — mache das im Dateibaum",
+  renameMovesFiles:
+    "Diese Umbenennung würde Dateien verschieben — mache das im Dateibaum",
   couldNotRename: "Umbenennen ging nicht: {error}",
-  renameTextChanged: "Der Text hat sich beim Umbenennen geändert — nichts wurde umbenannt",
+  renameTextChanged:
+    "Der Text hat sich beim Umbenennen geändert — nichts wurde umbenannt",
   nothingRenamed: "Nichts wurde umbenannt: {reason}",
   renamed: "In {files} zu {name} umbenannt",
   renamedPartly: "In {files} zu {name} umbenannt; nicht geändert: {list}",
@@ -1009,13 +1103,16 @@ const de: Shape<typeof en> = {
   restore: "Wiederherstellen",
   reloadWarning: "Neu laden verwirft deine ungespeicherten Änderungen.",
   reloadAnyway: "Trotzdem neu laden",
-  changedOnDisk: "Die Datei hat sich auf der Festplatte geändert, während du ungespeicherte Änderungen hast.",
+  changedOnDisk:
+    "Die Datei hat sich auf der Festplatte geändert, während du ungespeicherte Änderungen hast.",
   reload: "Neu laden",
   keepMine: "Meine behalten",
   compare: "Vergleichen",
-  overwriteQuestion: "Die Datei wurde auf der Festplatte geändert. Trotzdem speichern und sie überschreiben?",
+  overwriteQuestion:
+    "Die Datei wurde auf der Festplatte geändert. Trotzdem speichern und sie überschreiben?",
   overwrite: "Überschreiben",
-  deletedOnDisk: "Die Datei wurde auf der Festplatte gelöscht. Speichern legt sie neu an.",
+  deletedOnDisk:
+    "Die Datei wurde auf der Festplatte gelöscht. Speichern legt sie neu an.",
   reloaded: "Neu geladen — die Datei hat sich auf der Festplatte geändert.",
   compareTitle: "Festplatte → dein Text",
   compareSame: "Festplatte → dein Text (kein Unterschied)",
@@ -1025,14 +1122,18 @@ const de: Shape<typeof en> = {
   newNoteHint: "Neue Notiz — ⌘S legt sie ab",
   largeFileTitle: "Über 2 MB: keine Syntaxfarben",
   largeFile: "Große Datei — leichter Modus",
-  readOnlyOutside: "Schreibgeschützt — außerhalb des Projekts, vom Language-Server gezeigt",
+  readOnlyOutside:
+    "Schreibgeschützt — außerhalb des Projekts, vom Language-Server gezeigt",
   problemsTitle: "Probleme vom Language-Server — F8 / ⇧F8 zum Durchgehen",
   modeSource: "Quelltext",
   modePreview: "Vorschau",
   modeSplit: "Nebeneinander",
   eolWasMixed: "LF (war gemischt)",
   indentSpaces: { one: "1 Leerzeichen", other: "{n} Leerzeichen" },
-  indentSpacesDefault: { one: "1 Leerzeichen (Standard)", other: "{n} Leerzeichen (Standard)" },
+  indentSpacesDefault: {
+    one: "1 Leerzeichen (Standard)",
+    other: "{n} Leerzeichen (Standard)",
+  },
   cursorPosition: "Z {line}, Sp {col}",
   settingsReadFailed: "editor-settings.json ließ sich nicht lesen: {error}",
   settingsSaveFailed: "editor-settings.json ließ sich nicht speichern: {error}",
@@ -1049,7 +1150,8 @@ const de: Shape<typeof en> = {
     other: "{n} Commits nach {upstream} pushen (nie erzwungen)",
   },
 
-  serverMissing: "Kein Language-Server für {server} gefunden — installiere ihn mit: {install}",
+  serverMissing:
+    "Kein Language-Server für {server} gefunden — installiere ihn mit: {install}",
   editOutsideProject: "außerhalb des Projekts",
   editWouldCreate: "die Datei {file} würde neu entstehen",
   editCannotRead: "{file} ist nicht lesbar",
@@ -1058,7 +1160,8 @@ const de: Shape<typeof en> = {
   tagInVault: "im Vault",
 
   git: "Git",
-  deleteUntrackedConfirm: "{name} löschen? Die Datei ist nicht in Git, also lässt sie sich nicht zurückholen.",
+  deleteUntrackedConfirm:
+    "{name} löschen? Die Datei ist nicht in Git, also lässt sie sich nicht zurückholen.",
   discardChangesConfirm:
     "Die nicht vorgemerkten Änderungen in {name} verwerfen? Sie sind nirgends gespeichert und lassen sich nicht " +
     "zurückholen.",
@@ -1085,23 +1188,26 @@ const de: Shape<typeof en> = {
   newBranchHere: "Neuer Branch von hier",
   create: "Anlegen",
   fetchRemote: "Vom Remote holen (liest nur)",
-  pushing: "Pusht…",
+  pushing: "Pushe…",
   outgoingTitle: "Was ein Push veröffentlichen würde",
   toPush: "Zu pushen",
   noFileChanges: "Keine Dateiänderungen (ein Merge).",
   unstageAll: "Keine mehr vormerken",
-  nothingStaged: "Noch nichts vorgemerkt — das + an einer Änderung merkt sie vor.",
+  nothingStaged:
+    "Noch nichts vorgemerkt — das + an einer Änderung merkt sie vor.",
   stageAll: "Alle vormerken",
   treeClean: "Der Arbeitsbaum ist sauber.",
   writingMessage: "Eine Nachricht aus dem vorgemerkten Diff wird geschrieben…",
   commitPlaceholder: "Commit-Nachricht  (⌘↩ committet)",
-  suggestNeedsStaged: "Merk Änderungen vor, damit eine Nachricht geschrieben wird",
+  suggestNeedsStaged:
+    "Merk Änderungen vor, damit eine Nachricht geschrieben wird",
   suggestMessage:
     "Nachricht schreiben: schickt den vorgemerkten Diff (ohne .env- oder Schlüsseldateien) an das Modell des " +
     "Skill-Anbieters — ein bezahlter Aufruf",
   commit: "Commit",
   commitN: "Commit ({n})",
-  commitPushTitle: "Vorgemerktes committen, dann den Branch pushen (nie erzwungen)",
+  commitPushTitle:
+    "Vorgemerktes committen, dann den Branch pushen (nie erzwungen)",
   commitPush: "Commit & Push",
 
   editor: "Editor",

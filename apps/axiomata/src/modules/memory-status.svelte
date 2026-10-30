@@ -9,6 +9,7 @@
   import type { MemoryStatus, SyncReport } from "../core/backend";
   import { relativeTime, shortPath } from "../core/format";
   import type { ModuleContext } from "../core/types";
+  import { tBrain } from "../i18n/brain";
 
   const POLL_MS = 3000;
 
@@ -20,7 +21,21 @@
   let status = $state<MemoryStatus | null>(null);
   let error = $state("");
   let syncing = $state(false);
-  let lastReport = $state("");
+  /** The last sync's outcome, kept as values so its line follows a language switch. */
+  type Report =
+    | { ok: true; written: number; unchanged: number; tracked: number; failed: number }
+    | { ok: false; error: string };
+  let lastReport = $state<Report | null>(null);
+  const reportText = $derived.by(() => {
+    const r = lastReport;
+    if (!r) return "";
+    if (!r.ok) return tBrain("syncFailed", { error: r.error });
+    const base =
+      r.written === 0
+        ? tBrain("inSync", { files: tBrain("files", { n: r.tracked }) })
+        : tBrain("wrote", { n: r.written, unchanged: r.unchanged });
+    return r.failed === 0 ? base : `${base} · ${tBrain("failedCount", { n: r.failed })}`;
+  });
 
   const compact = $derived($config.compact === true);
 
@@ -38,13 +53,15 @@
     syncing = true;
     try {
       const r = await ctx.invoke<SyncReport>("sync_memory");
-      const base =
-        r.written.length === 0
-          ? `In sync · ${r.tracked_files} files`
-          : `Wrote ${r.written.length} · ${r.unchanged} unchanged`;
-      lastReport = r.failed.length === 0 ? base : `${base} · ${r.failed.length} failed`;
+      lastReport = {
+        ok: true,
+        written: r.written.length,
+        unchanged: r.unchanged,
+        tracked: r.tracked_files,
+        failed: r.failed.length,
+      };
     } catch (err) {
-      lastReport = `Sync failed: ${String(err)}`;
+      lastReport = { ok: false, error: String(err) };
     } finally {
       syncing = false;
       await refresh();
@@ -62,21 +79,23 @@
   {#if error}
     <p class="error">{error}</p>
   {:else if !status}
-    <p class="muted">Loading…</p>
+    <p class="muted">{tBrain("loading")}</p>
   {:else}
     <div class="row">
       <span class="badge" class:stale={status.stale} class:fresh={!status.stale}>
-        {status.stale ? "stale" : "fresh"}
+        {status.stale ? tBrain("stale") : tBrain("fresh")}
       </span>
-      <span class="files"><strong>{status.tracked_files}</strong> files</span>
-      <span class="muted">synced {relativeTime(status.last_sync)}</span>
+      <span class="files">
+        <strong>{status.tracked_files}</strong> {tBrain("filesWord", { n: status.tracked_files })}
+      </span>
+      <span class="muted">{tBrain("synced", { when: relativeTime(status.last_sync) })}</span>
       <button type="button" class="sync" disabled={syncing} onclick={sync}>
-        {syncing ? "Syncing…" : "Sync"}
+        {syncing ? tBrain("syncing") : tBrain("sync")}
       </button>
     </div>
     {#if !compact}
       <p class="path" title={status.workspace_root}>{shortPath(status.workspace_root, 3)}</p>
-      {#if lastReport}<p class="muted report">{lastReport}</p>{/if}
+      {#if reportText}<p class="muted report">{reportText}</p>{/if}
     {/if}
   {/if}
 </div>

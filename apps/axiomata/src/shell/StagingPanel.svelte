@@ -48,7 +48,7 @@
   import type { ResizeDelta } from "../canvas/resize";
   import { coverGround } from "../core/cover";
   import { getSetting, setSetting } from "../core/persist";
-  import { getModule } from "../core/registry";
+  import { getModule, moduleTitle } from "../core/registry";
   import {
     bringToFront,
     readAnchor,
@@ -234,7 +234,7 @@
   class:positioned={pos !== null}
   data-staged={panel.id}
   transition:fromOrigin={{ base: pos ? "" : "translateX(-50%)" }}
-  aria-label={def?.title ?? panel.type}
+  aria-label={def ? moduleTitle(def) : panel.type}
   bind:this={panelEl}
   onpointerdowncapture={() => bringToFront(panel.id)}
   style:width="{liveW * $uiScale}px"
@@ -249,7 +249,7 @@
     onMove={(_dir, d) => (resizing = unscaled(d))}
     onEnd={(_dir, d) => endResize(d)}
   />
-  <PanelHead title={def?.title ?? panel.type} iconSvg={def?.icon} {onClose} movable />
+  <PanelHead title={def ? moduleTitle(def) : panel.type} iconSvg={def?.icon} {onClose} movable />
   <div class="body">
     {#if def}
       <def.component {ctx} />

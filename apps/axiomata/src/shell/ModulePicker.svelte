@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import { createInstance, isPlacedSingleton } from "../core/lifecycle";
-  import { listModules } from "../core/registry";
+  import { listModules, moduleTitle } from "../core/registry";
   import { instances } from "../core/stores";
   import { toast } from "../core/toast";
   import { tShell } from "../i18n/shell";
@@ -51,7 +51,7 @@
             >
               <span class="icon" aria-hidden="true">{@html m.icon}</span>
               <span class="text">
-                <span class="title">{m.title}</span>
+                <span class="title">{moduleTitle(m)}</span>
                 <span class="meta">
                   {m.background ? tShell("background") : (m.sizeLabel ?? `${m.defaultSize.w}×${m.defaultSize.h}`)}
                   {#if m.singleton}· {tShell("single")}{#if placed.has(m.type)} · {tShell("placed")}{/if}{/if}

@@ -15,7 +15,16 @@
 -->
 <script lang="ts">
   import { BACKEND_CHOICES } from "../core/harness";
-  import { cronToInterval, defaultInterval, describeInterval, intervalToCron, WEEKDAY_NAMES, type RoutineInterval } from "../core/routineInterval";
+  import {
+    cronToInterval,
+    defaultInterval,
+    describeInterval,
+    intervalToCron,
+    WEEKDAY_NAMES,
+    weekdayName,
+    type RoutineInterval,
+  } from "../core/routineInterval";
+  import { tModules } from "../i18n/modules";
 
   export interface RoutineFormFields {
     name: string;
@@ -58,12 +67,13 @@
   // svelte-ignore state_referenced_locally
   let backend = $state(initial?.backend ?? "");
 
-  const KIND_LABELS: Record<RoutineInterval["kind"], string> = {
-    minutes: "every N minutes",
-    hourly: "every N hours",
-    daily: "daily",
-    weekly: "weekly",
-    custom: "custom (cron)",
+  /** The picker's presets; each label reads the current language. */
+  const KIND_LABELS: Record<RoutineInterval["kind"], () => string> = {
+    minutes: () => tModules("kindMinutes"),
+    hourly: () => tModules("kindHourly"),
+    daily: () => tModules("kindDaily"),
+    weekly: () => tModules("kindWeekly"),
+    custom: () => tModules("kindCustom"),
   };
 
   /** Switches the picker to a different shape, seeding it with sensible
@@ -97,32 +107,32 @@
 </script>
 
 <form onsubmit={submit} class="routine-form">
-  <input type="text" placeholder="name" bind:value={name} required />
+  <input type="text" placeholder={tModules("namePlaceholder")} bind:value={name} required />
 
   <div class="interval-kind">
     <select value={interval.kind} onchange={(e) => setKind((e.currentTarget as HTMLSelectElement).value as RoutineInterval["kind"])}>
       {#each Object.entries(KIND_LABELS) as [kind, label] (kind)}
-        <option value={kind}>{label}</option>
+        <option value={kind}>{label()}</option>
       {/each}
     </select>
   </div>
 
   {#if interval.kind === "minutes"}
     <div class="row">
-      <span>every</span>
+      <span>{tModules("everyLower")}</span>
       <input type="number" min="1" max="59" bind:value={interval.everyMinutes} />
-      <span>min</span>
+      <span>{tModules("minutesUnit")}</span>
     </div>
   {:else if interval.kind === "hourly"}
     <div class="row">
-      <span>every</span>
+      <span>{tModules("everyLower")}</span>
       <input type="number" min="1" max="23" bind:value={interval.everyHours} />
-      <span>h at :</span>
+      <span>{tModules("hoursAt")}</span>
       <input type="number" min="0" max="59" bind:value={interval.minute} />
     </div>
   {:else if interval.kind === "daily"}
     <div class="row">
-      <span>at</span>
+      <span>{tModules("at")}</span>
       <input type="number" min="0" max="23" bind:value={interval.hour} />
       <span>:</span>
       <input type="number" min="0" max="59" bind:value={interval.minute} />
@@ -130,33 +140,38 @@
   {:else if interval.kind === "weekly"}
     <div class="row">
       <select bind:value={interval.weekday}>
-        {#each WEEKDAY_NAMES as wd, i (wd)}<option value={i}>{wd}</option>{/each}
+        {#each WEEKDAY_NAMES as wd, i (wd)}<option value={i}>{weekdayName(i)}</option>{/each}
       </select>
-      <span>at</span>
+      <span>{tModules("at")}</span>
       <input type="number" min="0" max="23" bind:value={interval.hour} />
       <span>:</span>
       <input type="number" min="0" max="59" bind:value={interval.minute} />
     </div>
   {:else}
-    <input type="text" class="mono" placeholder="0 0 9 * * *  (sec min hour dom mon dow)" bind:value={interval.cron} />
+    <input type="text" class="mono" placeholder={tModules("cronPlaceholder")} bind:value={interval.cron} />
   {/if}
   <p class="preview">{describeInterval(interval)}</p>
 
   <div class="pair">
     <select bind:value={targetType}>
-      <option value="skill">skill</option>
-      <option value="prompt">prompt</option>
+      <option value="skill">{tModules("targetSkill")}</option>
+      <option value="prompt">{tModules("targetPrompt")}</option>
     </select>
-    <input type="text" placeholder={targetType === "skill" ? "skill name" : "prompt text"} bind:value={targetValue} required />
+    <input
+      type="text"
+      placeholder={targetType === "skill" ? tModules("skillNamePlaceholder") : tModules("promptPlaceholder")}
+      bind:value={targetValue}
+      required
+    />
   </div>
   <div class="pair">
     <select bind:value={backend}>
-      <option value="">default (skill harness)</option>
+      <option value="">{tModules("backendDefault")}</option>
       {#each BACKEND_CHOICES as c (c.id)}<option value={c.id}>{c.label}</option>{/each}
     </select>
     <button type="submit" disabled={busy}>{busy ? "…" : submitLabel}</button>
     {#if onCancel}
-      <button type="button" class="cancel" onclick={onCancel}>Cancel</button>
+      <button type="button" class="cancel" onclick={onCancel}>{tModules("cancel")}</button>
     {/if}
   </div>
 </form>

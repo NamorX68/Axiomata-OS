@@ -13,11 +13,25 @@
  * case, so nothing is ever silently reinterpreted.
  */
 
+import { tModules } from "../i18n/modules";
+import { weekdayFormat } from "./format";
+
 /** Cron day-of-week tokens, index 0 = Sunday .. 6 = Saturday — the `cron`
  *  crate accepts these three-letter names directly (already exercised by a
  *  core test), which sidesteps the numeric 0-vs-1-for-Sunday ambiguity
  *  between crontab dialects. */
 export const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/** A Sunday, the day `WEEKDAY_NAMES[0]` names: the weekday a picker shows is read from it in the app's language. */
+const A_SUNDAY = new Date(2026, 0, 4);
+
+/** The short name of weekday `index` (0 = Sunday) in the app's language — what the owner reads; the cron keeps
+ *  `WEEKDAY_NAMES`. */
+export function weekdayName(index: number): string {
+  const day = new Date(A_SUNDAY);
+  day.setDate(A_SUNDAY.getDate() + index);
+  return weekdayFormat("short").format(day);
+}
 
 export type RoutineInterval =
   | { kind: "minutes"; everyMinutes: number }
@@ -100,13 +114,17 @@ export function describeInterval(interval: RoutineInterval): string {
   const hhmm = (h: number, m: number) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   switch (interval.kind) {
     case "minutes":
-      return `every ${interval.everyMinutes} min`;
-    case "hourly":
-      return interval.everyHours === 1 ? `hourly at :${String(interval.minute).padStart(2, "0")}` : `every ${interval.everyHours}h at :${String(interval.minute).padStart(2, "0")}`;
+      return tModules("everyMinutes", { n: interval.everyMinutes });
+    case "hourly": {
+      const minute = String(interval.minute).padStart(2, "0");
+      return interval.everyHours === 1
+        ? tModules("hourlyAt", { minute })
+        : tModules("everyHoursAt", { n: interval.everyHours, minute });
+    }
     case "daily":
-      return `daily at ${hhmm(interval.hour, interval.minute)}`;
+      return tModules("dailyAt", { time: hhmm(interval.hour, interval.minute) });
     case "weekly":
-      return `weekly on ${WEEKDAY_NAMES[interval.weekday]} at ${hhmm(interval.hour, interval.minute)}`;
+      return tModules("weeklyAt", { day: weekdayName(interval.weekday), time: hhmm(interval.hour, interval.minute) });
     case "custom":
       return interval.cron;
   }

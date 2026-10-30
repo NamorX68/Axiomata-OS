@@ -12,6 +12,7 @@
  * button), it never triggers one on a timer.
  */
 
+import { tModules } from "../i18n/modules";
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
 import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke, type SkippedRun } from "./skillRun";
@@ -65,10 +66,10 @@ export function parseCalendarDigest(stdout: string): CalendarDigest {
   try {
     raw = JSON.parse(object);
   } catch (err) {
-    throw new Error(`calendar-digest output was not valid JSON: ${(err as Error).message}`);
+    throw new Error(tModules("outputNotJson", { skill: "calendar-digest", reason: (err as Error).message }));
   }
   if (!raw || typeof raw !== "object") {
-    throw new Error("calendar-digest output was not a JSON object");
+    throw new Error(tModules("outputNotObject", { skill: "calendar-digest" }));
   }
   const obj = raw as Record<string, unknown>;
   const calendars = Array.isArray(obj.calendars) ? obj.calendars.filter((c): c is string => typeof c === "string") : [];
@@ -121,7 +122,7 @@ export function groupByDay(events: CalendarEvent[]): { day: string; events: Cale
 /** "All day", "14:00–15:35", or just "14:00" when `end` doesn't parse as a
  *  same-day time (defensive — the skill always sends both). */
 export function eventTimeLabel(e: CalendarEvent): string {
-  if (e.allDay) return "All day";
+  if (e.allDay) return tModules("allDay");
   const start = e.start.slice(11, 16);
   const end = e.end.slice(11, 16);
   return end ? `${start}–${end}` : start;

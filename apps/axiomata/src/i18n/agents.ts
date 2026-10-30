@@ -23,7 +23,8 @@ const en = {
   statusEnded: "ended",
   statusEndedTitle: "The harness has exited",
   statusNone: "no status",
-  statusNoneTitle: 'No status channel (own command). For Claude Code, add {flag} to the command.',
+  statusNoneTitle:
+    "No status channel (own command). For Claude Code, add {flag} to the command.",
   statusClosed: "closed",
   statusClosedTitle: "No pane is open for this agent",
 
@@ -41,11 +42,13 @@ const en = {
   advanced: "Advanced",
   modelsAndRoles: "Models & roles",
   defaultModel: "default model",
-  checkId: "ID: lower-case letters and digits, with - or _ between them (up to 48 characters).",
+  checkId:
+    "ID: lower-case letters and digits, with - or _ between them (up to 48 characters).",
   checkLabelEmpty: "Label must not be empty.",
   checkLabelLong: "Label: up to 80 characters.",
   checkEnv: "Environment: “{line}” is not KEY=value.",
-  checkName: "Name: lower-case letters and digits, with - or _ between them (up to 48 characters).",
+  checkName:
+    "Name: lower-case letters and digits, with - or _ between them (up to 48 characters).",
   checkKind: "Kind: one lower-case word, e.g. implement, review, plan.",
   checkDescription: "Description: one line, up to 200 characters.",
   checkNoEngine: "There is no engine “{id}”.",
@@ -74,7 +77,8 @@ const en = {
     "{harness} as you use it outside — your settings and rules, in the project folder, with the team tools. " +
     "Click again while it is open for one more beside it",
   removeMaster: "Remove the {harness} master",
-  removeMasterAsk: "Remove the {harness} master? Panes already running it stay open.",
+  removeMasterAsk:
+    "Remove the {harness} master? Panes already running it stay open.",
   favorites: "Favorites",
   startNamed: "Start {name}",
   unavailable: "unavailable",
@@ -87,7 +91,8 @@ const en = {
   keepAgentFavorite: "Keep this agent as a favorite",
   editNamed: "Edit {name}",
   removeNamed: "Remove {name}",
-  removeAgentAsk: "Remove the agent “{name}”? Its worktree and branch go with it; panes already running it stay open.",
+  removeAgentAsk:
+    "Remove the agent “{name}”? Its worktree and branch go with it; panes already running it stay open.",
   unsavedWorkQuestion: "Unsaved work in the worktree — delete anyway?",
   sessions: "Sessions",
   waitingForYou: "Waiting for you: take over or discard",
@@ -96,7 +101,8 @@ const en = {
   modelsAndRolesMore: "Models & roles…",
   editAgent: "Edit agent",
   pickEngine: "Engine…",
-  editHint: "Another role or engine for this session only. Models, engines and roles are made and changed under",
+  editHint:
+    "Another role or engine for this session only. Models, engines and roles are made and changed under",
 
   // "Start an agent" (`AgentStart.svelte`).
   startAgent: "Start an agent",
@@ -115,11 +121,14 @@ const en = {
   models: "Models",
   roles: "Roles",
   chainModel: "Model",
-  chainModelText: "= what thinks, at a tier (light · medium · heavy), on the harness that runs it ·",
+  chainModelText:
+    "= what thinks, at a tier (light · medium · heavy), on the harness that runs it ·",
   chainRole: "Role",
-  chainRoleText: "= what it is for (instructions, rights, limits, a default tier) ·",
+  chainRoleText:
+    "= what it is for (instructions, rights, limits, a default tier) ·",
   chainAgent: "Agent",
-  chainAgentText: "= a role at a tier on an engine, started as a session with its own branch.",
+  chainAgentText:
+    "= a role at a tier on an engine, started as a session with its own branch.",
 
   // The Models tab (`ModelsSection.svelte`, `models.ts`).
   modelsUnreadable: "Could not load the models: {error}",
@@ -204,7 +213,8 @@ const en = {
   rolesHintBefore:
     "A role says what an agent is for: kind of work, default tier, rights, limits and the working instructions — " +
     "no engine: the tier's engine runs (Models tab). It lives as a file at",
-  rolesHintAfter: "and can never start a program itself. Pick one on the left to change it, or add a new one.",
+  rolesHintAfter:
+    "and can never start a program itself. Pick one on the left to change it, or add a new one.",
   migrationFailed: "The move to roles at tiers did not run",
   migrationBackupBefore: "The originals are in",
   migrationBackupAfter: "; delete it in Settings → Storage.",
@@ -213,8 +223,14 @@ const en = {
   ok: "OK",
   migMoved: { one: "{n} copied role moved", other: "{n} copied roles moved" },
   migAdded: "{names} added",
-  migEngines: { one: "{n} engine now automatic", other: "{n} engines now automatic" },
-  migSessions: { one: "{n} session moved along", other: "{n} sessions moved along" },
+  migEngines: {
+    one: "{n} engine now automatic",
+    other: "{n} engines now automatic",
+  },
+  migSessions: {
+    one: "{n} session moved along",
+    other: "{n} sessions moved along",
+  },
   migTidied: "Roles and engines tidied: {parts}.",
   migAlreadyTidy: "Roles and engines were already tidy.",
 
@@ -224,9 +240,11 @@ const en = {
   limitSteps: "{n} steps",
   factDescription: "description: {text}",
   factKindTier: "kind: {kind}, tier: {tier}",
-  factNamesEngine: "names an engine ({engines}) — ignored: the engine of the tier runs",
+  factNamesEngine:
+    "names an engine ({engines}) — ignored: the engine of the tier runs",
   factCreates: "creates cards without asking: {kinds}",
-  factRights: "rights, granted without asking in sessions started for a card: {rights}",
+  factRights:
+    "rights, granted without asking in sessions started for a card: {rights}",
   factLimits: "limits: {limits}",
   factNoLimits: "limits: none of its own",
   projectRolesApply: "Roles from this project apply (confirmed): {roles}.",
@@ -240,7 +258,10 @@ const en = {
   review: "Review…",
   cannotConfirm: "They cannot be confirmed: {reason}.",
   skippedNamed: "Skipped",
-  replacesYours: { one: "Replaces your own role: {names}.", other: "Replaces your own roles: {names}." },
+  replacesYours: {
+    one: "Replaces your own role: {names}.",
+    other: "Replaces your own roles: {names}.",
+  },
   namesEngine: {
     one:
       "{names} names an engine. A role chooses no engine any more, so it is ignored: " +
@@ -258,7 +279,8 @@ const en = {
   removeEngineAsk: "Remove the engine “{label}”?",
   engines: "Engines",
   addEngine: "Add engine…",
-  noOwnEngines: "No own engines. The models that are on already make one engine each.",
+  noOwnEngines:
+    "No own engines. The models that are on already make one engine each.",
   itsModelsTier: "{tier} (its model's)",
   unrated: "unrated",
   allEngines: "← All engines",
@@ -268,7 +290,8 @@ const en = {
   harness: "Harness",
   billing: "Billing",
   tierOfModel: "The tier of its model",
-  modelPlaceholder: "empty = the harness picks; Glut: openrouter/… or ollama/… picks the provider",
+  modelPlaceholder:
+    "empty = the harness picks; Glut: openrouter/… or ollama/… picks the provider",
   idFixed: "ID (fixed)",
   id: "ID",
   command: "Command (empty = the harness default)",
@@ -289,13 +312,16 @@ const en = {
   preparingWorktree: "Preparing this agent's worktree…",
   tasks: "Tasks",
   tasksDone: "{done} / {total} done",
-  fromEarlierSession: "From an earlier session — the agent has not written new tasks since it started.",
-  noTasksYet: "No tasks yet — they appear once the agent starts working on the plan below.",
+  fromEarlierSession:
+    "From an earlier session — the agent has not written new tasks since it started.",
+  noTasksYet:
+    "No tasks yet — they appear once the agent starts working on the plan below.",
   planModeDoc: "Plan (plan mode) · {name}",
   earlierSession: "earlier session",
   noPlanYet: "No plan yet. It appears here as soon as the agent writes one.",
   agentViews: "{name} views",
-  sharedFolderTitle: "The project is not a git repository, so agents share its folder",
+  sharedFolderTitle:
+    "The project is not a git repository, so agents share its folder",
   sharedFolder: "shared folder",
   restartAgent: "Restart the agent",
 
@@ -303,7 +329,8 @@ const en = {
   engineFor: "Engine for “{role}”",
   savedInRole: "(saved in the role)",
   engineForLabel: "Engine for {role}",
-  engineBelongsToRole: "The engine belongs to the role; change it under Models & roles",
+  engineBelongsToRole:
+    "The engine belongs to the role; change it under Models & roles",
   runsOn: "runs on {engine}",
 };
 
@@ -319,7 +346,8 @@ const de: Shape<typeof en> = {
   statusEnded: "beendet",
   statusEndedTitle: "Der Harness hat sich beendet",
   statusNone: "kein Status",
-  statusNoneTitle: "Kein Statuskanal (eigener Befehl). Für Claude Code ergänze {flag} im Befehl.",
+  statusNoneTitle:
+    "Kein Statuskanal (eigener Befehl). Für Claude Code ergänze {flag} im Befehl.",
   statusClosed: "geschlossen",
   statusClosedTitle: "Für diesen Agenten ist kein Pane offen",
 
@@ -330,17 +358,19 @@ const de: Shape<typeof en> = {
   tier: "Stufe",
   model: "Modell",
   save: "Speichern",
-  saving: "Speichert…",
+  saving: "Speichere…",
   cancel: "Abbrechen",
-  loading: "Lädt…",
+  loading: "Lade…",
   advanced: "Erweitert",
   modelsAndRoles: "Modelle & Rollen",
   defaultModel: "Standardmodell",
-  checkId: "ID: Kleinbuchstaben und Ziffern, mit - oder _ dazwischen (bis 48 Zeichen).",
+  checkId:
+    "ID: Kleinbuchstaben und Ziffern, mit - oder _ dazwischen (bis 48 Zeichen).",
   checkLabelEmpty: "Die Bezeichnung darf nicht leer sein.",
   checkLabelLong: "Bezeichnung: bis 80 Zeichen.",
   checkEnv: "Umgebung: „{line}“ ist nicht KEY=value.",
-  checkName: "Name: Kleinbuchstaben und Ziffern, mit - oder _ dazwischen (bis 48 Zeichen).",
+  checkName:
+    "Name: Kleinbuchstaben und Ziffern, mit - oder _ dazwischen (bis 48 Zeichen).",
   checkKind: "Art: ein kleingeschriebenes Wort, z. B. implement, review, plan.",
   checkDescription: "Beschreibung: eine Zeile, bis 200 Zeichen.",
   checkNoEngine: "Es gibt keine Engine „{id}“.",
@@ -368,7 +398,8 @@ const de: Shape<typeof en> = {
     "{harness}, wie du es außerhalb nutzt — deine Einstellungen und Regeln, im Projektordner, mit den " +
     "Team-Werkzeugen. Klicke erneut, während es offen ist, für ein weiteres daneben",
   removeMaster: "{harness}-Master entfernen",
-  removeMasterAsk: "{harness}-Master entfernen? Panes, in denen er schon läuft, bleiben offen.",
+  removeMasterAsk:
+    "{harness}-Master entfernen? Panes, in denen er schon läuft, bleiben offen.",
   favorites: "Favoriten",
   startNamed: "{name} starten",
   unavailable: "nicht verfügbar",
@@ -401,7 +432,7 @@ const de: Shape<typeof en> = {
   noEngineOfTier: "keine Engine dieser Stufe kann laufen",
   standard: "Standard",
   start: "Starten",
-  starting: "Startet…",
+  starting: "Starte…",
   removeChoiceFavorite: "Diese Wahl aus den Favoriten entfernen",
   keepChoiceFavorite: "Diese Wahl als Favoriten behalten",
   pickRoleHint: "Wähle eine Rolle, darunter dann ihre Stufe und ihr Modell.",
@@ -410,11 +441,14 @@ const de: Shape<typeof en> = {
   models: "Modelle",
   roles: "Rollen",
   chainModel: "Modell",
-  chainModelText: "= was denkt, auf einer Stufe (light · medium · heavy), im Harness, der es ausführt ·",
+  chainModelText:
+    "= was denkt, auf einer Stufe (light · medium · heavy), im Harness, der es ausführt ·",
   chainRole: "Rolle",
-  chainRoleText: "= wofür es da ist (Anweisungen, Rechte, Grenzen, eine Standardstufe) ·",
+  chainRoleText:
+    "= wofür es da ist (Anweisungen, Rechte, Grenzen, eine Standardstufe) ·",
   chainAgent: "Agent",
-  chainAgentText: "= eine Rolle auf einer Stufe auf einer Engine, gestartet als Sitzung mit eigenem Branch.",
+  chainAgentText:
+    "= eine Rolle auf einer Stufe auf einer Engine, gestartet als Sitzung mit eigenem Branch.",
 
   modelsUnreadable: "Die Modelle ließen sich nicht laden: {error}",
   researching: "Stufen der Modelle werden recherchiert…",
@@ -464,7 +498,8 @@ const de: Shape<typeof en> = {
   noPrice: "kein Preis",
   contextK: "{n}K Kontext",
   contextM: "{n}M Kontext",
-  limitsNotPrices: "Beide Grenzen sind Preise in USD pro Million Ausgabe-Tokens.",
+  limitsNotPrices:
+    "Beide Grenzen sind Preise in USD pro Million Ausgabe-Tokens.",
   limitsOrder: "„Light unter“ darf nicht über „Heavy über“ liegen.",
   researchNone: "Kein Modell ist zum Recherchieren eingeschaltet.",
   researchOne: "Die Stufe des Modells wird recherchiert…",
@@ -472,7 +507,8 @@ const de: Shape<typeof en> = {
 
   rolesUnreadable: "Die Rollen ließen sich nicht laden: {error}",
   roleExists: "Es gibt schon eine Rolle „{name}“.",
-  deleteRoleAsk: "Die Rolle „{name}“ löschen? Ihre AGENT.md-Datei wird entfernt.",
+  deleteRoleAsk:
+    "Die Rolle „{name}“ löschen? Ihre AGENT.md-Datei wird entfernt.",
   addRole: "Rolle hinzufügen…",
   noRoles: "Noch keine Rollen.",
   defaultTierNamed: "Standardstufe {tier}",
@@ -506,10 +542,19 @@ const de: Shape<typeof en> = {
   migrationLeft: "Unverändert gelassen: {items}.",
   migrationDefaults: "Standard-Engines je Stufe: {items}.",
   ok: "OK",
-  migMoved: { one: "{n} kopierte Rolle verschoben", other: "{n} kopierte Rollen verschoben" },
+  migMoved: {
+    one: "{n} kopierte Rolle verschoben",
+    other: "{n} kopierte Rollen verschoben",
+  },
   migAdded: "{names} hinzugefügt",
-  migEngines: { one: "{n} Engine jetzt automatisch", other: "{n} Engines jetzt automatisch" },
-  migSessions: { one: "{n} Sitzung mitgezogen", other: "{n} Sitzungen mitgezogen" },
+  migEngines: {
+    one: "{n} Engine jetzt automatisch",
+    other: "{n} Engines jetzt automatisch",
+  },
+  migSessions: {
+    one: "{n} Sitzung mitgezogen",
+    other: "{n} Sitzungen mitgezogen",
+  },
   migTidied: "Rollen und Engines aufgeräumt: {parts}.",
   migAlreadyTidy: "Rollen und Engines waren schon aufgeräumt.",
 
@@ -518,9 +563,11 @@ const de: Shape<typeof en> = {
   limitSteps: "{n} Schritte",
   factDescription: "Beschreibung: {text}",
   factKindTier: "Art: {kind}, Stufe: {tier}",
-  factNamesEngine: "nennt eine Engine ({engines}) — ignoriert: die Engine der Stufe läuft",
+  factNamesEngine:
+    "nennt eine Engine ({engines}) — ignoriert: die Engine der Stufe läuft",
   factCreates: "legt Karten an, ohne zu fragen: {kinds}",
-  factRights: "Rechte, ohne Nachfrage gewährt in Sitzungen, die für eine Karte gestartet sind: {rights}",
+  factRights:
+    "Rechte, ohne Nachfrage gewährt in Sitzungen, die für eine Karte gestartet sind: {rights}",
   factLimits: "Grenzen: {limits}",
   factNoLimits: "Grenzen: keine eigenen",
   projectRolesApply: "Rollen aus diesem Projekt gelten (bestätigt): {roles}.",
@@ -535,7 +582,10 @@ const de: Shape<typeof en> = {
   review: "Prüfen…",
   cannotConfirm: "Sie lassen sich nicht bestätigen: {reason}.",
   skippedNamed: "Übersprungen",
-  replacesYours: { one: "Ersetzt deine eigene Rolle: {names}.", other: "Ersetzt deine eigenen Rollen: {names}." },
+  replacesYours: {
+    one: "Ersetzt deine eigene Rolle: {names}.",
+    other: "Ersetzt deine eigenen Rollen: {names}.",
+  },
   namesEngine: {
     one:
       "{names} nennt eine Engine. Eine Rolle wählt keine Engine mehr, darum wird sie ignoriert: die Engine der " +
@@ -546,13 +596,15 @@ const de: Shape<typeof en> = {
   },
 
   claudeCodeHint: "Die CLI von Anthropic",
-  glutHint: "Axiomatas eigener Harness: Sandbox, Netz-Schranke, Grenzen für Ablehnungen",
+  glutHint:
+    "Axiomatas eigener Harness: Sandbox, Netz-Schranke, Grenzen für Ablehnungen",
   agentCount: { one: "{n} Agent", other: "{n} Agenten" },
   engineExists: "Es gibt schon eine Engine „{id}“.",
   removeEngineAsk: "Die Engine „{label}“ entfernen?",
   engines: "Engines",
   addEngine: "Engine hinzufügen…",
-  noOwnEngines: "Keine eigenen Engines. Die eingeschalteten Modelle ergeben schon je eine Engine.",
+  noOwnEngines:
+    "Keine eigenen Engines. Die eingeschalteten Modelle ergeben schon je eine Engine.",
   itsModelsTier: "{tier} (die seines Modells)",
   unrated: "ohne Stufe",
   allEngines: "← Alle Engines",
@@ -562,7 +614,8 @@ const de: Shape<typeof en> = {
   harness: "Harness",
   billing: "Abrechnung",
   tierOfModel: "Die Stufe seines Modells",
-  modelPlaceholder: "leer = der Harness wählt; Glut: openrouter/… oder ollama/… wählt den Anbieter",
+  modelPlaceholder:
+    "leer = der Harness wählt; Glut: openrouter/… oder ollama/… wählt den Anbieter",
   idFixed: "ID (fest)",
   id: "ID",
   command: "Befehl (leer = Standard des Harness)",
@@ -583,20 +636,25 @@ const de: Shape<typeof en> = {
   preparingWorktree: "Der Worktree dieses Agenten wird vorbereitet…",
   tasks: "Aufgaben",
   tasksDone: "{done} / {total} erledigt",
-  fromEarlierSession: "Aus einer früheren Sitzung — der Agent hat seit seinem Start keine neuen Aufgaben geschrieben.",
-  noTasksYet: "Noch keine Aufgaben — sie erscheinen, sobald der Agent am Plan unten arbeitet.",
+  fromEarlierSession:
+    "Aus einer früheren Sitzung — der Agent hat seit seinem Start keine neuen Aufgaben geschrieben.",
+  noTasksYet:
+    "Noch keine Aufgaben — sie erscheinen, sobald der Agent am Plan unten arbeitet.",
   planModeDoc: "Plan (Plan-Modus) · {name}",
   earlierSession: "frühere Sitzung",
-  noPlanYet: "Noch kein Plan. Er erscheint hier, sobald der Agent einen schreibt.",
+  noPlanYet:
+    "Noch kein Plan. Er erscheint hier, sobald der Agent einen schreibt.",
   agentViews: "Ansichten von {name}",
-  sharedFolderTitle: "Das Projekt ist kein Git-Repository, darum teilen sich die Agenten seinen Ordner",
+  sharedFolderTitle:
+    "Das Projekt ist kein Git-Repository, darum teilen sich die Agenten seinen Ordner",
   sharedFolder: "geteilter Ordner",
   restartAgent: "Agenten neu starten",
 
   engineFor: "Engine für „{role}“",
   savedInRole: "(wird in der Rolle gespeichert)",
   engineForLabel: "Engine für {role}",
-  engineBelongsToRole: "Die Engine gehört zur Rolle; ändere sie unter Modelle & Rollen",
+  engineBelongsToRole:
+    "Die Engine gehört zur Rolle; ändere sie unter Modelle & Rollen",
   runsOn: "läuft auf {engine}",
 };
 

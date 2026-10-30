@@ -8,6 +8,7 @@
   import { askDecisions, waitingAgents, withoutAsk, type AskDecision, type WaitingAsk } from "../core/agentWaiting";
   import { invokeBackend } from "../core/backend";
   import { toast } from "../core/toast";
+  import { tCanvas } from "../i18n/canvas";
 
   interface Props {
     agentId: number;
@@ -18,11 +19,16 @@
 
   let { agentId, ask, compact = false }: Props = $props();
 
-  const LABELS: Record<AskDecision, string> = { allow: "Allow", deny: "Deny", terminal: "In terminal" };
-  const TITLES: Record<AskDecision, string> = {
-    allow: "Allow this once",
-    deny: "Refuse it; the agent is told you declined",
-    terminal: "Answer it in the agent's terminal instead",
+  // Functions, so a button reads the current language when it is drawn.
+  const LABELS: Record<AskDecision, () => string> = {
+    allow: () => tCanvas("allow"),
+    deny: () => tCanvas("deny"),
+    terminal: () => tCanvas("inTerminal"),
+  };
+  const TITLES: Record<AskDecision, () => string> = {
+    allow: () => tCanvas("allowTitle"),
+    deny: () => tCanvas("denyTitle"),
+    terminal: () => tCanvas("terminalTitle"),
   };
 
   let busy = $state(false);
@@ -36,7 +42,7 @@
       await invokeBackend("answer_permission", { agentId, requestId: ask.id, decision });
       waitingAgents.update((list) => withoutAsk(list, agentId));
     } catch (err) {
-      toast(`Could not answer: ${String(err)}`, "warning");
+      toast(tCanvas("couldNotAnswer", { error: String(err) }), "warning");
     } finally {
       busy = false;
     }
@@ -53,11 +59,11 @@
       <button
         type="button"
         class="answer {decision}"
-        title={TITLES[decision]}
+        title={TITLES[decision]()}
         disabled={busy}
         onclick={(event) => void answer(event, decision)}
       >
-        {LABELS[decision]}
+        {LABELS[decision]()}
       </button>
     {/each}
   </div>

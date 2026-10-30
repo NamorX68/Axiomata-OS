@@ -35,6 +35,7 @@
   import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, writeAllMailSummaries, type MailDigest, type MailItem } from "../core/mail";
   import { resolveSkillName, staleDigestNote, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -70,7 +71,7 @@
    *  re-resolved digest actually came from. */
   async function applyFreshRun(run: RunRecord) {
     if (runFailed(run.status)) {
-      error = run.error ?? "Last run failed.";
+      error = run.error ?? tModules("lastRunFailed");
       await loadLatest();
       return;
     }
@@ -148,13 +149,23 @@
   <div class="head">
     <div class="stat">
       <span class="stat-num">{digest.emails.length}</span>
-      <span class="stat-label">curated<br />last 3 days</span>
+      <span class="stat-label">{tModules("curated")}<br />{tModules("lastThreeDays")}</span>
     </div>
     <span class="spacer"></span>
-    <span class="muted last-run" title={lastRun ? `Last run: ${lastRun.started_at}` : "No run yet"}>
-      {lastRun ? relativeTime(lastRun.started_at) : "never run"}
+    <span
+      class="muted last-run"
+      title={lastRun ? tModules("lastRunTitle", { when: lastRun.started_at }) : tModules("noRunYet")}
+    >
+      {lastRun ? relativeTime(lastRun.started_at) : tModules("neverRun")}
     </span>
-    <button type="button" class="refresh" title="Run mail-digest now" aria-label="Refresh" disabled={running} onclick={() => void refreshNow()}>
+    <button
+      type="button"
+      class="refresh"
+      title={tModules("runNow", { skill: skillName })}
+      aria-label={tModules("refresh")}
+      disabled={running}
+      onclick={() => void refreshNow()}
+    >
       {running ? "…" : "↻"}
     </button>
   </div>
@@ -166,7 +177,7 @@
     <!-- A fixed "Today's mix" header: it stays put while the email lists
          below scroll (moved out of the scrolling `.body` on purpose). -->
     <div class="mix">
-      <div class="section-label">Today's mix</div>
+      <div class="section-label">{tModules("todaysMix")}</div>
       <div class="mix-bar">
         {#each mix as seg (seg.label)}
           <span class="seg" style:flex="{seg.count} {seg.count} 0" style:background={seg.color} title="{seg.label}: {seg.count}"></span>
@@ -184,20 +195,19 @@
   {/if}
 
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{tModules("loading")}</p>
   {:else if !lastRun && running}
-    <p class="muted empty">Running <code>{skillName}</code> for the first time…</p>
+    <p class="muted empty">{tModules("firstRunBefore")}<code>{skillName}</code>{tModules("firstRunAfter")}</p>
   {:else if !lastRun}
     <p class="muted empty">
-      No data yet — run <code>{skillName}</code> from the Skills Deck, schedule it as a
-      Routine, or hit ↻ above.
+      {tModules("noDataBefore")}<code>{skillName}</code>{tModules("noDataAfter")}
     </p>
   {:else if digest.emails.length === 0}
-    <p class="muted empty">Nothing important or topic-matched right now.</p>
+    <p class="muted empty">{tModules("nothingImportant")}</p>
   {:else}
     <div class="body">
       {#if importantItems.length > 0}
-        <div class="section-label">Important</div>
+        <div class="section-label">{tModules("important")}</div>
         <ul class="emails">
           {#each importantItems as item (item.id)}
             {@render row(item)}
@@ -206,7 +216,7 @@
       {/if}
 
       {#if topicItems.length > 0}
-        <div class="section-label">By topic</div>
+        <div class="section-label">{tModules("byTopic")}</div>
         <ul class="emails">
           {#each topicItems as item (item.id)}
             {@render row(item)}
@@ -222,14 +232,14 @@
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <div class="row" role="button" tabindex="0" onclick={() => void openSummary(item)} onkeydown={(e) => e.key === "Enter" && openSummary(item)}>
       <span class="chip" class:chip-topic={item.reason === "topic"}>
-        {item.reason === "topic" ? item.topic : "Important"}
+        {item.reason === "topic" ? item.topic : tModules("important")}
       </span>
       <span class="subject">{item.subject}</span>
       <span class="muted date">{relativeTime(item.date)}</span>
     </div>
     <div class="sender muted">{item.sender}</div>
     <div class="summary muted">
-      {openingId === item.id ? "Opening…" : summaryPreview(item.summary)}
+      {openingId === item.id ? tModules("opening") : summaryPreview(item.summary)}
     </div>
   </li>
 {/snippet}

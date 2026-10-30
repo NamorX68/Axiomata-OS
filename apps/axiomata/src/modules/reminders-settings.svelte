@@ -2,6 +2,7 @@
   import { REMINDERS_SKILL_NAME } from "../core/reminders";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
   import SkillNameField from "./SkillNameField.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -13,10 +14,10 @@
 
 <div class="settings">
   <p class="muted">
-    Currently calling <code>{skillName}</code>.
+    {tModules("currentlyCallingBefore")}<code>{skillName}</code>{tModules("currentlyCallingAfter")}
   </p>
   <SkillNameField {ctx} defaultName={REMINDERS_SKILL_NAME} />
-  <p class="muted">There's no "all lists" view — pick one list on the front; that choice is remembered.</p>
+  <p class="muted">{tModules("remindersHint")}</p>
 </div>
 
 <style>

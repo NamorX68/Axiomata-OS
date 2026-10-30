@@ -30,12 +30,19 @@ import { listHandbook, openHandbook } from "../core/handbook";
 import { createInstance } from "../core/lifecycle";
 import { MOTION_LEVELS, motionSetting, type MotionLevel } from "../core/motion";
 import { openShellViews, terminalSession } from "../core/openViews";
-import { getModule, registerShellAction } from "../core/registry";
+import { getModule, moduleTitle, registerShellAction } from "../core/registry";
 import { SETTINGS_TABS } from "../core/settingsTabs";
-import { FILE_PANEL, openFilePanel, pendingLoss, requestClose, staged } from "../core/staging";
+import {
+  FILE_PANEL,
+  openFilePanel,
+  pendingLoss,
+  requestClose,
+  staged,
+} from "../core/staging";
 import { glassBlur, glassDim, instances, removeInstance } from "../core/stores";
 import { THEMES, applyTheme, isTheme } from "../core/themes";
 import type { ModuleAction, PreparedAsk } from "../core/types";
+import { tChat } from "../i18n/chat";
 import { startableProjects } from "../ide/cardStart";
 import { requestMode } from "../ide/modeRequest";
 import { showPlanInFlow } from "../ide/planRequest";
@@ -46,14 +53,24 @@ import { get } from "svelte/store";
 import { openKanban } from "./kanbanApp";
 
 /** The views `open_view` opens. */
-export const CHAT_VIEWS = ["studio", "kanban", "second-brain", "handbook", "settings", "terminal", "file"] as const;
+export const CHAT_VIEWS = [
+  "studio",
+  "kanban",
+  "second-brain",
+  "handbook",
+  "settings",
+  "terminal",
+  "file",
+] as const;
 type ChatView = (typeof CHAT_VIEWS)[number];
 
 const STUDIO_MODES = ["editor", "agents", "flow"] as const;
 
 /** A whole number from a param, else `undefined`. */
 function int(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+  return typeof value === "number" && Number.isInteger(value)
+    ? value
+    : undefined;
 }
 
 /** A trimmed string from a param, else `undefined`. */
@@ -104,12 +121,17 @@ const openView: ModuleAction = {
         if (project !== undefined) requestProject(project);
         if (mode) requestMode(mode);
         emit("shell:studio");
-        return { opened: "studio", project: project ?? null, mode: mode ?? null };
+        return {
+          opened: "studio",
+          project: project ?? null,
+          mode: mode ?? null,
+        };
       }
       case "kanban": {
         const card = int(p.card);
         // A card opens on its own board, not the one used last.
-        const boardId = card === undefined ? undefined : (await findCard(card)).board_id;
+        const boardId =
+          card === undefined ? undefined : (await findCard(card)).board_id;
         await openKanban({ boardId, cardId: card });
         return { opened: "kanban", card: card ?? null };
       }
@@ -120,7 +142,10 @@ const openView: ModuleAction = {
       }
       case "handbook": {
         const page = text(p.page);
-        if (page && !(await listHandbook()).some((entry) => entry.name === page)) {
+        if (
+          page &&
+          !(await listHandbook()).some((entry) => entry.name === page)
+        ) {
           throw new Error(`the handbook has no page "${page}"`);
         }
         openHandbook(page);
@@ -139,11 +164,14 @@ const openView: ModuleAction = {
       case "file": {
         const path = text(p.path);
         if (!path) throw new Error("file needs a path");
-        if (!openFilePanel(path, "read")) throw new Error(`could not open "${path}"`);
+        if (!openFilePanel(path, "read"))
+          throw new Error(`could not open "${path}"`);
         return { opened: "file", path };
       }
       default:
-        throw new Error(`unknown view "${String(p.view)}"; one of ${CHAT_VIEWS.join(", ")}`);
+        throw new Error(
+          `unknown view "${String(p.view)}"; one of ${CHAT_VIEWS.join(", ")}`,
+        );
     }
   },
 };
@@ -173,14 +201,27 @@ const setDisplay: ModuleAction = {
     const p = (params ?? {}) as Record<string, unknown>;
     // Everything is checked before anything changes: a bad value changes nothing.
     const theme = text(p.theme);
-    if (theme !== undefined && !isTheme(theme)) throw new Error(`unknown theme "${theme}"`);
+    if (theme !== undefined && !isTheme(theme))
+      throw new Error(`unknown theme "${theme}"`);
     const layout = BRAIN_LAYOUTS.find((l) => l.id === p.brainLayout)?.id;
-    if (p.brainLayout !== undefined && !layout) throw new Error(`unknown layout "${String(p.brainLayout)}"`);
-    const motion = MOTION_LEVELS.find((m) => m.id === p.motion)?.id as MotionLevel | undefined;
-    if (p.motion !== undefined && !motion) throw new Error(`unknown motion level "${String(p.motion)}"`);
-    const knob = (value: unknown, max: number, name: string): number | undefined => {
+    if (p.brainLayout !== undefined && !layout)
+      throw new Error(`unknown layout "${String(p.brainLayout)}"`);
+    const motion = MOTION_LEVELS.find((m) => m.id === p.motion)?.id as
+      MotionLevel | undefined;
+    if (p.motion !== undefined && !motion)
+      throw new Error(`unknown motion level "${String(p.motion)}"`);
+    const knob = (
+      value: unknown,
+      max: number,
+      name: string,
+    ): number | undefined => {
       if (value === undefined) return undefined;
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > max) {
+      if (
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        value < 0 ||
+        value > max
+      ) {
         throw new Error(`${name} must be a number from 0 to ${max}`);
       }
       return Math.round(value);
@@ -206,7 +247,9 @@ const setDisplay: ModuleAction = {
 async function knownSkill(params: unknown): Promise<Skill> {
   const name = text((params as { skill?: unknown } | null)?.skill);
   if (!name) throw new Error("start_skill needs a skill name");
-  const skill = (await invokeBackend<Skill[]>("list_skills")).find((entry) => entry.name === name);
+  const skill = (await invokeBackend<Skill[]>("list_skills")).find(
+    (entry) => entry.name === name,
+  );
   if (!skill) throw new Error(`no skill named "${name}"`);
   return skill;
 }
@@ -215,10 +258,8 @@ async function knownSkill(params: unknown): Promise<Skill> {
 export async function prepareSkillRun(params: unknown): Promise<PreparedAsk> {
   const skill = await knownSkill(params);
   return {
-    question: `Run the skill ${skill.name}`,
-    detail:
-      `${skill.description}\n` +
-      `Runs on ${skill.harness}; its instructions are ~/.axiomata/skills/${skill.name}/SKILL.md.`,
+    question: tChat("askRunSkill", { name: skill.name }),
+    detail: `${skill.description}\n${tChat("askSkillWhere", { harness: skill.harness, name: skill.name })}`,
     params: { skill: skill.name },
   };
 }
@@ -226,10 +267,15 @@ export async function prepareSkillRun(params: unknown): Promise<PreparedAsk> {
 const startSkill: ModuleAction = {
   name: "start_skill",
   description: "Run a skill by name (a billed agent run).",
-  params: { type: "object", properties: { skill: { type: "string" } }, required: ["skill"] },
+  params: {
+    type: "object",
+    properties: { skill: { type: "string" } },
+    required: ["skill"],
+  },
   chat: "ask",
   ask: prepareSkillRun,
-  run: async (params) => invokeBackend("run_skill", { name: (await knownSkill(params)).name }),
+  run: async (params) =>
+    invokeBackend("run_skill", { name: (await knownSkill(params)).name }),
 };
 
 /** A routine as the params give it: name, six- or seven-field cron, and a skill or a prompt. */
@@ -245,16 +291,22 @@ export function routineParams(params: unknown): RoutineParams {
   const p = (params ?? {}) as Record<string, unknown>;
   const name = text(p.name);
   const cron = text(p.cron);
-  if (!name || !cron) throw new Error("a routine needs a name and a cron (six or seven fields, seconds first)");
+  if (!name || !cron)
+    throw new Error(
+      "a routine needs a name and a cron (six or seven fields, seconds first)",
+    );
   const skill = text(p.skill);
   const prompt = text(p.prompt);
-  if (!skill === !prompt) throw new Error("a routine runs either a skill or a prompt");
+  if (!skill === !prompt)
+    throw new Error("a routine runs either a skill or a prompt");
   return { id: int(p.id), name, cron, skill, prompt };
 }
 
 /** A routine's target as the owner reads it. */
 function runsWhat(routine: { skill?: string; prompt?: string }): string {
-  return routine.skill ? `the skill ${routine.skill}` : "a prompt (below)";
+  return routine.skill
+    ? tChat("askRunsSkill", { name: routine.skill })
+    : tChat("askRunsPromptBelow");
 }
 
 /**
@@ -265,18 +317,33 @@ function runsWhat(routine: { skill?: string; prompt?: string }): string {
 export async function prepareRoutine(params: unknown): Promise<PreparedAsk> {
   const r = routineParams(params);
   const lines: string[] = [];
-  if (r.prompt) lines.push(`Prompt: ${r.prompt}`);
-  let verb = "Create";
+  if (r.prompt) lines.push(tChat("askPromptLine", { prompt: r.prompt }));
+  const asked = { name: r.name, cron: r.cron, what: runsWhat(r) };
+  let question = tChat("askCreateRoutine", asked);
   if (r.id !== undefined) {
-    const current = (await invokeBackend<Routine[]>("list_routines")).find((routine) => routine.id === r.id);
+    const current = (await invokeBackend<Routine[]>("list_routines")).find(
+      (routine) => routine.id === r.id,
+    );
     if (!current) throw new Error(`no routine #${r.id}`);
-    verb = `Replace routine #${r.id} “${current.name}” with`;
+    question = tChat("askReplaceRoutine", {
+      ...asked,
+      id: r.id,
+      old: current.name,
+    });
     const old =
-      current.target.type === "skill" ? `the skill ${current.target.value}` : `the prompt “${current.target.value}”`;
-    lines.push(`It replaces: “${current.name}” (${current.cron_expr}) running ${old}.`);
+      current.target.type === "skill"
+        ? tChat("askRunsSkill", { name: current.target.value })
+        : tChat("askRunsPrompt", { prompt: current.target.value });
+    lines.push(
+      tChat("askReplaces", {
+        name: current.name,
+        cron: current.cron_expr,
+        what: old,
+      }),
+    );
   }
   return {
-    question: `${verb} the routine “${r.name}” (${r.cron}) running ${runsWhat(r)}`,
+    question,
     detail: lines.join("\n"),
     params: r,
   };
@@ -303,18 +370,34 @@ const saveRoutine: ModuleAction = {
   ask: prepareRoutine,
   run: async (params) => {
     const r = routineParams(params);
-    const target = r.skill ? { type: "skill", value: r.skill } : { type: "prompt", value: r.prompt ?? "" };
+    const target = r.skill
+      ? { type: "skill", value: r.skill }
+      : { type: "prompt", value: r.prompt ?? "" };
     if (r.id === undefined) {
       return invokeBackend("add_routine", {
-        new: { name: r.name, cron_expr: r.cron, target, backend: null, enabled: true },
+        new: {
+          name: r.name,
+          cron_expr: r.cron,
+          target,
+          backend: null,
+          enabled: true,
+        },
       });
     }
     // `update_routine` replaces every field: the routine's own on/off state is read back so a change keeps it.
-    const current = (await invokeBackend<Routine[]>("list_routines")).find((routine) => routine.id === r.id);
+    const current = (await invokeBackend<Routine[]>("list_routines")).find(
+      (routine) => routine.id === r.id,
+    );
     if (!current) throw new Error(`no routine #${r.id}`);
     return invokeBackend("update_routine", {
       id: r.id,
-      new: { name: r.name, cron_expr: r.cron, target, backend: current.backend, enabled: current.enabled },
+      new: {
+        name: r.name,
+        cron_expr: r.cron,
+        target,
+        backend: current.backend,
+        enabled: current.enabled,
+      },
     });
   },
 };
@@ -322,7 +405,10 @@ const saveRoutine: ModuleAction = {
 /** A card of any board by its id (archived ones left out). */
 async function findCard(id: number): Promise<BoardCard> {
   for (const board of await invokeBackend<{ id: number }[]>("list_boards")) {
-    const cards = await invokeBackend<BoardCard[]>("list_board_cards", { boardId: board.id, includeArchived: false });
+    const cards = await invokeBackend<BoardCard[]>("list_board_cards", {
+      boardId: board.id,
+      includeArchived: false,
+    });
     const card = cards.find((entry) => entry.id === id);
     if (card) return card;
   }
@@ -330,17 +416,29 @@ async function findCard(id: number): Promise<BoardCard> {
 }
 
 /** The card to start and the project it runs in: a plain open card in no plan, and a project whose folder exists. */
-async function cardToStart(params: unknown): Promise<{ card: BoardCard; project: IdeProject }> {
+async function cardToStart(
+  params: unknown,
+): Promise<{ card: BoardCard; project: IdeProject }> {
   const p = (params ?? {}) as Record<string, unknown>;
   const id = int(p.card);
   if (id === undefined) throw new Error("start_card needs a card id");
   const card = await findCard(id);
-  if (card.plan_id !== null) throw new Error(`card #${id} is a step of plan #${card.plan_id}; its plan runs it`);
+  if (card.plan_id !== null)
+    throw new Error(
+      `card #${id} is a step of plan #${card.plan_id}; its plan runs it`,
+    );
   const projects = startableProjects(await listProjects());
   const wanted = int(p.project);
-  const project = wanted === undefined ? projects[0] : projects.find((entry) => entry.id === wanted);
+  const project =
+    wanted === undefined
+      ? projects[0]
+      : projects.find((entry) => entry.id === wanted);
   if (!project) {
-    throw new Error(wanted === undefined ? "there is no project a card could run in" : `no project #${wanted}`);
+    throw new Error(
+      wanted === undefined
+        ? "there is no project a card could run in"
+        : `no project #${wanted}`,
+    );
   }
   return { card, project };
 }
@@ -361,18 +459,35 @@ const startCard: ModuleAction = {
   ask: async (params) => {
     const { card, project } = await cardToStart(params);
     return {
-      question: `Start card #${card.id} “${card.title}” as a plan in the project ${project.name}`,
+      question: tChat("askStartCard", {
+        id: card.id,
+        title: card.title,
+        project: project.name,
+      }),
       detail: card.body,
-      params: { card: card.id, project: project.id, title: card.title, body: card.body },
+      params: {
+        card: card.id,
+        project: project.id,
+        title: card.title,
+        body: card.body,
+      },
     };
   },
   run: async (params) => {
     const shown = (params ?? {}) as { title?: unknown; body?: unknown };
     const { card, project } = await cardToStart(params);
-    if (shown.title !== undefined && (shown.title !== card.title || shown.body !== card.body)) {
-      throw new Error(`card #${card.id} changed since you were asked; nothing was started`);
+    if (
+      shown.title !== undefined &&
+      (shown.title !== card.title || shown.body !== card.body)
+    ) {
+      throw new Error(
+        `card #${card.id} changed since you were asked; nothing was started`,
+      );
     }
-    const plan = await invokeBackend<BoardPlan>("start_card_plan", { cardId: card.id, projectId: project.id });
+    const plan = await invokeBackend<BoardPlan>("start_card_plan", {
+      cardId: card.id,
+      projectId: project.id,
+    });
     showPlanInFlow(project.id, { boardId: plan.board_id, planId: plan.id });
     emit("shell:studio");
     return { plan: plan.id };
@@ -380,7 +495,14 @@ const startCard: ModuleAction = {
 };
 
 /** The kinds of view `close_view` closes. The Studio is not one: its panes and agents are never the chat's to close. */
-export const CLOSABLE_VIEWS = ["kanban", "file", "terminal", "second-brain", "handbook", "settings"] as const;
+export const CLOSABLE_VIEWS = [
+  "kanban",
+  "file",
+  "terminal",
+  "second-brain",
+  "handbook",
+  "settings",
+] as const;
 type ClosableKind = (typeof CLOSABLE_VIEWS)[number];
 
 /** One open view the chat may close, with what closing it would lose and its own way to close. */
@@ -403,11 +525,13 @@ async function terminalLoss(instanceId: string): Promise<string | null> {
   const session = terminalSession(instanceId);
   if (!session) return null; // its shell has ended, or never started: nothing runs
   try {
-    const program = await invokeBackend<string | null>("terminal_foreground", { id: session });
-    return program ? `the running program “${program}”, which closing ends` : null;
+    const program = await invokeBackend<string | null>("terminal_foreground", {
+      id: session,
+    });
+    return program ? tChat("askLossProgram", { program }) : null;
   } catch {
     // Not knowing is no "nothing": the owner decides.
-    return "whatever runs in it (it could not be checked)";
+    return tChat("askLossUnknown");
   }
 }
 
@@ -418,7 +542,11 @@ async function terminalLoss(instanceId: string): Promise<string | null> {
  */
 async function closeStagedPanel(id: string): Promise<void> {
   const focused = document.activeElement;
-  if (focused instanceof HTMLElement && focused.closest(`[data-staged="${CSS.escape(id)}"]`)) focused.blur();
+  if (
+    focused instanceof HTMLElement &&
+    focused.closest(`[data-staged="${CSS.escape(id)}"]`)
+  )
+    focused.blur();
   await requestClose(id);
 }
 
@@ -426,31 +554,48 @@ async function closeStagedPanel(id: string): Promise<void> {
 function closables(): Closable[] {
   const found: Closable[] = [];
   for (const panel of get(staged)) {
-    const kind = panel.type === FILE_PANEL ? "file" : panel.type === "kanban" ? "kanban" : null;
+    const kind =
+      panel.type === FILE_PANEL
+        ? "file"
+        : panel.type === "kanban"
+          ? "kanban"
+          : null;
     if (!kind) continue;
-    const path = typeof panel.config.path === "string" && panel.config.path ? panel.config.path : undefined;
+    const path =
+      typeof panel.config.path === "string" && panel.config.path
+        ? panel.config.path
+        : undefined;
     found.push({
       kind,
       id: panel.id,
-      title: kind === "file" ? (path ?? "a new note") : `Kanban (${path ?? "board"})`,
+      title:
+        kind === "file"
+          ? (path ?? tChat("askNewNote"))
+          : path
+            ? tChat("askKanbanPanel", { path })
+            : tChat("askKanbanBoard"),
       path,
       loss: async () => pendingLoss(panel.id),
-      onYes:
-        kind === "file"
-          ? " On yes the panel itself asks you whether to save or discard."
-          : " On yes the panel closes and that text is gone.",
+      onYes: kind === "file" ? tChat("askOnYesFile") : tChat("askOnYesKanban"),
       close: () => closeStagedPanel(panel.id),
     });
   }
   for (const inst of get(instances)) {
     if (inst.type !== "terminal") continue;
-    const cwd = typeof inst.config.cwd === "string" && inst.config.cwd ? ` in ${inst.config.cwd}` : "";
+    const cwd =
+      typeof inst.config.cwd === "string" && inst.config.cwd
+        ? inst.config.cwd
+        : "";
+    const def = getModule("terminal");
+    const module = def ? moduleTitle(def) : "Terminal";
     found.push({
       kind: "terminal",
       id: inst.id,
-      title: `${getModule("terminal")?.title ?? "Terminal"} tile${cwd}`,
+      title: cwd
+        ? tChat("askTerminalTileIn", { module, cwd })
+        : tChat("askTerminalTile", { module }),
       loss: () => terminalLoss(inst.id),
-      onYes: " On yes the tile is removed and the program ends with it.",
+      onYes: tChat("askOnYesTerminal"),
       // The tile's own × (`canvas/Tile.svelte`): the tile goes, and its shell with it.
       close: () => removeInstance(inst.id),
     });
@@ -480,10 +625,14 @@ function closeTarget(params: unknown): Closable {
   const id = text(p.id);
   const path = text(p.path);
   const open = closables().filter((view) => view.kind === kind);
-  const named = open.filter((view) => (id ? view.id === id : path ? view.path === path : true));
+  const named = open.filter((view) =>
+    id ? view.id === id : path ? view.path === path : true,
+  );
   if (named.length === 1) return named[0];
   if (named.length === 0) {
-    throw new Error(`no open ${kind}${id ? ` "${id}"` : path ? ` at ${path}` : ""}; open_views lists what is open`);
+    throw new Error(
+      `no open ${kind}${id ? ` "${id}"` : path ? ` at ${path}` : ""}; open_views lists what is open`,
+    );
   }
   throw new Error(
     `${named.length} ${kind} views are open (${named.map((view) => `${view.id}: ${view.title}`).join("; ")}); ` +
@@ -541,8 +690,10 @@ const closeView: ModuleAction = {
     const frozen = { view: target.kind, id: target.id };
     shownToOwner.add(frozen);
     return {
-      question: `Close ${target.title}`,
-      detail: `Closing it would lose ${loss}.${target.onYes}`,
+      question: tChat("askClose", { title: target.title }),
+      detail: [tChat("askCloseLoses", { loss }), target.onYes]
+        .filter(Boolean)
+        .join(" "),
       params: frozen,
     };
   },
@@ -550,16 +701,24 @@ const closeView: ModuleAction = {
     const target = closeTarget(params);
     // Not a close the owner said yes to (nothing was lost when it was checked, or the owner's own command): checked
     // again here, so a text typed or a program started in between is never closed away unasked.
-    if (!(typeof params === "object" && params !== null && shownToOwner.has(params))) {
+    if (!(
+      typeof params === "object" &&
+      params !== null &&
+      shownToOwner.has(params)
+    )) {
       const loss = await target.loss();
-      if (loss) throw new Error(`closing ${target.title} would lose ${loss}; call close_view again to ask the owner`);
+      if (loss)
+        throw new Error(
+          `closing ${target.title} would lose ${loss}; call close_view again to ask the owner`,
+        );
     }
     await target.close();
     // A staged panel's own guard may have kept it (the owner chose Cancel at its unsaved-text question): say so. Only a
     // staged panel is gone as soon as its close returns; a window leaves the list when its component next updates.
     const isPanel = target.kind === "file" || target.kind === "kanban";
     const kept = isPanel && get(staged).some((panel) => panel.id === target.id);
-    if (kept) return { closed: false, id: target.id, reason: "the owner kept it open" };
+    if (kept)
+      return { closed: false, id: target.id, reason: "the owner kept it open" };
     return { closed: target.kind, id: target.id };
   },
 };
@@ -578,4 +737,3 @@ export const CHAT_ACTIONS: readonly ModuleAction[] = [
 export function registerChatActions(): void {
   for (const action of CHAT_ACTIONS) registerShellAction(action);
 }
-

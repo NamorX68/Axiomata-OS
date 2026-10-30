@@ -10,6 +10,7 @@
 
   import { readPalette } from "./model";
   import { APP_GROUP_GLYPHS, drawGlyph } from "./render";
+  import { glyphName, tBrain } from "../i18n/brain";
 
   let { selected, onPick }: { selected: string; onPick: (glyph: string) => void } = $props();
 
@@ -51,14 +52,14 @@
   });
 </script>
 
-<div class="picker" role="listbox" aria-label="Choose an icon">
+<div class="picker" role="listbox" aria-label={tBrain("chooseIcon")}>
   {#each APP_GROUP_GLYPHS as g, i (g)}
     <button
       type="button"
       class="cell"
       class:selected={g === selected}
       role="option"
-      aria-label={g}
+      aria-label={glyphName(g)}
       aria-selected={g === selected}
       onclick={() => onPick(g)}
     >

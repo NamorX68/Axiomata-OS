@@ -7,16 +7,17 @@
 
 import type { WaitingAgent } from "../core/agentWaiting";
 import type { BoardCard, BoardPlan } from "../core/backend";
+import { kanbanLabels } from "../i18n/kanban";
 import { readyToTakeOver } from "./planning";
 
 /** Where the plan of a card stands, as the card says it. */
 export type CardPlanPhase = "planning" | "running" | "waiting";
 
-export const PHASE_LABEL: Record<CardPlanPhase, string> = {
-  planning: "planning",
-  running: "running",
-  waiting: "waits for your take-over",
-};
+export const PHASE_LABEL: Readonly<Record<CardPlanPhase, string>> = kanbanLabels({
+  planning: "phasePlanning",
+  running: "phaseRunning",
+  waiting: "phaseWaiting",
+});
 
 /** The open plans that were made from a card: their steps stay off the board. */
 export function cardPlans(plans: BoardPlan[]): Map<number, BoardPlan> {

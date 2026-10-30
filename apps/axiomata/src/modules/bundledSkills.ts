@@ -6,6 +6,7 @@
 import { writable } from "svelte/store";
 
 import type { BundledSkill, BundledState } from "../core/backend";
+import { tCanvas } from "../i18n/canvas";
 import type { StatusTone } from "../ui/status";
 
 /** The latest list from the backend — `null` until it was read once. The front face reads it once at start for the
@@ -19,15 +20,15 @@ export const bundledFocus = writable(0);
 export function stateLabel(state: BundledState): string {
   switch (state) {
     case "up_to_date":
-      return "up to date";
+      return tCanvas("stateUpToDate");
     case "outdated":
-      return "outdated";
+      return tCanvas("stateOutdated");
     case "missing":
-      return "missing";
+      return tCanvas("stateMissing");
     case "changed":
-      return "changed by you";
+      return tCanvas("stateChanged");
     case "differs":
-      return "differs — may be yours";
+      return tCanvas("stateDiffers");
   }
 }
 
@@ -56,5 +57,5 @@ export function updatableCount(list: readonly BundledSkill[]): number {
 export function noticeText(list: readonly BundledSkill[] | null): string | null {
   const n = list ? updatableCount(list) : 0;
   if (n === 0) return null;
-  return n === 1 ? "1 bundled skill has an update" : `${n} bundled skills have updates`;
+  return tCanvas("bundledNotice", { n });
 }

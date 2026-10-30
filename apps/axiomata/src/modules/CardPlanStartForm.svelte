@@ -12,6 +12,8 @@
   import { setGrillWish } from "../ide/grillAfter";
   import { showPlanInFlow } from "../ide/planRequest";
   import { listProjects } from "../ide/projects";
+  import { tFlow } from "../i18n/flow";
+  import { tKanban as t } from "../i18n/kanban";
 
   interface Props {
     card: BoardCard;
@@ -45,7 +47,7 @@
       // K4: grilling is the default; the owner unticks "grill afterwards" in the Flow before starting the planner.
       setGrillWish(plan.id, true);
       showPlanInFlow(projectId, { boardId: plan.board_id, planId: plan.id });
-      toast(`Card #${card.id} is now plan #${plan.id}: start its planner in the Flow.`, "info");
+      toast(t("nowPlan", { id: card.id, plan: plan.id }), "info");
       onDone();
       onStarted?.();
     } catch (err) {
@@ -64,26 +66,22 @@
   }}
 >
   {#if projects.length === 0}
-    <p class="hint">There is no project the card could run in. Create one in the Studio.</p>
+    <p class="hint">{t("noProject")}</p>
   {:else}
     <label>
-      Project
-      <select bind:value={projectId} aria-label="Project">
+      {t("project")}
+      <select bind:value={projectId} aria-label={t("project")}>
         {#each projects as project (project.id)}<option value={project.id}>{project.name}</option>{/each}
       </select>
     </label>
-    <p class="hint">
-      The card becomes a plan. In the Studio you choose whether to be grilled and start the planner, which proposes
-      the steps. Once you release the plan, the steps run by themselves (up to $5 unless you change it) and the card
-      moves along — to Review when everything is ready for your take-over.
-    </p>
+    <p class="hint">{t("planStartHint")}</p>
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
     <button class="ax-btn primary" type="submit" disabled={busy || projectId === null}>
-      {busy ? "Starting …" : "Start as plan"}
+      {busy ? t("starting") : t("startAsPlan")}
     </button>
-    <button class="ax-btn" type="button" onclick={onDone}>Cancel</button>
+    <button class="ax-btn" type="button" onclick={onDone}>{tFlow("cancel")}</button>
   </div>
 </form>
 

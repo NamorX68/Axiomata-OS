@@ -25,6 +25,8 @@ import type {
   CardStatus,
   TaskState,
 } from "./backend";
+import { tFlow } from "../i18n/flow";
+import { kanbanLabels, tKanban } from "../i18n/kanban";
 
 /** A column together with the cards in it, in the order they are drawn. */
 export interface ColumnWithCards {
@@ -93,7 +95,7 @@ export function collectLabels(cards: BoardCard[]): string[] {
 }
 
 export interface DueState {
-  /** Short human label: "today", "in 3 T", "2 T überfällig". */
+  /** Short human label: "today", "in 3 d", "2 d overdue" — read in the current language. */
   label: string;
   overdue: boolean;
   /** Due today or tomorrow: the card says so in the warning colour (editor-look B1). */
@@ -117,10 +119,10 @@ export function dueState(dueAt: string, now: Date = new Date()): DueState {
       86_400_000,
   );
 
-  if (days < 0) return { label: `${Math.abs(days)} d overdue`, overdue: true, soon: false };
-  if (days === 0) return { label: "today", overdue: false, soon: true };
-  if (days === 1) return { label: "tomorrow", overdue: false, soon: true };
-  return { label: `in ${days} d`, overdue: false, soon: false };
+  if (days < 0) return { label: tKanban("dueOverdue", { n: Math.abs(days) }), overdue: true, soon: false };
+  if (days === 0) return { label: tKanban("dueToday"), overdue: false, soon: true };
+  if (days === 1) return { label: tKanban("dueTomorrow"), overdue: false, soon: true };
+  return { label: tKanban("dueIn", { n: days }), overdue: false, soon: false };
 }
 
 /** Palette index for a label, so the same word always reads the same colour. */
@@ -241,21 +243,21 @@ export function showsAssignee(assignee: string | null): assignee is string {
 
 
 /** How a card's state reads on the board. */
-export const STATE_LABEL: Record<TaskState, string> = {
-  proposed: "proposal",
-  blocked: "waiting",
-  ready: "ready",
-  working: "in progress",
-  planned: "plan",
-  input_required: "question",
-  in_review: "in review",
-  done: "done",
-  verified: "checked",
-  integrated: "in the plan",
-  taken_over: "taken over",
-  failed: "failed",
-  canceled: "canceled",
-};
+export const STATE_LABEL: Readonly<Record<TaskState, string>> = kanbanLabels({
+  proposed: "stateProposed",
+  blocked: "stateBlocked",
+  ready: "stateReady",
+  working: "stateWorking",
+  planned: "statePlanned",
+  input_required: "stateInputRequired",
+  in_review: "stateInReview",
+  done: "stateDone",
+  verified: "stateVerified",
+  integrated: "stateIntegrated",
+  taken_over: "stateTakenOver",
+  failed: "stateFailed",
+  canceled: "stateCanceled",
+});
 
 /**
  * Whether a state deserves a badge on the card. The column already says "open", "in progress", "in review" or
@@ -361,24 +363,26 @@ export function planOf(card: BoardCard, plans: BoardPlan[]): BoardPlan | null {
 
 /** How a plan reads in a list. */
 export function planLabel(plan: BoardPlan): string {
-  const status = { draft: "draft", approved: "released", closed: "closed" }[plan.status];
+  const status = tFlow(
+    ({ draft: "statusDraft", approved: "statusReleased", closed: "statusClosed" } as const)[plan.status],
+  );
   return `${plan.name} · ${status}`;
 }
 
 /** How a line of a card's history reads. */
-export const EVENT_LABEL: Record<CardEventKind, string> = {
-  started: "started",
-  reported: "reported done",
-  approved: "checked",
-  returned: "returned",
-  escalated: "escalated",
-  limit_stop: "limit reached",
-  input_required: "question",
-  input_provided: "answered",
-  failed: "failed",
-  canceled: "called off",
-  released: "released",
-  taken_over: "taken over",
-  integrated: "taken into the plan",
-  note: "note",
-};
+export const EVENT_LABEL: Readonly<Record<CardEventKind, string>> = kanbanLabels({
+  started: "eventStarted",
+  reported: "eventReported",
+  approved: "eventApproved",
+  returned: "eventReturned",
+  escalated: "eventEscalated",
+  limit_stop: "eventLimitStop",
+  input_required: "eventInputRequired",
+  input_provided: "eventInputProvided",
+  failed: "eventFailed",
+  canceled: "eventCanceled",
+  released: "eventReleased",
+  taken_over: "eventTakenOver",
+  integrated: "eventIntegrated",
+  note: "eventNote",
+});

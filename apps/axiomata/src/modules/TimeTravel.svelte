@@ -9,6 +9,7 @@
 
   import { formatDate } from "../core/format";
   import IconButton from "../ui/IconButton.svelte";
+  import { tBrain } from "../i18n/brain";
 
   interface Props {
     /** The vault's life: its first note's birth to now (`graph/hive.ts` `travelSpan`). */
@@ -32,7 +33,7 @@
   const at = $derived(span.from + ((span.to - span.from) * step) / STEPS);
   const label = $derived(
     step >= STEPS
-      ? "today"
+      ? tBrain("today")
       : formatDate(at, { day: "numeric", month: "short", year: "numeric" }),
   );
 
@@ -85,7 +86,7 @@
   {#if open}
     <IconButton
       icon={playing ? "pause" : "play"}
-      label={playing ? "Stop" : "Grow the vault"}
+      label={playing ? tBrain("stop") : tBrain("growVault")}
       size="sm"
       onclick={() => (playing ? stop() : play())}
     />
@@ -94,16 +95,16 @@
       min="0"
       max={STEPS}
       value={step}
-      aria-label="Time travel"
+      aria-label={tBrain("timeTravel")}
       oninput={(e) => {
         stop();
         show(Number(e.currentTarget.value));
       }}
     />
     <span class="date">{label}</span>
-    <IconButton icon="x" label="Back to today" size="sm" onclick={close} />
+    <IconButton icon="x" label={tBrain("backToToday")} size="sm" onclick={close} />
   {:else}
-    <IconButton icon="history" label="Time travel: how the vault grew" onclick={() => (open = true)} />
+    <IconButton icon="history" label={tBrain("timeTravelOpen")} onclick={() => (open = true)} />
   {/if}
 </div>
 

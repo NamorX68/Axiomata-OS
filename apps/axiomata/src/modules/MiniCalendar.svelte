@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { monthDiff, monthGrid, monthOf, weekdayLabels, type YearMonth } from "../core/monthGrid";
+  import { tModules } from "../i18n/modules";
 
   let {
     month,
@@ -54,12 +55,24 @@
 
 <div class="mini">
   <div class="bar">
-    <button type="button" class="nav" aria-label="Previous month" disabled={!canPrev} onclick={() => onPage(-1)}>‹</button>
+    <button
+      type="button"
+      class="nav"
+      aria-label={tModules("previousMonth")}
+      disabled={!canPrev}
+      onclick={() => onPage(-1)}
+    >‹</button>
     <span class="label">{grid.label}</span>
-    <button type="button" class="nav" aria-label="Next month" disabled={!canNext} onclick={() => onPage(1)}>›</button>
+    <button
+      type="button"
+      class="nav"
+      aria-label={tModules("nextMonth")}
+      disabled={!canNext}
+      onclick={() => onPage(1)}
+    >›</button>
   </div>
 
-  <div class="grid" role="grid" aria-label="Month">
+  <div class="grid" role="grid" aria-label={tModules("month")}>
     {#each weekdays as wd (wd)}
       <span class="wd" aria-hidden="true">{wd}</span>
     {/each}

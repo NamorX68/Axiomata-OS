@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
 
   let { ctx, defaultName }: { ctx: ModuleContext; defaultName: string } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -27,7 +28,7 @@
   }
 </script>
 
-<label class="field" for="skill-name-{ctx.instanceId}">Skill name</label>
+<label class="field" for="skill-name-{ctx.instanceId}">{tModules("skillName")}</label>
 <input
   id="skill-name-{ctx.instanceId}"
   type="text"
@@ -37,9 +38,7 @@
   oninput={setSkillName}
 />
 <p class="muted small">
-  Runs once when this tile first mounts (app start, or right after you place it) and whenever you
-  hit ↻ — never on a repeating timer. For a recurring refresh, schedule <code>{defaultName}</code>
-  (or whatever you've renamed it to here) as a Routine instead.
+  {tModules("skillNameHintBefore")}<code>{defaultName}</code>{tModules("skillNameHintAfter")}
 </p>
 
 <style>

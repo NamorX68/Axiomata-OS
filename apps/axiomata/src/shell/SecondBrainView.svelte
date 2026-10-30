@@ -52,6 +52,7 @@
   import TimeTravel from "../modules/TimeTravel.svelte";
   import { GraphRenderer, type RenderMode } from "../graph/render";
   import { registerShellView } from "../core/openViews";
+  import { kindName, tBrain } from "../i18n/brain";
 
   let {
     open = $bindable(false),
@@ -145,30 +146,29 @@
     filter = `#${tag}`;
   }
 
-  const HELP = [
-    [
-      "Bundle",
-      `Every note on one ring, an arc per area, the newest first, clockwise. Links run through the middle, bundled along the folders, in the colour of the note they start from; the links of the last ${FRESH_LINK_DAYS} days glow. Point at a note or an area to see its links. Skills ring it outside.`,
-    ],
-    [
-      "Map",
-      "A map of the vault: every note a field, every area a country, the oldest notes at its heart. Links are roads (zoom in); close up every field shows its name. Skills ring the map.",
-    ],
-    [
-      "Hex",
-      "A honeycomb: every note its own hex cell, packed tight, each area in its own wedge, the newest nearest the middle. Skills and areas sit inside it.",
-    ],
-    ["Areas", "One segment per top-level vault folder."],
-    [
-      "Folders",
-      "One segment per deepest folder, e.g. Learning/Rust/lessons. A finer split of large areas; in Bundle the links bundle along the folder tree.",
-    ],
-  ] as const;
-  /** Looks up a HELP entry's text by its term, so the buttons below reference
-   *  entries by name instead of a fragile array index. */
-  /** A term's help, found by its English name or a layout's id (the layouts' shown names follow the language). */
-  function helpText(term: string): string {
-    return HELP.find(([t]) => t.toLowerCase() === term.toLowerCase())?.[1] ?? "";
+  /**
+   * The help list beside the buttons, each term under the id its button's `aria-describedby` names: the layouts under
+   * their ids, with the names the buttons show (`BRAIN_LAYOUTS`), then the two groupings.
+   */
+  const HELP: readonly { id: string; term: () => string; text: () => string }[] = [
+    ...BRAIN_LAYOUTS.map((l) => ({ id: l.id, term: l.label, text: () => layoutHelp(l.id) })),
+    { id: "areas", term: () => tBrain("areas"), text: () => tBrain("helpAreas") },
+    { id: "folders", term: () => tBrain("folders"), text: () => tBrain("helpFolders") },
+  ];
+  function layoutHelp(id: BrainLayout): string {
+    if (id === "bundle") return tBrain("helpBundle", { days: FRESH_LINK_DAYS });
+    return tBrain(id === "map" ? "helpMap" : "helpHex");
+  }
+  /** A term's help, found by its id. */
+  function helpText(id: string): string {
+    return HELP.find((h) => h.id === id)?.text() ?? "";
+  }
+  /** The counts under the controls: notes, the segments of the chosen grouping, links. */
+  function stats(m: GraphModel): string {
+    const segments = tBrain(grouping === "folders" ? "folderCount" : "areaCount", { n: m.areas.length });
+    const parts = [tBrain("notes", { n: m.totalFiles }), segments, tBrain("links", { n: m.edges.length })];
+    if (m.truncated) parts.push(tBrain("truncated"));
+    return parts.join(" · ");
   }
   let busy = $state(false);
   let error = $state("");
@@ -368,7 +368,8 @@
     busy = true;
     try {
       const r = await invokeBackend<RunSummary>("run_skill", { name });
-      toast(`/${name}: ${r.status} (${r.duration_ms} ms)`, r.status === "success" ? "info" : "warning");
+      const tone = r.status === "success" ? "info" : "warning";
+      toast(tBrain("skillRan", { name, status: r.status, ms: r.duration_ms }), tone);
     } catch (err) {
       toast(String(err), "danger");
     } finally {
@@ -389,11 +390,11 @@
     deleting = true;
     try {
       await invokeBackend("delete_workspace_file", { rel: path });
-      toast("File deleted.");
+      toast(tBrain("fileDeleted"));
       select(null); // also clears confirmDelete
       await load(); // rebuild the graph without the deleted node
     } catch (err) {
-      toast(`Deleting failed: ${err}`, "warning");
+      toast(tBrain("deleteFailed", { error: String(err) }), "warning");
     } finally {
       deleting = false;
     }
@@ -406,7 +407,7 @@
     const absolute = graph && path ? `${graph.workspace_root.replace(/\/+$/, "")}/${path}` : path;
     try {
       await navigator.clipboard.writeText(absolute);
-      toast("Path copied.");
+      toast(tBrain("pathCopied"));
     } catch {
       toast(absolute);
     }
@@ -471,7 +472,7 @@
     const day = formatDate(growthAt, { day: "numeric", month: "short", year: "numeric" });
     // Notes without a time are there from the start.
     const count = countBornBy(births, growthAt) + (graph.files.length - births.length);
-    return `${day} · ${count} ${count === 1 ? "note" : "notes"}`;
+    return tBrain("growthAt", { day, notes: tBrain("notes", { n: count }) });
   });
 
   function startGrowth() {
@@ -598,7 +599,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<section class="brain" aria-label="Second Brain">
+<section class="brain" aria-label={tBrain("secondBrain")}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="stage"
@@ -621,9 +622,20 @@
     <div class="travel"><TimeTravel {span} onTravel={(at) => travelAt.set(at)} /></div>
   {/if}
   {#if growth}
-    <div class="growth" class:away={$staged.length > 0} role="group" aria-label="How your vault grew" transition:fade={{ duration: 120 }}>
+    <div
+      class="growth"
+      class:away={$staged.length > 0}
+      role="group"
+      aria-label={tBrain("growthTitle")}
+      transition:fade={{ duration: 120 }}
+    >
       {#if !still}
-        <button type="button" class="play" aria-label={growth.playing ? "Pause" : "Play"} onclick={toggleGrowth}>{growth.playing ? "❚❚" : "▶"}</button>
+        <button
+          type="button"
+          class="play"
+          aria-label={growth.playing ? tBrain("pause") : tBrain("play")}
+          onclick={toggleGrowth}
+        >{growth.playing ? "❚❚" : "▶"}</button>
       {/if}
       <input
         type="range"
@@ -631,17 +643,23 @@
         max={GROWTH_MS}
         step="10"
         value={growth.elapsed}
-        aria-label="Moment of the replay"
+        aria-label={tBrain("growthMoment")}
         oninput={(e) => scrubGrowth(Number((e.currentTarget as HTMLInputElement).value))}
       />
       <span class="when">{growthLabel}</span>
-      <button type="button" class="end" aria-label="End the replay" title="End (Esc)" onclick={endGrowth}>×</button>
+      <button
+        type="button"
+        class="end"
+        aria-label={tBrain("endReplay")}
+        title={tBrain("endReplayTitle")}
+        onclick={endGrowth}
+      >×</button>
     </div>
   {/if}
 
   <aside class="controls" class:away={$staged.length > 0}>
     <div class="group">
-      <span class="label">Layout</span>
+      <span class="label">{tBrain("layout")}</span>
       <div class="seg">
         {#each BRAIN_LAYOUTS as l (l.id)}
           <button type="button" class:on={layout === l.id} title={helpText(l.id)} aria-describedby="help-{l.id}" onclick={() => setLayout(l.id)}>{l.label()}</button>
@@ -649,18 +667,30 @@
       </div>
     </div>
     <div class="group">
-      <span class="label">Group by</span>
+      <span class="label">{tBrain("groupBy")}</span>
       <div class="seg">
-        <button type="button" class:on={grouping === "areas"} title={helpText("Areas")} aria-describedby="help-areas" onclick={() => (grouping = "areas")}>Areas</button>
-        <button type="button" class:on={grouping === "folders"} title={helpText("Folders")} aria-describedby="help-folders" onclick={() => (grouping = "folders")}>Folders</button>
+        <button
+          type="button"
+          class:on={grouping === "areas"}
+          title={helpText("areas")}
+          aria-describedby="help-areas"
+          onclick={() => (grouping = "areas")}
+        >{tBrain("areas")}</button>
+        <button
+          type="button"
+          class:on={grouping === "folders"}
+          title={helpText("folders")}
+          aria-describedby="help-folders"
+          onclick={() => (grouping = "folders")}
+        >{tBrain("folders")}</button>
       </div>
     </div>
     <div class="group search">
       <input
         type="search"
         class="find"
-        placeholder="Find notes or #tag"
-        aria-label="Find notes by name or #tag"
+        placeholder={tBrain("findPlaceholder")}
+        aria-label={tBrain("findLabel")}
         list="brain-tags"
         spellcheck="false"
         bind:value={filter}
@@ -669,25 +699,37 @@
         {#each allTags as tag (tag)}<option value="#{tag}"></option>{/each}
       </datalist>
       {#if filterHits}
-        <span class="label">{filterHits.size} {filterHits.size === 1 ? "match" : "matches"}</span>
+        <span class="label">{tBrain("matches", { n: filterHits.size })}</span>
       {/if}
     </div>
     <div class="row">
-      <button type="button" title="Replay the vault's life from its first note, in twenty seconds" disabled={!span || growth !== null} onclick={startGrowth}>▶ How your vault grew</button>
-      <button type="button" title="Reset zoom and pan" onclick={resetView}>Reset view</button>
-      <button type="button" title="Reload the graph from the workspace" onclick={() => void load()}>Reload</button>
+      <button
+        type="button"
+        title={tBrain("replayTitle")}
+        disabled={!span || growth !== null}
+        onclick={startGrowth}
+      >{tBrain("replayButton")}</button>
+      <button type="button" title={tBrain("resetViewTitle")} onclick={resetView}>{tBrain("resetView")}</button>
+      <button type="button" title={tBrain("reloadTitle")} onclick={() => void load()}>{tBrain("reload")}</button>
     </div>
-    <button type="button" class="help-btn" class:on={helpOpen} title="What do the options mean?" aria-label="Help" onclick={() => (helpOpen = !helpOpen)}>?</button>
+    <button
+      type="button"
+      class="help-btn"
+      class:on={helpOpen}
+      title={tBrain("helpTitle")}
+      aria-label={tBrain("help")}
+      onclick={() => (helpOpen = !helpOpen)}
+    >?</button>
     {#if model}
-      <p class="stats">{model.totalFiles} notes · {model.areas.length} {grouping} · {model.edges.length} links{model.truncated ? " · truncated" : ""}</p>
+      <p class="stats">{stats(model)}</p>
     {/if}
     {#if helpOpen}
       <div class="help">
         <Legend {layout} />
         <dl class="help-terms">
-          {#each HELP as [term, text] (term)}
-            <dt id="help-{term.toLowerCase().replace(' ', '-')}">{term}</dt>
-            <dd>{text}</dd>
+          {#each HELP as h (h.id)}
+            <dt id="help-{h.id}">{h.term()}</dt>
+            <dd>{h.text()}</dd>
           {/each}
         </dl>
       </div>
@@ -713,29 +755,36 @@
       <div class="detail-scroll">
       <header class="detail-head">
         <div class="eyebrow">
-          <span class="tag kind">{selected.kind}</span>
+          <span class="tag kind">{kindName(selected.kind)}</span>
           {#if selected.area && selected.kind !== "area"}
             <button type="button" class="tag area" style:--chip={selected.color} onclick={() => areaNode && goTo(areaNode)}>{selected.area}</button>
           {/if}
         </div>
         <h2>{selected.label}</h2>
-        <button type="button" class="close" aria-label="Deselect" onclick={() => select(null)}>×</button>
+        <button type="button" class="close" aria-label={tBrain("deselect")} onclick={() => select(null)}>×</button>
       </header>
 
       {#if selected.kind === "file" || selected.kind === "hub"}
         <dl class="meta">
           {#if folderOf && folderOf !== selected.area}
-            <dt>Folder</dt><dd><button type="button" class="linkish" onclick={openFolder}>{folderOf}</button></dd>
+            <dt>{tBrain("folder")}</dt>
+            <dd><button type="button" class="linkish" onclick={openFolder}>{folderOf}</button></dd>
           {/if}
-          <dt>Size</dt><dd>{formatBytes(selected.bytes)}</dd>
-          <dt>Modified</dt><dd>{relativeTime(selected.modified)} <span class="dim">· {absoluteTime(selected.modified)}</span></dd>
-          <dt>Path</dt><dd class="mono">{selected.path}</dd>
-          <dt>Links</dt><dd>{linksOut.length} out · {linksIn.length} in</dd>
+          <dt>{tBrain("size")}</dt><dd>{formatBytes(selected.bytes)}</dd>
+          <dt>{tBrain("modified")}</dt>
+          <dd>{relativeTime(selected.modified)} <span class="dim">· {absoluteTime(selected.modified)}</span></dd>
+          <dt>{tBrain("path")}</dt><dd class="mono">{selected.path}</dd>
+          <dt>{tBrain("linksTerm")}</dt><dd>{tBrain("linksInOut", { out: linksOut.length, in: linksIn.length })}</dd>
           {#if selected.tags && selected.tags.length > 0}
-            <dt>Tags</dt>
+            <dt>{tBrain("tags")}</dt>
             <dd class="chips">
               {#each selected.tags as tag (tag)}
-                <button type="button" class="chip" title="Show the notes tagged #{tag}" onclick={() => filterByTag(tag)}>#{tag}</button>
+                <button
+                  type="button"
+                  class="chip"
+                  title={tBrain("showTagged", { tag })}
+                  onclick={() => filterByTag(tag)}
+                >#{tag}</button>
               {/each}
             </dd>
           {/if}
@@ -746,29 +795,43 @@
           {/key}
         </div>
         <div class="actions">
-          <button type="button" class="primary" onclick={() => viewFile(selected!.path!)}>Open</button>
-          <button type="button" onclick={() => copyPath(selected!.path!)}>Copy path</button>
-          <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
+          <button type="button" class="primary" onclick={() => viewFile(selected!.path!)}>{tBrain("open")}</button>
+          <button type="button" onclick={() => copyPath(selected!.path!)}>{tBrain("copyPath")}</button>
+          <button type="button" onclick={() => flyTo(selected!)}>{tBrain("flyTo")}</button>
           {#if confirmDelete}
             <button type="button" class="danger" disabled={deleting} onclick={() => deleteFile(selected!.path!)}>
-              {deleting ? "Deleting…" : "Really delete"}
+              {deleting ? tBrain("deleting") : tBrain("reallyDelete")}
             </button>
-            <button type="button" disabled={deleting} onclick={() => (confirmDelete = false)}>Cancel</button>
+            <button
+              type="button"
+              disabled={deleting}
+              onclick={() => (confirmDelete = false)}
+            >{tBrain("cancel")}</button>
           {:else}
-            <button type="button" class="danger-ghost" onclick={() => (confirmDelete = true)}>Delete</button>
+            <button
+              type="button"
+              class="danger-ghost"
+              onclick={() => (confirmDelete = true)}
+            >{tBrain("delete")}</button>
           {/if}
         </div>
       {:else if selected.kind === "area"}
         <dl class="meta">
-          <dt>Notes</dt><dd>{areaFiles.length}</dd>
-          <dt>Folders</dt><dd>{areaGroups.length}</dd>
+          <dt>{tBrain("notesTerm")}</dt><dd>{areaFiles.length}</dd>
+          <dt>{tBrain("foldersTerm")}</dt><dd>{areaGroups.length}</dd>
         </dl>
         <div class="actions">
-          <button type="button" class="primary" onclick={() => flyTo(selected!)}>Fly to</button>
+          <button type="button" class="primary" onclick={() => flyTo(selected!)}>{tBrain("flyTo")}</button>
         </div>
-        <h3>Notes in this area ({areaFiles.length})</h3>
+        <h3>{tBrain("notesInArea", { n: areaFiles.length })}</h3>
         {#if areaFiles.length > 30}
-          <input type="search" class="filter" placeholder="Filter…" aria-label="Filter notes" bind:value={areaFilter} />
+          <input
+            type="search"
+            class="filter"
+            placeholder={tBrain("filterPlaceholder")}
+            aria-label={tBrain("filterLabel")}
+            bind:value={areaFilter}
+          />
         {/if}
         <div class="area-list">
           {#each areaGroups as [sub, nodes] (sub)}
@@ -788,21 +851,26 @@
       {:else if selected.kind === "skill"}
         <p class="body">{graph?.skills.find((s) => `/${s.name}` === selected!.label)?.description ?? ""}</p>
         <div class="actions">
-          <button type="button" class="primary" disabled={busy} onclick={() => runSkill(selected!.label.slice(1))}>▶ Run</button>
-          <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
+          <button
+            type="button"
+            class="primary"
+            disabled={busy}
+            onclick={() => runSkill(selected!.label.slice(1))}
+          >{tBrain("runSkill")}</button>
+          <button type="button" onclick={() => flyTo(selected!)}>{tBrain("flyTo")}</button>
         </div>
       {/if}
 
       {#if selected.kind !== "area"}
-        <h3>Links to ({linksOut.length})</h3>
-        {#if linksOut.length === 0}<p class="dim small">No links yet.</p>{/if}
+        <h3>{tBrain("linksTo", { n: linksOut.length })}</h3>
+        {#if linksOut.length === 0}<p class="dim small">{tBrain("noLinks")}</p>{/if}
         <ul class="links">
           {#each linksOut as l (l.node.id)}
             <li><button type="button" class="link" onclick={() => goTo(l.node)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>
           {/each}
         </ul>
-        <h3>Linked from ({linksIn.length})</h3>
-        {#if linksIn.length === 0}<p class="dim small">No links yet.</p>{/if}
+        <h3>{tBrain("linkedFrom", { n: linksIn.length })}</h3>
+        {#if linksIn.length === 0}<p class="dim small">{tBrain("noLinks")}</p>{/if}
         <ul class="links">
           {#each linksIn as l (l.node.id)}
             <li><button type="button" class="link" onclick={() => goTo(l.node)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>

@@ -29,6 +29,11 @@ export function listModules(): ModuleDefinition[] {
   return [...registry.values()];
 }
 
+/** A module's name as the owner reads it, in the current language — call it where it is drawn, never keep it. */
+export function moduleTitle(def: Pick<ModuleDefinition, "title" | "label">): string {
+  return def.label?.() ?? def.title;
+}
+
 /**
  * The shell's own actions, reached like a module instance's under the id
  * `shell` — for what belongs to no tile: opening a file for the owner in the

@@ -23,6 +23,7 @@ import { ashAt, branchGrowth, flash, layoutGrowth, sprout, type GrowthLayout, ty
 import { APP_RING, approachAngle, bornOf, BUNDLE, EXPANDED_GROUP_RING, orbitRestAngle, RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 import { cellKey, NEIGHBOURS, pixelToAxial } from "./territory";
+import { tBrain } from "../i18n/brain";
 
 export type RenderMode = "bundle" | "orbit" | "map" | "hex";
 
@@ -302,8 +303,6 @@ export class GraphRenderer {
   /** Where the countries' names were drawn in the last frame, for the hit test (they lie on top of the fields). */
   private mapLabels: { node: GraphNode; x: number; y: number; w: number; h: number }[] = [];
   private rgbCache = new Map<string, Rgb>();
-  /** Hex's captions over the skills' ring and the notes' band. */
-  captions = { skills: "SKILLS", memory: "MEMORY" };
   /** In-flight `flyTo` pan/zoom tween, consumed by `frame`. */
   private flyAnim: { fromX: number; fromY: number; fromZoom: number; toX: number; toY: number; toZoom: number; start: number; duration: number } | null = null;
   /** The node `flyTo` last landed on, pulsed for a moment so it's easy to
@@ -623,8 +622,8 @@ export class GraphRenderer {
         ctx.globalAlpha = 0.9;
         ctx.fillText(label, cx, cy - radius - 6);
       };
-      cap(this.captions.skills, R * RING.skills + 10, this.accentColor, Math.max(10, Math.min(15, R * 0.05)));
-      cap(this.captions.memory, R * RING.filesOuter + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
+      cap(tBrain("captionSkills"), R * RING.skills + 10, this.accentColor, Math.max(10, Math.min(15, R * 0.05)));
+      cap(tBrain("captionMemory"), R * RING.filesOuter + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
       ctx.globalAlpha = 1;
     }
 
@@ -2245,8 +2244,10 @@ export class GraphRenderer {
   private badgeFor(n: GraphNode, _t: number): string | null {
     if (n.kind === "file" && n.modified) {
       const days = Math.floor((Date.now() - Date.parse(n.modified)) / 86_400_000);
-      if (days < 1) return "NEW";
-      return days < 30 ? `${days}D` : days < 365 ? `${Math.floor(days / 30)}M` : `${Math.floor(days / 365)}Y`;
+      if (days < 1) return tBrain("ageNew");
+      if (days < 30) return tBrain("ageDays", { n: days });
+      if (days < 365) return tBrain("ageMonths", { n: Math.floor(days / 30) });
+      return tBrain("ageYears", { n: Math.floor(days / 365) });
     }
     return null;
   }

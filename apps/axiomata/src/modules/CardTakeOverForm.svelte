@@ -15,6 +15,8 @@
   import { projectRootId } from "../fileapp/projectModel";
   import { defaultTakeOverMessage, unpushedNote } from "../ide/cardStart";
   import { refreshAgents, session } from "../ide/projectSession";
+  import { tFlow } from "../i18n/flow";
+  import { tKanban as t } from "../i18n/kanban";
 
   let { card, onDone }: { card: BoardCard; onDone: () => void } = $props();
 
@@ -52,11 +54,11 @@
       void refreshAgents().catch(() => {});
       toast(
         result.already_on_base
-          ? `Card #${card.id} closed: its work was already on the main line (${result.commit.slice(0, 8)}), so nothing was committed.`
-          : `Card #${card.id} was taken over (${result.commit.slice(0, 8)}).`,
+          ? t("alreadyOnBase", { id: card.id, commit: result.commit.slice(0, 8) })
+          : t("takenOver", { id: card.id, commit: result.commit.slice(0, 8) }),
         "info",
       );
-      for (const note of result.cleanup) toast(`Not cleaned up: ${note}`, "warning");
+      for (const note of result.cleanup) toast(tFlow("notCleaned", { note }), "warning");
       await sayWhatIsNotPushed(result.project_id);
       onDone();
     } catch (err) {
@@ -75,23 +77,19 @@
   }}
 >
   <label>
-    Commit-Nachricht
-    <input bind:value={message} aria-label="Commit message" />
+    {t("commitMessage")}
+    <input bind:value={message} aria-label={t("commitMessage")} />
   </label>
-  <p class="hint">
-    Übernommen wird genau der Stand, den der Reviewer gesehen hat, als ein Commit auf dem Hauptzweig des Projekts.
-    Es wird nichts gepusht.
-  </p>
+  <p class="hint">{t("takeOverHint")}</p>
   {#if conflict.length > 0}
     <p class="error" role="alert">
-      Konflikt, nichts wurde verändert. Diese Dateien sind in Konflikt:
-      {conflict.join(", ")}
+      {t("takeOverConflict", { files: conflict.join(", ") })}
     </p>
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
-    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? "Taking over …" : "Take over"}</button>
-    <button class="ax-btn" type="button" onclick={onDone}>Cancel</button>
+    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? t("takingOver") : t("takeOver")}</button>
+    <button class="ax-btn" type="button" onclick={onDone}>{tFlow("cancel")}</button>
   </div>
 </form>
 

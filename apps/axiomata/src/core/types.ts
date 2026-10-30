@@ -61,7 +61,10 @@ export interface ModuleContext {
 export interface ModuleDefinition {
   /** Stable id, e.g. "skills-deck". */
   type: string;
+  /** The English name: what the agent's manifest carries (`core/registry.ts`), never shown to the owner as such. */
   title: string;
+  /** The name in the owner's language, read where it is drawn (`moduleTitle`); `title` when unset. */
+  label?: () => string;
   /** Inline SVG markup (no `<img>` — honours the `img-src` CSP). */
   icon: string;
   /** Front face; mounted with `{ ctx }`. */

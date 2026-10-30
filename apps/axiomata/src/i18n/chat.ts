@@ -12,7 +12,8 @@ const en = {
   cmdClear: "Start a new conversation",
   cmdCompact: "Summarise the conversation so far to free context",
   cmdModel: "Show or change this conversation's model",
-  cmdEffort: "Show or change how hard Glut's model reasons in this conversation",
+  cmdEffort:
+    "Show or change how hard Glut's model reasons in this conversation",
   cmdPlan: "Plan mode: the agent reads and plans, changes nothing",
   cmdBuild: "Build mode: the agent may carry the plan out",
   cmdSkills: "List the skills, or run one",
@@ -40,7 +41,8 @@ const en = {
   whileBusy: "The agent is working — try again when it is done.",
   movedTo: "/{name} is now {now}",
   didYouMean: "unknown command /{name} — did you mean {near}?",
-  unknownHint: "unknown command /{name} — /help lists them; /do <text> sends an instruction",
+  unknownHint:
+    "unknown command /{name} — /help lists them; /do <text> sends an instruction",
   handbookUnreadable: "The handbook could not be read: {error}",
   handbookOpened: "Handbook: {title}.",
   noHandbookPage: "No handbook page for “{topic}” — the list shows the pages.",
@@ -59,7 +61,8 @@ const en = {
   notCompacted: "Not compacted.",
   noEarlier: "No earlier conversations.",
   noSuchConversation: "no earlier conversation {id} — /resume lists them",
-  resumed: "Resumed “{title}” — its earlier messages are not shown here; the agent has them.",
+  resumed:
+    "Resumed “{title}” — its earlier messages are not shown here; the agent has them.",
   nothingToUndo: "Nothing to undo: no conversation yet.",
   undone: "Undone.",
   noTurns: "No turns in this conversation yet.",
@@ -123,7 +126,8 @@ const en = {
   effortTurn: "{level} for this conversation — default: {fallback}",
   effortConfiguredIs: "the configured {level}",
   effortSettings: "{level}, the configured chat effort",
-  effortUnlisted: "the model does not list {level} — the provider takes a near level or refuses it",
+  effortUnlisted:
+    "the model does not list {level} — the provider takes a near level or refuses it",
   effortAlways: "always reasons",
   effortCatalogSilent: "the catalog does not say which levels the model takes",
 
@@ -132,21 +136,55 @@ const en = {
   placeholderBusy: "Agent is working…",
   inputLabel: "Assistant input",
   commandsLabel: "Commands",
-  planTitle: "Plan mode: the agent reads and plans, changes nothing — click (or ⇧⇥ in the field) to let it build",
-  buildTitle: "Build mode: the agent may change things — click (or ⇧⇥ in the field) to only plan",
+  planTitle:
+    "Plan mode: the agent reads and plans, changes nothing — click (or ⇧⇥ in the field) to let it build",
+  buildTitle:
+    "Build mode: the agent may change things — click (or ⇧⇥ in the field) to only plan",
   plan: "Plan",
   build: "Build",
   newSession: "New session ({keys} in this field)",
   working: "working…",
-  messages: { one: "1 message in this conversation", other: "{n} messages in this conversation" },
+  messages: {
+    one: "1 message in this conversation",
+    other: "{n} messages in this conversation",
+  },
   showChat: "chat",
   hideChat: "hide chat",
-  turnStopped: "A chat turn stopped when the app did — open the chat to resume it.",
+  turnStopped:
+    "A chat turn stopped when the app did — open the chat to resume it.",
   effortFor: "Effort for this conversation",
-  effortTitle: "Effort: {explanation} — this conversation only; /effort lists the levels",
-  effortTitleNote: "Effort: {explanation} ({note}) — this conversation only; /effort lists the levels",
+  effortTitle:
+    "Effort: {explanation} — this conversation only; /effort lists the levels",
+  effortTitleNote:
+    "Effort: {explanation} ({note}) — this conversation only; /effort lists the levels",
   effortLabel: "Effort",
   notListed: "{level} (not listed)",
+
+  // The questions a chat action puts to the owner (`modules/chatActions.ts`); the agent reads the same text back.
+  askRunSkill: "Run the skill {name}",
+  askSkillWhere:
+    "Runs on {harness}; its instructions are ~/.axiomata/skills/{name}/SKILL.md.",
+  askCreateRoutine: "Create the routine “{name}” ({cron}) running {what}",
+  askReplaceRoutine:
+    "Replace routine #{id} “{old}” with the routine “{name}” ({cron}) running {what}",
+  askRunsSkill: "the skill {name}",
+  askRunsPromptBelow: "a prompt (below)",
+  askRunsPrompt: "the prompt “{prompt}”",
+  askPromptLine: "Prompt: {prompt}",
+  askReplaces: "It replaces: “{name}” ({cron}) running {what}.",
+  askStartCard: "Start card #{id} “{title}” as a plan in the project {project}",
+  askClose: "Close {title}",
+  askCloseLoses: "Closing it would lose {loss}.",
+  askOnYesFile: "On yes the panel itself asks you whether to save or discard.",
+  askOnYesKanban: "On yes the panel closes and that text is gone.",
+  askOnYesTerminal: "On yes the tile is removed and the program ends with it.",
+  askNewNote: "a new note",
+  askKanbanPanel: "Kanban ({path})",
+  askKanbanBoard: "Kanban (board)",
+  askTerminalTile: "{module} tile",
+  askTerminalTileIn: "{module} tile in {cwd}",
+  askLossProgram: "the running program “{program}”, which closing ends",
+  askLossUnknown: "whatever runs in it (it could not be checked)",
 };
 
 export const tChat = texts("chat", en, {
@@ -154,7 +192,8 @@ export const tChat = texts("chat", en, {
   cmdClear: "Ein neues Gespräch beginnen",
   cmdCompact: "Das bisherige Gespräch zusammenfassen und Platz schaffen",
   cmdModel: "Das Modell dieses Gesprächs zeigen oder wechseln",
-  cmdEffort: "Zeigen oder ändern, wie gründlich Gluts Modell in diesem Gespräch nachdenkt",
+  cmdEffort:
+    "Zeigen oder ändern, wie gründlich Gluts Modell in diesem Gespräch nachdenkt",
   cmdPlan: "Plan-Modus: der Agent liest und plant, ändert nichts",
   cmdBuild: "Build-Modus: der Agent darf den Plan umsetzen",
   cmdSkills: "Die Skills zeigen oder einen starten",
@@ -181,15 +220,19 @@ export const tChat = texts("chat", en, {
   whileBusy: "Der Agent arbeitet gerade — versuche es, wenn er fertig ist.",
   movedTo: "/{name} heißt jetzt {now}",
   didYouMean: "Unbekanntes Kommando /{name} — meintest du {near}?",
-  unknownHint: "Unbekanntes Kommando /{name} — /help zeigt alle; /do <Text> schickt eine Anweisung",
+  unknownHint:
+    "Unbekanntes Kommando /{name} — /help zeigt alle; /do <Text> schickt eine Anweisung",
   handbookUnreadable: "Das Handbuch ließ sich nicht lesen: {error}",
   handbookOpened: "Handbuch: {title}.",
-  noHandbookPage: "Keine Handbuchseite zu „{topic}“ — die Liste zeigt die Seiten.",
+  noHandbookPage:
+    "Keine Handbuchseite zu „{topic}“ — die Liste zeigt die Seiten.",
   modelConfigured: "Modell: {model} (eingestellt).",
   notModelId: "„{id}“ ist keine Modell-ID",
-  notAmong: "{id} gehört nicht zu den Modellen von {provider} — /model zeigt sie",
+  notAmong:
+    "{id} gehört nicht zu den Modellen von {provider} — /model zeigt sie",
   modelSet: "Modell für dieses Gespräch: {model}.",
-  effortGlutOnly: "/effort gehört zu Glut: der Chat läuft auf einem anderen Harness.",
+  effortGlutOnly:
+    "/effort gehört zu Glut: der Chat läuft auf einem anderen Harness.",
   effortConfigured: "Effort: {level} (eingestellt).",
   effortBack: "Effort: zurück auf {label}.",
   notEffortLevel: "„{level}“ ist keine Effort-Stufe — {levels}",
@@ -200,7 +243,8 @@ export const tChat = texts("chat", en, {
   notCompacted: "Nicht zusammengefasst.",
   noEarlier: "Keine früheren Gespräche.",
   noSuchConversation: "Kein früheres Gespräch {id} — /resume zeigt sie",
-  resumed: "„{title}“ fortgesetzt — die früheren Nachrichten stehen hier nicht, der Agent kennt sie.",
+  resumed:
+    "„{title}“ fortgesetzt — die früheren Nachrichten stehen hier nicht, der Agent kennt sie.",
   nothingToUndo: "Nichts zurückzunehmen: noch kein Gespräch.",
   undone: "Zurückgenommen.",
   noTurns: "Noch keine Schritte in diesem Gespräch.",
@@ -210,7 +254,8 @@ export const tChat = texts("chat", en, {
   noTileMatches: "Keine Kachel passt zu „{key}“",
   removed: "{title} entfernt.",
   unknownTileType: "Unbekannte Kachel „{type}“ — Kacheln: {types}",
-  noTileOnCanvas: "Keine Kachel „{title}“ auf dem Canvas — erst /tile add {type}",
+  noTileOnCanvas:
+    "Keine Kachel „{title}“ auf dem Canvas — erst /tile add {type}",
   noActions: "keine",
   paramsJson: "Die Werte müssen JSON sein, zum Beispiel {example}",
   tileDone: "/tile {type} {action} erledigt.",
@@ -257,12 +302,15 @@ export const tChat = texts("chat", en, {
 
   effortDefault: "Standard",
   effortDefaultOf: "Standard ({level})",
-  effortGlutDefault: "Gluts eigene Einstellung, sonst der Standard des Modells ({level})",
-  effortProviderDefault: "Gluts eigene Einstellung, sonst der Standard des Anbieters",
+  effortGlutDefault:
+    "Gluts eigene Einstellung, sonst der Standard des Modells ({level})",
+  effortProviderDefault:
+    "Gluts eigene Einstellung, sonst der Standard des Anbieters",
   effortTurn: "{level} für dieses Gespräch — Standard: {fallback}",
   effortConfiguredIs: "das eingestellte {level}",
   effortSettings: "{level}, der eingestellte Chat-Effort",
-  effortUnlisted: "das Modell nennt {level} nicht — der Anbieter nimmt eine nahe Stufe oder lehnt ab",
+  effortUnlisted:
+    "das Modell nennt {level} nicht — der Anbieter nimmt eine nahe Stufe oder lehnt ab",
   effortAlways: "denkt immer nach",
   effortCatalogSilent: "der Katalog sagt nicht, welche Stufen das Modell kennt",
 
@@ -270,19 +318,53 @@ export const tChat = texts("chat", en, {
   placeholderBusy: "Der Agent arbeitet…",
   inputLabel: "Eingabe für den Assistenten",
   commandsLabel: "Kommandos",
-  planTitle: "Plan-Modus: der Agent liest und plant, ändert nichts — klicke (oder ⇧⇥ im Feld), damit er baut",
-  buildTitle: "Build-Modus: der Agent darf ändern — klicke (oder ⇧⇥ im Feld), damit er nur plant",
+  planTitle:
+    "Plan-Modus: der Agent liest und plant, ändert nichts — klicke (oder ⇧⇥ im Feld), damit er baut",
+  buildTitle:
+    "Build-Modus: der Agent darf ändern — klicke (oder ⇧⇥ im Feld), damit er nur plant",
   plan: "Plan",
   build: "Build",
   newSession: "Neues Gespräch ({keys} in diesem Feld)",
   working: "arbeitet…",
-  messages: { one: "1 Nachricht in diesem Gespräch", other: "{n} Nachrichten in diesem Gespräch" },
+  messages: {
+    one: "1 Nachricht in diesem Gespräch",
+    other: "{n} Nachrichten in diesem Gespräch",
+  },
   showChat: "Chat",
   hideChat: "Chat ausblenden",
-  turnStopped: "Ein Chat-Schritt brach ab, als die App beendet wurde — öffne den Chat, um ihn fortzusetzen.",
+  turnStopped:
+    "Ein Chat-Schritt brach ab, als die App beendet wurde — öffne den Chat, um ihn fortzusetzen.",
   effortFor: "Effort für dieses Gespräch",
-  effortTitle: "Effort: {explanation} — nur dieses Gespräch; /effort zeigt die Stufen",
-  effortTitleNote: "Effort: {explanation} ({note}) — nur dieses Gespräch; /effort zeigt die Stufen",
+  effortTitle:
+    "Effort: {explanation} — nur dieses Gespräch; /effort zeigt die Stufen",
+  effortTitleNote:
+    "Effort: {explanation} ({note}) — nur dieses Gespräch; /effort zeigt die Stufen",
   effortLabel: "Effort",
   notListed: "{level} (nicht genannt)",
+  askRunSkill: "Den Skill {name} starten",
+  askSkillWhere:
+    "Läuft auf {harness}; seine Anweisungen stehen in ~/.axiomata/skills/{name}/SKILL.md.",
+  askCreateRoutine: "Die Routine „{name}“ ({cron}) anlegen, sie startet {what}",
+  askReplaceRoutine:
+    "Routine #{id} „{old}“ ersetzen durch die Routine „{name}“ ({cron}), sie startet {what}",
+  askRunsSkill: "den Skill {name}",
+  askRunsPromptBelow: "einen Prompt (unten)",
+  askRunsPrompt: "den Prompt „{prompt}“",
+  askPromptLine: "Prompt: {prompt}",
+  askReplaces: "Sie ersetzt: „{name}“ ({cron}), die {what} startet.",
+  askStartCard: "Karte #{id} „{title}“ als Plan im Projekt {project} starten",
+  askClose: "{title} schließen",
+  askCloseLoses: "Beim Schließen ginge verloren: {loss}.",
+  askOnYesFile:
+    "Bei Ja fragt dich das Panel selbst, ob gespeichert oder verworfen wird.",
+  askOnYesKanban: "Bei Ja schließt das Panel, und dieser Text ist weg.",
+  askOnYesTerminal:
+    "Bei Ja wird die Kachel entfernt, und das Programm endet mit ihr.",
+  askNewNote: "eine neue Notiz",
+  askKanbanPanel: "Kanban ({path})",
+  askKanbanBoard: "Kanban (Board)",
+  askTerminalTile: "Kachel {module}",
+  askTerminalTileIn: "Kachel {module} in {cwd}",
+  askLossProgram: "das laufende Programm „{program}“, das beim Schließen endet",
+  askLossUnknown: "was darin läuft (es ließ sich nicht prüfen)",
 });

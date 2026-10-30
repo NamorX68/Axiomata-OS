@@ -13,6 +13,8 @@
   import { listRoles, type Role } from "../core/roster";
   import { listProjects } from "../ide/projects";
   import { engineCatalog, engineLine, refreshEngines } from "../ide/rosterStore";
+  import { tFlow } from "../i18n/flow";
+  import { tKanban as t } from "../i18n/kanban";
 
   let { card, onDone }: { card: BoardCard; onDone: () => void } = $props();
 
@@ -64,7 +66,7 @@
         projectId,
         engineId: engineId || null,
       });
-      toast(`Card #${card.id} runs in the session ${session.agent.name}.`, "info");
+      toast(t("startedInSession", { id: card.id, name: session.agent.name }), "info");
       emit("shell:agent", { projectId, agentId: session.agent.id });
       onDone();
     } catch (err) {
@@ -83,19 +85,23 @@
   }}
 >
   {#if projects.length === 0}
-    <p class="hint">There is no project the card could run in. Create one in the Studio.</p>
+    <p class="hint">{t("noProject")}</p>
   {:else}
     <label>
-      Projekt
-      <select bind:value={projectId} aria-label="Projekt">
+      {t("project")}
+      <select bind:value={projectId} aria-label={t("project")}>
         {#each projects as project (project.id)}<option value={project.id}>{project.name}</option>{/each}
       </select>
     </label>
     <label>
-      Engine
-      <select bind:value={engineId} aria-label="Engine">
+      {t("engine")}
+      <select bind:value={engineId} aria-label={t("engine")}>
         {#if ownEngine !== null}
-          <option value="">The role {roleName}'s own{ownEngineLabel ? ` (${ownEngineLabel})` : ""}</option>
+          <option value=""
+            >{ownEngineLabel
+              ? t("roleOwnEngineWith", { role: roleName, engine: ownEngineLabel })
+              : t("roleOwnEngine", { role: roleName })}</option
+          >
         {/if}
         {#each $engineCatalog as engine (engine.id)}
           <option value={engine.id}>{engine.label} — {engineLine(engine)}</option>
@@ -103,15 +109,15 @@
       </select>
     </label>
     {#if ownEngine === null && roles.length > 0}
-      <p class="hint">The role “{roleName}” names no engine — pick one.</p>
+      <p class="hint">{t("roleNamesNoEngine", { role: roleName })}</p>
     {/if}
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
     <button class="ax-btn primary" type="submit" disabled={busy || projectId === null}>
-      {busy ? "Starting …" : "Start"}
+      {busy ? t("starting") : t("start")}
     </button>
-    <button class="ax-btn" type="button" onclick={onDone}>Cancel</button>
+    <button class="ax-btn" type="button" onclick={onDone}>{tFlow("cancel")}</button>
   </div>
 </form>
 

@@ -20,7 +20,7 @@ import { listHandbook, openHandbook, pageForTopic, type HandbookEntry } from "./
 import { busy, newSession, planMode, send, sessionId, turnEffort, turnModel, turns } from "./chat";
 import { createInstance, destroyInstance } from "./lifecycle";
 import { loadModelCatalog, modelCatalog, providerOptions } from "./modelCatalog";
-import { getModule, invokeAction, listModules } from "./registry";
+import { getModule, invokeAction, listModules, moduleTitle } from "./registry";
 import { openFilePanel } from "./staging";
 import { instances } from "./stores";
 import { THEMES, applyTheme, isTheme } from "./themes";
@@ -305,6 +305,12 @@ async function helpTopic(topic: string): Promise<CommandResult> {
     return { ok: true, message: tChat("handbookOpened", { title }) };
   }
   return { ok: false, message: tChat("noHandbookPage", { topic }), panel: await helpList() };
+}
+
+/** A module type's name in the owner's language, the bare type when none is registered. */
+function titleOf(type: string): string {
+  const def = getModule(type);
+  return def ? moduleTitle(def) : type;
 }
 
 function listTypes(): string {
@@ -600,7 +606,7 @@ async function tile(args: string[]): Promise<CommandResult> {
       const type = rest[0] ?? "";
       const r = createInstance(type);
       return r.ok
-        ? { ok: true, message: tChat("added", { title: getModule(type)?.title ?? type }) }
+        ? { ok: true, message: tChat("added", { title: titleOf(type) }) }
         : { ok: false, message: r.reason };
     }
 
@@ -609,7 +615,7 @@ async function tile(args: string[]): Promise<CommandResult> {
       const hit = get(instances).find((i) => i.type === key || (key.length >= 4 && i.id.startsWith(key)));
       if (!hit) return { ok: false, message: tChat("noTileMatches", { key }) };
       destroyInstance(hit.id);
-      return { ok: true, message: tChat("removed", { title: getModule(hit.type)?.title ?? hit.type }) };
+      return { ok: true, message: tChat("removed", { title: titleOf(hit.type) }) };
     }
 
     default:
@@ -622,7 +628,7 @@ async function moduleAction(type: string, args: string[]): Promise<CommandResult
   const def = getModule(type);
   if (!def) return { ok: false, message: tChat("unknownTileType", { type, types: listTypes() }) };
   const inst = get(instances).find((i) => i.type === type);
-  if (!inst) return { ok: false, message: tChat("noTileOnCanvas", { title: def.title, type }) };
+  if (!inst) return { ok: false, message: tChat("noTileOnCanvas", { title: moduleTitle(def), type }) };
   const action = args[0];
   if (!action) {
     const names = (def.actions ?? []).map((a) => a.name).join(", ") || tChat("noActions");

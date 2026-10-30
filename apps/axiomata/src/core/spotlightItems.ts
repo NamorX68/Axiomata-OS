@@ -24,6 +24,8 @@ export type SpotlightAction =
 export interface ModuleLike {
   type: string;
   title: string;
+  /** The name in the owner's language (`core/registry.ts` `moduleTitle`). */
+  label?: () => string;
   stageOnly?: boolean;
   singleton?: boolean;
 }
@@ -75,7 +77,7 @@ export function moduleItems(modules: ModuleLike[], isPlaced: (type: string) => b
   return modules
     .filter((module) => !module.stageOnly && !(module.singleton && isPlaced(module.type)))
     .map((module) =>
-      item("module", module.type, module.title, { type: "module", moduleType: module.type }, {
+      item("module", module.type, module.label?.() ?? module.title, { type: "module", moduleType: module.type }, {
         subtitle: tShell("placeModule"),
       }),
     );

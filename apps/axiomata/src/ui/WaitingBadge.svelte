@@ -14,6 +14,7 @@
   import { badgeClick, placeList, waitedFor, type WaitingAgent } from "../core/agentWaiting";
   import { emit } from "../core/bus";
   import { pushClose } from "../core/closeStack";
+  import { tKanban as t } from "../i18n/kanban";
   import AskAnswer from "./AskAnswer.svelte";
   import { portal } from "./portal";
 
@@ -39,8 +40,8 @@
 
   const label = $derived(
     agents.length === 1
-      ? `${agents[0]?.name ?? "An agent"} is waiting for you`
-      : `${agents.length} agents are waiting for you`,
+      ? t("agentWaiting", { name: agents[0]?.name ?? t("anAgent") })
+      : t("agentsWaiting", { n: agents.length }),
   );
 
   function openAgent(agent: WaitingAgent): void {
@@ -134,9 +135,9 @@
         style:left={position ? `${position.left}px` : undefined}
         style:top={position ? `${position.top}px` : undefined}
         role="dialog"
-        aria-label="Agents waiting for you"
+        aria-label={t("agentsWaitingLabel")}
       >
-        <p class="head">Waiting for you</p>
+        <p class="head">{t("waitingForYou")}</p>
         <ul>
           {#each agents as agent (agent.agent_id)}
             <li>
@@ -150,14 +151,14 @@
               >
                 <span class="name">{agent.name}</span>
                 <span class="card">
-                  {agent.card_id !== null ? `#${agent.card_id} ${agent.card_title ?? ""}` : "no card"}
+                  {agent.card_id !== null ? `#${agent.card_id} ${agent.card_title ?? ""}` : t("noCard")}
                 </span>
                 <span class="since">{waitedFor(agent.since, now)}</span>
               </button>
               {#if agent.ask}
                 <div class="request"><AskAnswer agentId={agent.agent_id} ask={agent.ask} /></div>
               {:else if agent.reason === "plan_draft"}
-                <p class="note">waits for your answer on its plan</p>
+                <p class="note">{t("waitsOnPlan")}</p>
               {/if}
             </li>
           {/each}

@@ -7,6 +7,8 @@
 
 import { writable, type Writable } from "svelte/store";
 
+import { tKanban } from "../i18n/kanban";
+
 /** The event the backend sends with the whole new list. */
 export const AGENTS_WAITING = "agents:waiting";
 
@@ -114,9 +116,9 @@ export function waitedFor(since: string | null, now: number): string {
   const start = since === null ? Number.NaN : Date.parse(since);
   if (Number.isNaN(start)) return "";
   const minutes = Math.floor((now - start) / 60_000);
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes} min`;
-  return `${Math.floor(minutes / 60)} h`;
+  if (minutes < 1) return tKanban("waitedNow");
+  if (minutes < 60) return tKanban("waitedMinutes", { n: minutes });
+  return tKanban("waitedHours", { n: Math.floor(minutes / 60) });
 }
 
 /** A box on screen, in CSS pixels. */

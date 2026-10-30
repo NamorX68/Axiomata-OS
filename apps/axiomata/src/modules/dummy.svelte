@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ModuleContext } from "../core/types";
+  import { tCanvas } from "../i18n/canvas";
 
   // Scaffolding for step 2 — replaced by real modules in steps 8–10.
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -9,8 +10,8 @@
 </script>
 
 <div class="dummy" class:compact={$config.compact === true}>
-  <p>dummy module · {ctx.instanceId.slice(0, 8)}</p>
-  <p class="cfg">compact: {$config.compact === true ? "on" : "off"}</p>
+  <p>{tCanvas("dummyModule", { id: ctx.instanceId.slice(0, 8) })}</p>
+  <p class="cfg">{tCanvas("dummyCompact", { state: $config.compact === true ? tCanvas("on") : tCanvas("off") })}</p>
 </div>
 
 <style>

@@ -1,8 +1,9 @@
 /**
  * The texts of the app shell: the dock and its heartbeat (`shell/Dock.svelte`, `shell/Heartbeat.svelte`), the ⌘K
  * spotlight (`shell/Spotlight.svelte`, `core/spotlight.ts`, `core/spotlightItems.ts`), the chat panel and the chat's
- * questions, the module and theme pickers, the handbook panel and the toasts. Module titles, theme names, skill and
- * file names come from data or their own definitions and stay as they are (`docs/plans/i18n.md`, Q13).
+ * questions, the module and theme pickers, the handbook panel and the toasts. Module titles come from each module's
+ * `label` (`core/registry.ts` `moduleTitle`); theme names, skill and file names are names or data and stay as they
+ * are (`docs/plans/i18n.md`, Q13).
  */
 
 import { texts } from "./texts";
@@ -26,7 +27,10 @@ const en = {
 
   // The heartbeat and the tank.
   now: "now",
-  todayStrip: { one: "Today's work: 1 run or session", other: "Today's work: {n} runs and sessions" },
+  todayStrip: {
+    one: "Today's work: 1 run or session",
+    other: "Today's work: {n} runs and sessions",
+  },
   spentNoCap: "Spent today: {amount}, no daily limit",
   spentOfCap: "Spent today: {amount} of {cap}",
   todaysWork: "Today's work",
@@ -126,7 +130,10 @@ export const tShell = texts("shell", en, {
   settingsKeys: "Einstellungen ({keys})",
 
   now: "jetzt",
-  todayStrip: { one: "Heute: 1 Lauf oder Sitzung", other: "Heute: {n} Läufe und Sitzungen" },
+  todayStrip: {
+    one: "Heute: 1 Lauf oder Sitzung",
+    other: "Heute: {n} Läufe und Sitzungen",
+  },
   spentNoCap: "Heute ausgegeben: {amount}, keine Tagesgrenze",
   spentOfCap: "Heute ausgegeben: {amount} von {cap}",
   todaysWork: "Heute erledigt",

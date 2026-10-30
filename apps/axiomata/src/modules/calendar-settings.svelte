@@ -2,6 +2,7 @@
   import { CALENDAR_SKILL_NAME } from "../core/calendar";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
   import SkillNameField from "./SkillNameField.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -25,12 +26,12 @@
 
 <div class="settings">
   <p class="muted">
-    Currently calling <code>{skillName}</code>.
+    {tModules("currentlyCallingBefore")}<code>{skillName}</code>{tModules("currentlyCallingAfter")}
   </p>
   <SkillNameField {ctx} defaultName={CALENDAR_SKILL_NAME} />
 
   <label class="check">
-    Tage in der Agenda
+    {tModules("agendaDays")}
     <input
       type="number"
       min="1"
@@ -41,18 +42,18 @@
   </label>
 
   <label class="check">
-    Clock next to the calendar
+    {tModules("clockNext")}
     <input type="checkbox" checked={showClock} onchange={(e) => set("showClock", e.currentTarget.checked)} />
   </label>
   {#if showClock}
-    <div class="radios" role="radiogroup" aria-label="Clock style">
+    <div class="radios" role="radiogroup" aria-label={tModules("clockStyle")}>
       <label>
         <input
           type="radio"
           name="clockStyle-{ctx.instanceId}"
           checked={clockStyle === "digital"}
           onchange={() => set("clockStyle", "digital")}
-        /> Digital
+        /> {tModules("clockDigital")}
       </label>
       <label>
         <input
@@ -60,7 +61,7 @@
           name="clockStyle-{ctx.instanceId}"
           checked={clockStyle === "arc"}
           onchange={() => set("clockStyle", "arc")}
-        /> Day arc
+        /> {tModules("clockArc")}
       </label>
     </div>
   {/if}

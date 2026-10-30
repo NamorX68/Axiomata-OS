@@ -43,6 +43,7 @@ import { emit, on } from "./core/bus";
   import Ignition from "./shell/Ignition.svelte";
   import Sounds from "./shell/Sounds.svelte";
   import { focusMode, toggleFocus } from "./core/focusMode";
+  import { tCanvas } from "./i18n/canvas";
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
@@ -200,10 +201,10 @@ import { emit, on } from "./core/bus";
       listenBackend<{ cardId: number; projectId: number; agentId: number }>("card:review-started", (started) => {
         requestAgent({ projectId: started.projectId, agentId: started.agentId, background: true });
         ideStarted = true;
-        toast(`Card #${started.cardId}: a reviewer is checking it (Studio, Agents).`, "info");
+        toast(tCanvas("reviewStarted", { id: started.cardId }), "info");
       }),
       listenBackend<{ cardId: number; reason: string }>("card:review-blocked", (blocked) => {
-        toast(`Card #${blocked.cardId} waits for a review: ${blocked.reason}`, "warning");
+        toast(tCanvas("reviewBlocked", { id: blocked.cardId, reason: blocked.reason }), "warning");
       }),
       // A plan that runs by itself did something (A2A CP-A8): a started card's pane opens in the background — opening it
       // is what starts the harness —, the panes of integrated cards close, and what needs the owner is said.
@@ -226,8 +227,12 @@ import { emit, on } from "./core/bus";
       listenBackend<{ cardId: number | null; planId: number | null; agentName: string; reason: string }>(
         "card:limit-reached",
         (stopped) => {
-          const what = stopped.cardId !== null ? `Card #${stopped.cardId}` : `Plan #${stopped.planId}`;
-          toast(`${what}: ${stopped.agentName} was stopped at the limit (${stopped.reason}).`, "warning");
+          const params = { agent: stopped.agentName, reason: stopped.reason };
+          const text =
+            stopped.cardId !== null
+              ? tCanvas("limitCard", { id: stopped.cardId, ...params })
+              : tCanvas("limitPlan", { id: stopped.planId ?? "?", ...params });
+          toast(text, "warning");
         },
       ),
     ];

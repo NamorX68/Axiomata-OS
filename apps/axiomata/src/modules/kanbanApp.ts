@@ -7,6 +7,7 @@ import { invokeBackend as invoke } from "../core/backend";
 import { emit } from "../core/bus";
 import { openStaged } from "../core/staging";
 import { toast } from "../core/toast";
+import { tKanban } from "../i18n/kanban";
 import { lastBoard } from "./kanbanPrefs";
 
 /** The window the board opens in — its own size key, so a single card's panel does not inherit it. */
@@ -48,7 +49,7 @@ export async function openKanban(target: { boardId?: number; cardId?: number } =
     boards = await invoke<{ id: number }[]>("list_boards");
   } catch (err) {
     // Opening on "no board" because the list failed would offer to create a board that probably exists.
-    toast(`Kanban could not load the boards: ${String(err)}`, "warning");
+    toast(tKanban("loadBoardsFailed", { error: String(err) }), "warning");
     return;
   }
   const boardId = target.boardId ?? boardToOpen(boards, lastBoard());

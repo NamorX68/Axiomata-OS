@@ -19,7 +19,9 @@ export interface Plural {
 export type Text = string | Plural;
 
 /** The German catalog's shape: every English key, a plain text where English has one, a plural where it has one. */
-export type Shape<E extends Record<string, Text>> = { readonly [K in keyof E]: E[K] extends string ? string : Plural };
+export type Shape<E extends Record<string, Text>> = {
+  readonly [K in keyof E]: E[K] extends string ? string : Plural;
+};
 
 /** The values a text names. */
 export type Params = Readonly<Record<string, string | number>>;
@@ -42,8 +44,12 @@ export function catalogs(): readonly Registered[] {
 
 /** Fills `{name}` from `params`; a name without a value stays as it is, so a missing value shows, never vanishes. */
 export function fill(template: string, params: Params = {}): string {
-  return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (whole, name: string) =>
-    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : whole,
+  return template.replace(
+    /\{([a-zA-Z][a-zA-Z0-9_]*)\}/g,
+    (whole, name: string) =>
+      Object.prototype.hasOwnProperty.call(params, name)
+        ? String(params[name])
+        : whole,
   );
 }
 
@@ -66,7 +72,11 @@ export function textIn<E extends Record<string, Text>>(
 }
 
 /** Makes an area's catalog and its lookup. */
-export function texts<E extends Record<string, Text>>(area: string, en: E, de: Shape<E>): Translate<keyof E & string> {
+export function texts<E extends Record<string, Text>>(
+  area: string,
+  en: E,
+  de: Shape<E>,
+): Translate<keyof E & string> {
   registry.push({ area, en, de });
   return (key, params) => textIn(en, de, lang(), key, params);
 }

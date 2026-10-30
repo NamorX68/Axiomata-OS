@@ -1,103 +1,26 @@
 /**
  * The parts of the app already in two languages show no text of their own (`docs/plans/i18n.md`, Q5): every word a
- * converted component draws comes from a catalog. A step of the plan adds its files to `CONVERTED`; a text written
- * straight into one of them fails here instead of staying English unnoticed.
+ * component draws comes from a catalog — since I7 every component of the app; one that must show text of its own is
+ * named in `EXEMPT` with the reason. A text written straight into the markup fails here instead of staying English.
  */
 
 import { describe, expect, it } from "vitest";
 
-/** Every component's source, read on demand: only the converted ones are loaded. */
-const SOURCES = import.meta.glob<string>("../**/*.svelte", { query: "?raw", import: "default" });
+/** Every component's source, read on demand. */
+const SOURCES = import.meta.glob<string>("../**/*.svelte", {
+  query: "?raw",
+  import: "default",
+});
 
-/** The converted components, relative to `src/`. */
-const CONVERTED = [
-  "shell/LanguageSetting.svelte",
-  "shell/AssistantBar.svelte",
-  "shell/SlashPanel.svelte",
-  "shell/EffortSwitch.svelte",
-  "shell/Settings.svelte",
-  "shell/TagsSettings.svelte",
-  "shell/VaultTagging.svelte",
-  "shell/StorageSettings.svelte",
-  "shell/Dock.svelte",
-  "shell/Spotlight.svelte",
-  "shell/Heartbeat.svelte",
-  "shell/ChatPanel.svelte",
-  "shell/ModulePicker.svelte",
-  "shell/Sounds.svelte",
-  "shell/HandbookPanel.svelte",
-  "shell/ChatAsks.svelte",
-  "shell/Toasts.svelte",
-  "shell/ThemePicker.svelte",
-  "shell/Ignition.svelte",
-  "shell/Window.svelte",
-  "shell/StagingPanel.svelte",
-  "shell/StagingLayer.svelte",
-  "shell/Ambient.svelte",
-  "ide/panes/PlanPane.svelte",
-  "ide/panes/GraphPane.svelte",
-  "ide/panes/ProposalEditor.svelte",
-  "ide/panes/TeamPane.svelte",
-  "ide/SessionMail.svelte",
-  "ide/AgentTeamEntry.svelte",
-  "ide/AgentsPanel.svelte",
-  "ide/AgentStart.svelte",
-  "ide/ModelsSection.svelte",
-  "ide/RolesSection.svelte",
-  "ide/EnginesSection.svelte",
-  "ide/ProjectRolesNotice.svelte",
-  "ide/MigrationNotice.svelte",
-  "ide/RoleChip.svelte",
-  "ide/StatusDot.svelte",
-  "ide/panes/AgentPane.svelte",
-  "ide/panes/RosterPane.svelte",
-  "ide/panes/SessionPicker.svelte",
-  "ide/IdeView.svelte",
-  "ide/ActivityRail.svelte",
-  "ide/PaneGroup.svelte",
-  "ide/DockNode.svelte",
-  "ide/panes/PaneHost.svelte",
-  "ide/TasksPanel.svelte",
-  "ide/DebugPanel.svelte",
-  "ide/BreakpointEditor.svelte",
-  "ide/DiffView.svelte",
-  "ide/GitActionDialog.svelte",
-  "ide/panes/TaskPane.svelte",
-  "ide/panes/FilesPane.svelte",
-  "ide/panes/SearchPane.svelte",
-  "ide/panes/GitPane.svelte",
-  "ide/panes/FilePane.svelte",
-  "fileapp/FileEditor.svelte",
-  "fileapp/EditorSettingsPanel.svelte",
-  "fileapp/ProjectBar.svelte",
-  "fileapp/GitPanel.svelte",
-  "fileapp/FileTree.svelte",
-  "fileapp/FindBar.svelte",
-  "fileapp/ProjectSearch.svelte",
-  "fileapp/FilePanel.svelte",
-  "fileapp/OutlinePanel.svelte",
-  "fileapp/QuickOpen.svelte",
-  "fileapp/GitDiffView.svelte",
-  "fileapp/EditorSurface.svelte",
-  "fileapp/ProjectSidebar.svelte",
-  "fileapp/UnsavedQuestion.svelte",
-  "fileapp/Inspector.svelte",
-  "fileapp/Minimap.svelte",
-  "fileapp/MarkdownPreview.svelte",
-  "fileapp/FilePeek.svelte",
-  "fileapp/CodeActionPopup.svelte",
-  "fileapp/SvgPreview.svelte",
-  "fileapp/ShortcutsPanel.svelte",
-  "fileapp/ImageView.svelte",
-  "fileapp/CompletionPopup.svelte",
-  "fileapp/ViStatusLine.svelte",
-  "fileapp/HtmlPreview.svelte",
-  "fileapp/DiffPanes.svelte",
-];
+/**
+ * Every component is converted (I1–I7): none draws text of its own. A component that must, names why here.
+ */
+const EXEMPT: readonly string[] = [];
 
 /** Marks and names that may stand as they are: names stay English in both languages (Q13). */
-const NAMES = "Studio|Canvas|Flow|Kanban|Orbit|Skills?|Routines?|Master|Axiomata|Glut|[A-Z_]+\\.md|~/[\\w./-]*";
-const MARKS = `[\\s\\d·•…—–\\-+×/:,.()[\\]{}<>|?!%#@&*'"›‹→←↑↓−●]`;
+const NAMES =
+  "Studio|Canvas|Flow|Kanban|Orbit|Skills?|Routines?|Master|Axiomata|Glut|[A-Za-z_]+\\.md|url\\(#\\s*\\)|~/[\\w./-]*";
+const MARKS = `[\\s\\d·•…—–\\-+×/:,.()[\\]{}<>|?!%#@&*'"›‹→←↑↓−●✎✕✓↻↩★☆⌘⇧⌥⌃⏎]`;
 const ALLOWED = new RegExp(`^(?:${MARKS}|${NAMES})*$`);
 
 /** The markup of a component without its script, its style and its comments. */
@@ -109,7 +32,9 @@ function markup(source: string): string {
 }
 
 /** The `{expressions}` of a piece of markup, outermost first (braces counted, so `{() => {…}}` is one). */
-function expressions(html: string): { inner: string; start: number; end: number }[] {
+function expressions(
+  html: string,
+): { inner: string; start: number; end: number }[] {
   const found: { inner: string; start: number; end: number }[] = [];
   let depth = 0;
   let start = -1;
@@ -119,7 +44,8 @@ function expressions(html: string): { inner: string; start: number; end: number 
       depth++;
     } else if (html[i] === "}" && depth > 0) {
       depth--;
-      if (depth === 0) found.push({ inner: html.slice(start + 1, i), start, end: i + 1 });
+      if (depth === 0)
+        found.push({ inner: html.slice(start + 1, i), start, end: i + 1 });
     }
   }
   return found;
@@ -182,26 +108,51 @@ export function literalTexts(source: string): string[] {
   }
   plain += html.slice(at);
   for (const m of plain.matchAll(/>([^<>]+)</g)) keep(m[1] ?? "");
-  for (const m of plain.matchAll(/\b(?:label|title|aria-label|placeholder|alt)="([^"]*)"/g)) keep(m[1] ?? "");
+  for (const m of plain.matchAll(
+    /\b(?:label|title|aria-label|placeholder|alt)="([^"]*)"/g,
+  ))
+    keep(m[1] ?? "");
   return found;
 }
 
 describe("the converted components", () => {
   it("show no text of their own", async () => {
-    for (const file of CONVERTED) {
-      const load = SOURCES[`../${file}`];
-      expect(load, `${file} exists`).toBeDefined();
+    const files = Object.keys(SOURCES).filter(
+      (path) => !EXEMPT.includes(path.slice(3)),
+    );
+    expect(files.length).toBeGreaterThan(100);
+    const found: Record<string, string[]> = {};
+    for (const path of files) {
+      const load = SOURCES[path];
       if (!load) continue;
-      expect(literalTexts(await load()), file).toEqual([]);
+      const texts = literalTexts(await load());
+      if (texts.length > 0) found[path.slice(3)] = texts;
     }
+    expect(found).toEqual({});
   });
 
   it("would catch a text written straight into the markup", () => {
-    expect(literalTexts('<p>Hello</p><button title="Close">{t("x")}</button>')).toEqual(["Hello", "Close"]);
-    expect(literalTexts("<p>{t('x')} · Studio</p><script>const a = '<b>no</b>';</script>")).toEqual([]);
-    expect(literalTexts('<p>{busy ? "Starting now" : t("start")}</p>')).toEqual(["Starting now"]);
-    expect(literalTexts('<button title="Open {name}" onclick={() => go(a > b)}>{t("go")}</button>')).toEqual(["Open"]);
-    expect(literalTexts('<p>{formatDate(x, { dateStyle: "short" })}</p>')).toEqual([]);
-    expect(literalTexts('<b>{t("newSession", { keys: hint("⌘N", p) })}</b>')).toEqual([]);
+    expect(
+      literalTexts('<p>Hello</p><button title="Close">{t("x")}</button>'),
+    ).toEqual(["Hello", "Close"]);
+    expect(
+      literalTexts(
+        "<p>{t('x')} · Studio</p><script>const a = '<b>no</b>';</script>",
+      ),
+    ).toEqual([]);
+    expect(literalTexts('<p>{busy ? "Starting now" : t("start")}</p>')).toEqual(
+      ["Starting now"],
+    );
+    expect(
+      literalTexts(
+        '<button title="Open {name}" onclick={() => go(a > b)}>{t("go")}</button>',
+      ),
+    ).toEqual(["Open"]);
+    expect(
+      literalTexts('<p>{formatDate(x, { dateStyle: "short" })}</p>'),
+    ).toEqual([]);
+    expect(
+      literalTexts('<b>{t("newSession", { keys: hint("⌘N", p) })}</b>'),
+    ).toEqual([]);
   });
 });

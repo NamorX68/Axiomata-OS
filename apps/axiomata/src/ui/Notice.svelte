@@ -6,6 +6,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
+  import { tCanvas } from "../i18n/canvas";
   import IconButton from "./IconButton.svelte";
   import StatusMark from "./StatusMark.svelte";
   import type { StatusTone } from "./status";
@@ -37,7 +38,7 @@
     {#if details}
       <IconButton
         icon={open ? "chevron-down" : "chevron-right"}
-        label={open ? "Fewer details" : "More details"}
+        label={open ? tCanvas("fewerDetails") : tCanvas("moreDetails")}
         size="sm"
         onclick={() => (open = !open)}
       />

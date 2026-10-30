@@ -42,6 +42,7 @@
 <script lang="ts">
   import type { AppMenuAction } from "../core/appGroups";
   import GlyphPicker from "../graph/GlyphPicker.svelte";
+  import { tCanvas } from "../i18n/canvas";
 
   let {
     x,
@@ -95,29 +96,29 @@
   {#if stage === "menu"}
     {#each actions as action}
       {#if action.kind === "addToNewGroup"}
-        <button type="button" class="item" onclick={onAddToNewGroup}>Add to a new group</button>
+        <button type="button" class="item" onclick={onAddToNewGroup}>{tCanvas("addToNewGroup")}</button>
       {:else if action.kind === "addToGroup"}
         <button type="button" class="item" onclick={() => onAddToGroup(action.groupId)}>
-          Add to group “{action.groupName}”
+          {tCanvas("addToGroup", { name: action.groupName })}
         </button>
       {:else if action.kind === "removeFromGroup"}
-        <button type="button" class="item" onclick={onRemoveFromGroup}>Aus Gruppe entfernen</button>
+        <button type="button" class="item" onclick={onRemoveFromGroup}>{tCanvas("removeFromGroup")}</button>
       {:else if action.kind === "rename"}
-        <button type="button" class="item" onclick={() => (stage = "rename")}>Umbenennen</button>
+        <button type="button" class="item" onclick={() => (stage = "rename")}>{tCanvas("rename")}</button>
       {:else if action.kind === "changeIcon"}
-        <button type="button" class="item" onclick={() => (stage = "changeIcon")}>Change icon</button>
+        <button type="button" class="item" onclick={() => (stage = "changeIcon")}>{tCanvas("changeIcon")}</button>
       {:else if action.kind === "remove"}
-        <button type="button" class="item" onclick={() => (stage = "confirmRemove")}>Entfernen</button>
+        <button type="button" class="item" onclick={() => (stage = "confirmRemove")}>{tCanvas("remove")}</button>
       {/if}
     {/each}
   {:else if stage === "confirmRemove"}
-    <p class="confirm">Remove “{label}” from the ring?</p>
+    <p class="confirm">{tCanvas("confirmRemove", { label })}</p>
     <div class="row">
-      <button type="button" class="danger" onclick={onRemove}>Entfernen</button>
-      <button type="button" onclick={onCancel}>Cancel</button>
+      <button type="button" class="danger" onclick={onRemove}>{tCanvas("remove")}</button>
+      <button type="button" onclick={onCancel}>{tCanvas("cancel")}</button>
     </div>
   {:else if stage === "rename"}
-    <label class="field-label" for="app-context-rename">New name</label>
+    <label class="field-label" for="app-context-rename">{tCanvas("newName")}</label>
     <input
       id="app-context-rename"
       class="rename-input"
@@ -126,11 +127,11 @@
       onkeydown={(e) => e.key === "Enter" && submitRename()}
     />
     <div class="row">
-      <button type="button" onclick={submitRename}>Apply</button>
-      <button type="button" onclick={onCancel}>Cancel</button>
+      <button type="button" onclick={submitRename}>{tCanvas("apply")}</button>
+      <button type="button" onclick={onCancel}>{tCanvas("cancel")}</button>
     </div>
   {:else if stage === "changeIcon"}
-    <span class="field-label">Choose an icon</span>
+    <span class="field-label">{tCanvas("chooseIcon")}</span>
     <GlyphPicker selected={glyph} onPick={onChangeIcon} />
   {/if}
 </div>

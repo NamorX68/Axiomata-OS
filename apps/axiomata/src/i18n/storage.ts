@@ -20,7 +20,8 @@ const en = {
   days: "days",
   kept: "kept",
   frees: "frees {amount}",
-  glutKeep: "Glut cleans {folder} by its own rules, once a day and with “Clean up now”",
+  glutKeep:
+    "Glut cleans {folder} by its own rules, once a day and with “Clean up now”",
   glutUnknown: "Glut: unknown format",
   weekly: "Clean up once a week at start",
   saving: "Saving…",
@@ -34,7 +35,8 @@ const en = {
     "Sessions whose harness ended days ago with no work of their own — nothing uncommitted, no commit beyond their " +
     "base, no open card. Their worktree and branch go with them; a session with work always stays.",
   orphansTitle: "Orphaned worktrees waiting for you",
-  orphansHint: "Their agent is gone, but they hold work nobody saved, so no clean-up removes them.",
+  orphansHint:
+    "Their agent is gone, but they hold work nobody saved, so no clean-up removes them.",
   unknownState: "unknown state",
   deleteWorktree: "Delete {path}",
   backupsTitle: "Backups of the old roles and engines",
@@ -46,16 +48,20 @@ const en = {
   // What the actions say.
   rulesSaved: "Storage rules saved",
   saveRulesFailed: "Could not save the rules: {error}",
-  confirmCleanFrees: "Clean up now? This frees about {size}. Worktrees with changes stay.",
-  confirmCleanNothing: "Clean up now? Nothing is due right now; the database is still compacted if it needs it.",
+  confirmCleanFrees:
+    "Clean up now? This frees about {size}. Worktrees with changes stay.",
+  confirmCleanNothing:
+    "Clean up now? Nothing is due right now; the database is still compacted if it needs it.",
   cleaned: "Cleaned up — {size} freed",
   cleanFailed: "Clean-up failed: {error}",
   worktreeDirty: "It has changes nobody saved",
   worktreeUnknown: "Git cannot tell whether it has changes",
-  confirmDeleteWorktree: "Delete the worktree {path}? {what}; they are gone for good.",
+  confirmDeleteWorktree:
+    "Delete the worktree {path}? {what}; they are gone for good.",
   worktreeDeleted: "Worktree deleted",
   worktreeDeleteFailed: "Could not delete the worktree: {error}",
-  confirmDeleteBackup: "Delete the backup {path}? The old role files and engines in it are gone for good.",
+  confirmDeleteBackup:
+    "Delete the backup {path}? The old role files and engines in it are gone for good.",
   backupDeleted: "Backup deleted",
   backupDeleteFailed: "Could not delete the backup: {error}",
 
@@ -93,7 +99,8 @@ const en = {
   keepRunsLog: "rotated at {mb} MB, the last {n} kept",
   keepEndedSessions: {
     one: "ended, quiet for 1 day, no open card, nothing uncommitted and no commit beyond its base",
-    other: "ended, quiet for {n} days, no open card, nothing uncommitted and no commit beyond its base",
+    other:
+      "ended, quiet for {n} days, no open card, nothing uncommitted and no commit beyond its base",
   },
   keepAgentEvents: "while their agent exists",
   keepWorktrees: "removed with their agent; one with changes waits for you",
@@ -122,14 +129,16 @@ export const tStorage = texts("storage", en, {
   days: "Tage",
   kept: "behalten",
   frees: "gibt {amount} frei",
-  glutKeep: "Glut räumt {folder} nach eigenen Regeln auf, einmal am Tag und mit „Jetzt aufräumen“",
+  glutKeep:
+    "Glut räumt {folder} nach eigenen Regeln auf, einmal am Tag und mit „Jetzt aufräumen“",
   glutUnknown: "Glut: unbekanntes Format",
   weekly: "Einmal pro Woche beim Start aufräumen",
   saving: "Speichere…",
   saveRules: "Regeln speichern",
   cleaningUp: "Räume auf…",
   cleanNow: "Jetzt aufräumen",
-  saveFirst: "Speichere zuerst die Regeln: „Jetzt aufräumen“ räumt nach den gespeicherten auf.",
+  saveFirst:
+    "Speichere zuerst die Regeln: „Jetzt aufräumen“ räumt nach den gespeicherten auf.",
   endedToRemove: "Beendete Sitzungen, die ein Aufräumen entfernt",
   endedRemoved: "Entfernte beendete Sitzungen",
   endedHint:
@@ -148,17 +157,20 @@ export const tStorage = texts("storage", en, {
 
   rulesSaved: "Speicher-Regeln gespeichert",
   saveRulesFailed: "Die Regeln ließen sich nicht speichern: {error}",
-  confirmCleanFrees: "Jetzt aufräumen? Das gibt etwa {size} frei. Worktrees mit Änderungen bleiben.",
+  confirmCleanFrees:
+    "Jetzt aufräumen? Das gibt etwa {size} frei. Worktrees mit Änderungen bleiben.",
   confirmCleanNothing:
     "Jetzt aufräumen? Gerade ist nichts fällig; die Datenbank wird trotzdem kompaktiert, wenn sie es braucht.",
   cleaned: "Aufgeräumt — {size} freigegeben",
   cleanFailed: "Aufräumen fehlgeschlagen: {error}",
   worktreeDirty: "Er hat Änderungen, die niemand gesichert hat",
   worktreeUnknown: "Git kann nicht sagen, ob er Änderungen hat",
-  confirmDeleteWorktree: "Den Worktree {path} löschen? {what}; sie sind endgültig weg.",
+  confirmDeleteWorktree:
+    "Den Worktree {path} löschen? {what}; sie sind endgültig weg.",
   worktreeDeleted: "Worktree gelöscht",
   worktreeDeleteFailed: "Der Worktree ließ sich nicht löschen: {error}",
-  confirmDeleteBackup: "Das Backup {path} löschen? Die alten Rollendateien und Engines darin sind endgültig weg.",
+  confirmDeleteBackup:
+    "Das Backup {path} löschen? Die alten Rollendateien und Engines darin sind endgültig weg.",
   backupDeleted: "Backup gelöscht",
   backupDeleteFailed: "Das Backup ließ sich nicht löschen: {error}",
 
@@ -196,7 +208,8 @@ export const tStorage = texts("storage", en, {
       "beendet, seit {n} Tagen still, keine offene Karte, nichts Uncommittetes und kein Commit über ihre Basis hinaus",
   },
   keepAgentEvents: "solange ihr Agent existiert",
-  keepWorktrees: "mit ihrem Agenten entfernt; einer mit Änderungen wartet auf dich",
+  keepWorktrees:
+    "mit ihrem Agenten entfernt; einer mit Änderungen wartet auf dich",
 
   glutSnapshots: "Snapshots",
   glutJournals: "Lauf-Journale",

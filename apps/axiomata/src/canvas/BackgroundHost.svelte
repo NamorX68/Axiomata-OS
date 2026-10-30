@@ -5,9 +5,10 @@
 -->
 <script lang="ts">
   import { motion, motionSetting, systemReducesMotion, turns, type MotionLevel } from "../core/motion";
-  import { getModule, makeContext } from "../core/registry";
+  import { getModule, makeContext, moduleTitle } from "../core/registry";
   import { removeInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
+  import { tCanvas } from "../i18n/canvas";
 
   let { inst }: { inst: CanvasInstance } = $props();
   // `type` / `id` never change for a mounted instance (see Tile.svelte).
@@ -37,16 +38,30 @@
   <div class="corner" data-no-drag>
     <button
       type="button"
-      aria-label="Motion"
+      aria-label={tCanvas("motion")}
       aria-pressed={turns($motion)}
       disabled={$systemReducesMotion}
-      title={$systemReducesMotion ? "macOS “Reduce motion” is on" : turns($motion) ? "Pause motion" : "Start motion"}
+      title={$systemReducesMotion
+        ? tCanvas("reduceMotionOn")
+        : turns($motion)
+          ? tCanvas("pauseMotion")
+          : tCanvas("startMotion")}
       onclick={toggleMotion}>{turns($motion) ? "⏸" : "▶"}</button
     >
     {#if def?.settings}
-      <button type="button" aria-label="Background settings" title={def.title} onclick={() => (settingsOpen = !settingsOpen)}>⚙</button>
+      <button
+        type="button"
+        aria-label={tCanvas("backgroundSettings")}
+        title={moduleTitle(def)}
+        onclick={() => (settingsOpen = !settingsOpen)}>{"⚙"}</button
+      >
     {/if}
-    <button type="button" aria-label="Remove background" title="Remove" onclick={() => removeInstance(inst.id)}>×</button>
+    <button
+      type="button"
+      aria-label={tCanvas("removeBackground")}
+      title={tCanvas("remove")}
+      onclick={() => removeInstance(inst.id)}>×</button
+    >
     {#if settingsOpen && def?.settings}
       <div class="popover">
         <def.settings {ctx} />

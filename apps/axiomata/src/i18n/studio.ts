@@ -27,7 +27,8 @@ const en = {
   debugAgain: "Start the debug session again from the Debug view.",
   dialogFailed: "Could not open the dialog: {error}",
   masterFailed: "The master session could not be opened: {error}",
-  cardElsewhere: "A card is running in another project (session #{id}); its pane appears as soon as you open it.",
+  cardElsewhere:
+    "A card is running in another project (session #{id}); its pane appears as soon as you open it.",
   sessionFailed: "The session could not be opened: {error}",
   railViews: "Views",
   viewFiles: "Files",
@@ -69,13 +70,15 @@ const en = {
     "{name} is working in this worktree and may change this file while you edit it — you'll be asked before " +
     "anything is overwritten.",
   theAgent: "The agent",
-  placeGone: "{rel}: the place it lived in is gone (a discarded worktree, or a removed project).",
+  placeGone:
+    "{rel}: the place it lived in is gone (a discarded worktree, or a removed project).",
   fileMissing: "{rel} does not exist (any more).",
   cannotOpen: "Could not open {rel}: {error}",
   clickToOpen: "⌘-click a file:line to open it",
   stopTask: "Stop (Ctrl-C)",
   runAgain: "Run again",
-  taskEarlier: "This task was started in an earlier session. Run it again from the Run view.",
+  taskEarlier:
+    "This task was started in an earlier session. Run it again from the Run view.",
 
   // The Run view.
   run: "Run",
@@ -93,7 +96,8 @@ const en = {
   review: "Review…",
   tasksReview: "Project tasks need your review",
   tasksReviewBefore: "This project has its own",
-  tasksReviewAfter: "It runs commands from the repository, so it stays off until you have looked at them.",
+  tasksReviewAfter:
+    "It runs commands from the repository, so it stays off until you have looked at them.",
   reviewTasksFirst: "Review the project's tasks.json first",
   startInPane: "Start again in its pane: {task}",
   tagProject: "project",
@@ -126,7 +130,8 @@ const en = {
   allowThese: "Allow these",
   debugReview: "Project debug setups need your review",
   debugReviewBefore: "This project has its own",
-  debugReviewAfter: "It starts programs from the repository, so it stays off until you have looked at them.",
+  debugReviewAfter:
+    "It starts programs from the repository, so it stays off until you have looked at them.",
   start: "Start",
   whatToDebug: "What to debug",
   currentFile: "Current file — {rel}",
@@ -135,7 +140,8 @@ const en = {
   argumentsOptional: "Arguments (optional)",
   runInTerminal: "Run in a terminal",
   runInTerminalHint: "For a TUI or a program that reads the keyboard",
-  nothingToDebug: "Nothing to debug found. Say what to start with “New configuration…”.",
+  nothingToDebug:
+    "Nothing to debug found. Say what to start with “New configuration…”.",
   newConfigButton: "New configuration…",
   newConfig: "New configuration",
   editConfig: "Edit configuration",
@@ -254,13 +260,15 @@ const en = {
   mergeNoFf: "Merge (--no-ff)",
   squashExplain: "— one new commit on {branch}",
   mergeExplain: "— keeps {name}'s commits",
-  neverPushes: "Never pushes. {name}'s branch moves onto the new {branch}; its diff is then empty.",
+  neverPushes:
+    "Never pushes. {name}'s branch moves onto the new {branch}; its diff is then empty.",
   workingNow: "{name} is working right now and may change these files again.",
   conflict: "These files conflict, so nothing was changed:",
   working: "Working…",
 
   // A project's stored layout (`projectSession.ts`, `projects.ts`).
-  layoutUnreadable: "The stored layout for “{name}” could not be read; starting fresh.",
+  layoutUnreadable:
+    "The stored layout for “{name}” could not be read; starting fresh.",
   layoutNotSaved: "The IDE layout could not be saved: {error}",
 };
 
@@ -273,7 +281,8 @@ export const tStudio = texts("studio", en, {
   shortcuts: "Tastenkürzel",
   backToOs: "Zurück zum OS",
   canvasEmpty: "Der Canvas ist leer",
-  canvasEmptyText: "Agenten erscheinen hier, sobald eine Karte oder eine Sitzung startet.",
+  canvasEmptyText:
+    "Agenten erscheinen hier, sobald eine Karte oder eine Sitzung startet.",
   openTerminal: "Terminal öffnen",
   noProject: "Kein Projekt offen",
   noProjectText: "Öffne eines über die Projektleiste in der Seitenleiste.",
@@ -282,7 +291,8 @@ export const tStudio = texts("studio", en, {
   debugAgain: "Starte die Debug-Sitzung neu aus der Debug-Ansicht.",
   dialogFailed: "Der Dialog ließ sich nicht öffnen: {error}",
   masterFailed: "Die Master-Sitzung ließ sich nicht öffnen: {error}",
-  cardElsewhere: "In einem anderen Projekt läuft eine Karte (Sitzung #{id}); ihr Pane erscheint, sobald du es öffnest.",
+  cardElsewhere:
+    "In einem anderen Projekt läuft eine Karte (Sitzung #{id}); ihr Pane erscheint, sobald du es öffnest.",
   sessionFailed: "Die Sitzung ließ sich nicht öffnen: {error}",
   railViews: "Ansichten",
   viewFiles: "Dateien",
@@ -292,7 +302,10 @@ export const tStudio = texts("studio", en, {
   viewRun: "Run — bauen, testen, starten",
   viewDebug: "Debug",
   viewAgents: "Agenten",
-  agentsWorking: { one: "Agenten — 1 arbeitet", other: "Agenten — {n} arbeiten" },
+  agentsWorking: {
+    one: "Agenten — 1 arbeitet",
+    other: "Agenten — {n} arbeiten",
+  },
   newTerminal: "Neues Terminal",
   openFile: "Datei öffnen… (⌘O)",
 
@@ -323,13 +336,15 @@ export const tStudio = texts("studio", en, {
     "{name} arbeitet in diesem Worktree und kann diese Datei ändern, während du sie bearbeitest — du wirst gefragt, " +
     "bevor etwas überschrieben wird.",
   theAgent: "Der Agent",
-  placeGone: "{rel}: der Ort, an dem sie lag, ist weg (ein verworfener Worktree oder ein entferntes Projekt).",
+  placeGone:
+    "{rel}: der Ort, an dem sie lag, ist weg (ein verworfener Worktree oder ein entferntes Projekt).",
   fileMissing: "{rel} gibt es nicht (mehr).",
   cannotOpen: "{rel} ließ sich nicht öffnen: {error}",
   clickToOpen: "⌘-Klick auf Datei:Zeile öffnet sie",
   stopTask: "Stoppen (Ctrl-C)",
   runAgain: "Erneut ausführen",
-  taskEarlier: "Diese Aufgabe wurde in einer früheren Sitzung gestartet. Starte sie neu aus der Run-Ansicht.",
+  taskEarlier:
+    "Diese Aufgabe wurde in einer früheren Sitzung gestartet. Starte sie neu aus der Run-Ansicht.",
 
   run: "Run",
   groupRun: "Starten",
@@ -346,7 +361,8 @@ export const tStudio = texts("studio", en, {
   review: "Prüfen…",
   tasksReview: "Die Aufgaben des Projekts brauchen deine Prüfung",
   tasksReviewBefore: "Dieses Projekt hat eine eigene",
-  tasksReviewAfter: "Sie führt Befehle aus dem Repository aus und bleibt deshalb aus, bis du sie angesehen hast.",
+  tasksReviewAfter:
+    "Sie führt Befehle aus dem Repository aus und bleibt deshalb aus, bis du sie angesehen hast.",
   reviewTasksFirst: "Prüfe zuerst die tasks.json des Projekts",
   startInPane: "Neu starten in seinem Pane: {task}",
   tagProject: "Projekt",
@@ -370,8 +386,10 @@ export const tStudio = texts("studio", en, {
   inThisProject: "In diesem Projekt",
   forAllProjects: "Für alle meine Projekte",
   taskNeeds: "Eine Aufgabe braucht einen Namen und einen Befehl.",
-  removeTaskPersonal: "Die Aufgabe „{label}“ aus deiner Aufgaben-Datei entfernen?",
-  removeTaskProject: "Die Aufgabe „{label}“ aus der tasks.json des Projekts entfernen?",
+  removeTaskPersonal:
+    "Die Aufgabe „{label}“ aus deiner Aufgaben-Datei entfernen?",
+  removeTaskProject:
+    "Die Aufgabe „{label}“ aus der tasks.json des Projekts entfernen?",
 
   debug: "Debug",
   readConfigs: "Konfigurationen neu einlesen",
@@ -379,7 +397,8 @@ export const tStudio = texts("studio", en, {
   allowThese: "Diese erlauben",
   debugReview: "Die Debug-Konfigurationen des Projekts brauchen deine Prüfung",
   debugReviewBefore: "Dieses Projekt hat eine eigene",
-  debugReviewAfter: "Sie startet Programme aus dem Repository und bleibt deshalb aus, bis du sie angesehen hast.",
+  debugReviewAfter:
+    "Sie startet Programme aus dem Repository und bleibt deshalb aus, bis du sie angesehen hast.",
   start: "Start",
   whatToDebug: "Was debuggt wird",
   currentFile: "Aktuelle Datei — {rel}",
@@ -388,7 +407,8 @@ export const tStudio = texts("studio", en, {
   argumentsOptional: "Argumente (optional)",
   runInTerminal: "In einem Terminal ausführen",
   runInTerminalHint: "Für eine TUI oder ein Programm, das die Tastatur liest",
-  nothingToDebug: "Nichts zum Debuggen gefunden. Sage mit „Neue Konfiguration…“, was gestartet werden soll.",
+  nothingToDebug:
+    "Nichts zum Debuggen gefunden. Sage mit „Neue Konfiguration…“, was gestartet werden soll.",
   newConfigButton: "Neue Konfiguration…",
   newConfig: "Neue Konfiguration",
   editConfig: "Konfiguration bearbeiten",
@@ -419,7 +439,8 @@ export const tStudio = texts("studio", en, {
   addWatch: "Ausdruck zum Beobachten hinzufügen…",
   breakpoints: "Haltepunkte",
   removeAllBreakpoints: "Alle Haltepunkte entfernen",
-  breakpointsHint: "Klicke auf eine Zeilennummer in einer Python- oder Rust-Datei, um einen zu setzen.",
+  breakpointsHint:
+    "Klicke auf eine Zeilennummer in einer Python- oder Rust-Datei, um einen zu setzen.",
   breakpointExtras: "Bedingung, Trefferzahl, Log-Nachricht",
   remove: "Entfernen",
   bpWhen: "wenn",
@@ -467,7 +488,7 @@ export const tStudio = texts("studio", en, {
   takeOverButton: "Übernehmen…",
   dockDiffs: "Diese Diffs in einem eigenen Pane im Dock öffnen",
   reload: "Neu laden (⌘R)",
-  loading: "Lädt…",
+  loading: "Lade…",
   sharedFolder:
     "Dieser Projektordner ist kein Git-Repository, also arbeiten seine Agenten gemeinsam darin, und es gibt keinen " +
     "Diff pro Agent. Mache ihn zu einem Git-Repository, damit jeder Agent einen eigenen Worktree bekommt.",
@@ -505,7 +526,8 @@ export const tStudio = texts("studio", en, {
   mergeNoFf: "Merge (--no-ff)",
   squashExplain: "— ein neuer Commit auf {branch}",
   mergeExplain: "— behält die Commits von {name}",
-  neverPushes: "Pusht nie. Der Branch von {name} rückt auf den neuen Stand von {branch}; sein Diff ist dann leer.",
+  neverPushes:
+    "Pusht nie. Der Branch von {name} rückt auf den neuen Stand von {branch}; sein Diff ist dann leer.",
   workingNow: "{name} arbeitet gerade und kann diese Dateien wieder ändern.",
   conflict: "Diese Dateien stehen im Konflikt, deshalb wurde nichts geändert:",
   working: "Arbeitet…",

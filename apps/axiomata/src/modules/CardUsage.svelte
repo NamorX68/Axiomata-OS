@@ -6,6 +6,7 @@
 <script lang="ts">
   import { invokeBackend as invoke, type BoardCard, type SessionUsage } from "../core/backend";
   import { unmeasuredNote, usageLines } from "../ide/cardUsage";
+  import { tKanban as t } from "../i18n/kanban";
 
   let { card }: { card: Pick<BoardCard, "id" | "updated_at" | "state"> } = $props();
 
@@ -38,16 +39,16 @@
 </script>
 
 {#if sessions.length > 0}
-  <section class="usage" aria-label="Verbrauch">
-    <h4 class="usage-head">Verbrauch</h4>
+  <section class="usage" aria-label={t("usage")}>
+    <h4 class="usage-head">{t("usage")}</h4>
     {#each sessions as session (session.agent_id)}
       <div class="session">
         <div class="who">
           <strong>{session.name}</strong>
-          <span class="muted">{session.review ? "Reviewer" : "Arbeiter"} · {session.role}</span>
+          <span class="muted">{session.review ? t("reviewer") : t("worker")} · {session.role}</span>
         </div>
         {#if !session.measured}
-          <p class="warn">Verbrauch unbekannt. {unmeasuredNote(session)}</p>
+          <p class="warn">{t("usageUnknown")} {unmeasuredNote(session)}</p>
         {/if}
         {#each usageLines(session) as row (row.label)}
           <div class="row" class:reached={row.reached}>
@@ -57,7 +58,7 @@
           </div>
         {/each}
         {#if session.stopped}
-          <p class="stopped">Gestoppt: {session.stopped}</p>
+          <p class="stopped">{t("stopped", { reason: session.stopped })}</p>
         {/if}
       </div>
     {/each}

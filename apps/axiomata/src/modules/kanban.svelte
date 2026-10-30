@@ -92,11 +92,16 @@
   import WaitingBadge from "../ui/WaitingBadge.svelte";
   import { waitingAgents } from "../core/agentWaiting";
   import type { StatusTone } from "../ui/status";
+  import { tFlow } from "../i18n/flow";
+  import { tKanban as t } from "../i18n/kanban";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // svelte-ignore state_referenced_locally
   const config = ctx.config;
 
+  /** Marks, not words: the same in every language. */
+  const MARK_APPROVED = "✓";
+  const MARK_RETURNED = "↩";
   /** Label colours live as tokens so each theme can tune them. */
   const LABEL_TOKENS = 6;
   /** D1: columns squeeze to here, then the board scrolls. Never hidden. */
@@ -409,10 +414,13 @@
   }
 
   function announce(title: string) {
-    const where = target
-      ? ` — ${$data?.columns.find((c) => c.id === target!.columnId)?.name ?? ""}, position ${target.index + 1}`
-      : "";
-    announcement = `${title} picked up${where}. Arrow keys move, Space drops, Escape cancels.`;
+    announcement = target
+      ? t("pickedUpAt", {
+          title,
+          column: $data?.columns.find((c) => c.id === target!.columnId)?.name ?? "",
+          n: target.index + 1,
+        })
+      : t("pickedUp", { title });
   }
 
   function onCardKey(event: KeyboardEvent, card: BoardCard, column: number, index: number) {
@@ -435,14 +443,14 @@
       const held = carrying;
       carrying = null;
       target = null;
-      announcement = `${held.title} dropped.`;
+      announcement = t("dropped", { title: held.title });
       if (to) void commitMove(held.id, to);
       return;
     }
 
     if (event.key === "Escape" && carrying) {
       event.preventDefault();
-      announcement = `${carrying.title} stays where it was.`;
+      announcement = t("staysPut", { title: carrying.title });
       carrying = null;
       target = null;
       return;
@@ -463,7 +471,16 @@
   let colMenu = $state<number | null>(null);
   type Role = BoardColumn["maps_to_status"];
   const ROLES: Role[] = ["open", "doing", "done"];
-  const ROLE_NAMES: Record<Role, string> = { open: "open", doing: "in progress", done: "done" };
+  /** A card's tiers: names, the same in every language (`docs/plans/i18n.md`, Q13). */
+  const TIERS: { id: CardTier; label: string }[] = [
+    { id: "light", label: "Light" },
+    { id: "medium", label: "Medium" },
+    { id: "heavy", label: "Heavy" },
+  ];
+  /** A column role's name, read where it is drawn so it follows a language switch. */
+  function roleName(role: Role): string {
+    return t(({ open: "roleOpen", doing: "roleDoing", done: "roleDone" } as const)[role]);
+  }
 
   /** A column's status mark (UX2): open quiet, done green; in progress glows only while it holds work. */
   function roleTone(role: Role, cardCount: number): StatusTone {
@@ -472,7 +489,21 @@
     return "neutral";
   }
 
-  /** The menu's "Umbenennen": the column's own name field, selected. */
+  /** A click outside the column menu and its button closes the menu. */
+  function closeColMenuOutside(event: MouseEvent): void {
+    if (colMenu !== null && !(event.target as Element | null)?.closest?.(".col-menu, .col-tools")) colMenu = null;
+  }
+
+  /** Escape closes the column menu first, else the side panel's card — unless the owner is typing in a field. */
+  function onWindowEscape(event: KeyboardEvent): void {
+    if (event.key !== "Escape") return;
+    if (colMenu !== null) colMenu = null;
+    else if (sideCardId !== null && !(event.target as Element | null)?.closest?.("input, textarea, select")) {
+      showInSide(null);
+    }
+  }
+
+  /** The menu's "Rename": the column's own name field, selected. */
   function renameColumn(id: number): void {
     colMenu = null;
     const field = rootEl?.querySelector<HTMLInputElement>(`[data-column="${id}"] input.name`);
@@ -547,7 +578,8 @@
     try {
       await invoke("create_board_column", {
         boardId,
-        new: { name: "New column", maps_to_status: "open" },
+        // The new column's name is written in the language the owner works in; from then on it is the owner's data.
+        new: { name: t("newColumn"), maps_to_status: "open" },
       });
       await refreshBoard(boardId);
     } catch (err) {
@@ -563,7 +595,7 @@
         moveCardsTo: moveTo,
       });
       if (!gone) {
-        listError = "The column still holds cards — choose where they should go.";
+        listError = t("columnHoldsCards");
         return;
       }
       removingColumn = null;
@@ -695,15 +727,22 @@
     const id = ctx.instanceId;
     setLossProbe(id, () => {
       const lost = [
-        newTitle.trim() && `the new card title “${newTitle.trim()}” not yet added`,
-        note.trim() && `the history note “${note.trim()}” not yet written`,
+        newTitle.trim() && t("lostTitle", { title: newTitle.trim() }),
+        note.trim() && t("lostNote", { note: note.trim() }),
         // A step's form (start, plan, review, take over) holds what was chosen and typed in it until it is sent.
-        stepForm && `the open ${stepForm.step} form of card #${stepForm.card} with what was entered in it`,
+        stepForm && t("lostForm", { form: t(FORM_NAME[stepForm.step]), card: stepForm.card }),
       ].filter(Boolean);
-      return lost.length ? lost.join(" and ") : null;
+      return lost.length ? lost.join(` ${t("and")} `) : null;
     });
     return () => setLossProbe(id, null);
   });
+  /** The catalog key of each step form's name, for what closing the panel would lose. */
+  const FORM_NAME = {
+    plan: "formPlan",
+    start: "formStart",
+    review: "formReview",
+    "take-over": "formTakeOver",
+  } as const;
   /** The form of a card step that is open — start, review or take-over (A2A CP-A6) — and the card it belongs to. */
   let stepForm = $state<{ card: number; step: "plan" | "start" | "review" | "take-over"; state: string } | null>(
     null,
@@ -888,7 +927,7 @@
   });
 
   function titleOf(id: number): string {
-    return $data?.cards.find((c) => c.id === id)?.title ?? "deleted";
+    return $data?.cards.find((c) => c.id === id)?.title ?? t("deletedCard");
   }
 </script>
 
@@ -913,7 +952,7 @@
         {/each}
       </span>
       {#if card.verified_by}
-        <span class="verified" title="approved by {actorLabel(card.verified_by)}">✓</span>
+        <span class="verified" title={t("approvedBy", { name: actorLabel(card.verified_by) })}>{MARK_APPROVED}</span>
       {/if}
       {#if card.due_at}
         {@const due = dueState(card.due_at)}
@@ -935,7 +974,9 @@
     {@const phase = phaseOf(cardPlan, $data?.cards ?? [])}
     <p class="flow-line">
       <span class="state-badge" data-state-tone={phase === "waiting" ? "warn" : "muted"} title={cardPlan.name}>
-        plan · {PHASE_LABEL[phase]}{#if steps.total > 0}&nbsp;· {steps.done}/{steps.total}{/if}
+        {steps.total > 0
+          ? t("planBadgeSteps", { phase: PHASE_LABEL[phase], done: steps.done, total: steps.total })
+          : t("planBadge", { phase: PHASE_LABEL[phase] })}
       </span>
     </p>
   {/if}
@@ -943,12 +984,16 @@
     <p class="flow-line">
       {#if isNotableState(card.state)}
         <span class="state-badge" data-state-tone={stateTone(card.state)} title={card.input_required ?? undefined}>
-          {STATE_LABEL[card.state]}{#if card.state === "blocked"}&nbsp;on&nbsp;{card.waiting_on.map((id) => `#${id}`).join(", ")}{/if}
+          {card.state === "blocked"
+            ? t("stateOn", { state: STATE_LABEL[card.state], ids: card.waiting_on.map((id) => `#${id}`).join(", ") })
+            : STATE_LABEL[card.state]}
         </span>
       {/if}
       {#if card.kind}<span class="flow-tag">{card.kind}</span>{/if}
-      {#if card.agent}<span class="flow-tag" title="Role">{card.agent}</span>{/if}
-      {#if card.returned_count > 0}<span class="flow-tag" title="returned by the reviewer">↩ {card.returned_count}</span>{/if}
+      {#if card.agent}<span class="flow-tag" title={tFlow("role")}>{card.agent}</span>{/if}
+      {#if card.returned_count > 0}
+        <span class="flow-tag" title={t("returnedByReviewer")}>{MARK_RETURNED} {card.returned_count}</span>
+      {/if}
     </p>
   {/if}
 {/snippet}
@@ -959,22 +1004,14 @@
     // back to the app is the moment to look again. Views of one board share a single load.
     if (boardId !== null) void refreshBoard(boardId);
   }}
-  onclick={(event) => {
-    if (colMenu !== null && !(event.target as Element | null)?.closest?.(".col-menu, .col-tools")) colMenu = null;
-  }}
-  onkeydown={(event) => {
-    if (event.key !== "Escape") return;
-    if (colMenu !== null) colMenu = null;
-    else if (sideCardId !== null && !(event.target as Element | null)?.closest?.("input, textarea, select")) {
-      showInSide(null);
-    }
-  }}
+  onclick={closeColMenuOutside}
+  onkeydown={onWindowEscape}
 />
 
 <!-- A card's detail: in a stand-alone card panel, and in the large board's side panel (editor-look B4). -->
 {#snippet cardDetail(detail: BoardCard)}
     <article class="detail">
-    <span class="detail-num">Card #{detail.id}</span>
+    <span class="detail-num">{t("cardNumber", { id: detail.id })}</span>
     <!-- Edited in place rather than behind an edit mode: there is no reading
          state worth protecting on a card, and a mode would make the common
          act (fix a typo) cost two extra clicks. Saved on blur, so nothing
@@ -982,7 +1019,7 @@
     <input
       class="detail-title"
       value={detail.title}
-      aria-label="Title"
+      aria-label={t("title")}
       onblur={(event) => saveDetail({ title: event.currentTarget.value })}
     />
     {#if detail.labels.length > 0}
@@ -995,21 +1032,21 @@
     <textarea
       class="detail-body"
       value={detail.body}
-      placeholder="No text."
-      aria-label="Text"
+      placeholder={t("noText")}
+      aria-label={t("text")}
       onblur={(event) => saveDetail({ body: event.currentTarget.value })}
     ></textarea>
     <div class="fields">
       <label>
-        <span>Labels</span>
+        <span>{t("labels")}</span>
         <input
           value={detail.labels.join(", ")}
-          placeholder="rust, design"
+          placeholder={t("labelsPlaceholder")}
           onblur={(event) => saveDetail({ labels: parseLabels(event.currentTarget.value) })}
         />
       </label>
       <label>
-        <span>Due</span>
+        <span>{t("due")}</span>
         <input
           type="date"
           value={dueToInput(detail.due_at)}
@@ -1017,10 +1054,10 @@
         />
       </label>
       <label>
-        <span>Assigned to</span>
+        <span>{t("assignedTo")}</span>
         <input
           value={detail.assignee ?? ""}
-          placeholder="human:owner or agent:name"
+          placeholder={t("assigneePlaceholder")}
           onblur={(event) =>
             saveDetail({ assignee: event.currentTarget.value.trim() || null })}
         />
@@ -1028,18 +1065,18 @@
     </div>
 
     <!-- The agent flow (a2a.md CP-A2): what kind of work this is, for which role and how strong, and when it counts as done. -->
-    <h4 class="flow-head">Ablauf</h4>
+    <h4 class="flow-head">{t("agentFlow")}</h4>
     <div class="fields">
       <label>
-        <span>Art</span>
+        <span>{t("kind")}</span>
         <input
           value={detail.kind ?? ""}
-          placeholder="implement, review, test, doc"
+          placeholder={t("kindPlaceholder")}
           onblur={(event) => saveDetail({ kind: event.currentTarget.value.trim() || null })}
         />
       </label>
       <label>
-        <span>Level</span>
+        <span>{tFlow("level")}</span>
         <select
           value={detail.tier ?? ""}
           onchange={(event) => {
@@ -1049,35 +1086,33 @@
           }}
         >
           <option value="">—</option>
-          <option value="light">leicht</option>
-          <option value="medium">mittel</option>
-          <option value="heavy">schwer</option>
+          {#each TIERS as tier (tier.id)}<option value={tier.id}>{tier.label}</option>{/each}
         </select>
       </label>
       <label>
-        <span>Role</span>
+        <span>{tFlow("role")}</span>
         <input
           list="kanban-roles"
           value={detail.agent ?? ""}
-          placeholder="z. B. allrounder"
+          placeholder={t("rolePlaceholder")}
           onblur={(event) => saveDetail({ agent: event.currentTarget.value.trim() || null })}
         />
       </label>
       <label>
-        <span>Reason</span>
+        <span>{t("reason")}</span>
         <input
           value={detail.agent_reason ?? ""}
-          placeholder="why this role"
+          placeholder={t("reasonPlaceholder")}
           onblur={(event) => saveDetail({ agent_reason: event.currentTarget.value.trim() || null })}
         />
       </label>
       <label>
-        <span>Plan</span>
+        <span>{t("plan")}</span>
         <select
           value={detail.plan_id ?? ""}
           disabled={detail.origin_of != null}
           title={detail.origin_of != null
-            ? `The goal of plan #${detail.origin_of}; it is no step of a plan`
+            ? t("goalOfPlan", { id: detail.origin_of })
             : undefined}
           onchange={(event) => {
             const select = event.currentTarget;
@@ -1085,7 +1120,7 @@
             settle(select, detail.id, (card) => String(card.plan_id ?? ""));
           }}
         >
-          <option value="">no plan</option>
+          <option value="">{t("noPlan")}</option>
           {#each plans as plan (plan.id)}
             <option value={plan.id}>{planLabel(plan)}</option>
           {/each}
@@ -1098,19 +1133,23 @@
     <textarea
       class="detail-body"
       value={detail.acceptance}
-      placeholder="Acceptance criteria — how the reviewer tells the card is done."
-      aria-label="Abnahmekriterien"
+      placeholder={t("acceptancePlaceholder")}
+      aria-label={tFlow("acceptance")}
       onblur={(event) => saveDetail({ acceptance: event.currentTarget.value })}
     ></textarea>
 
     {#if detail.plan_id !== null}
       {@const candidates = dependencyCandidates(detail, $data?.cards ?? [])}
       <div class="deps">
-        <span class="deps-label">Braucht zuerst</span>
+        <span class="deps-label">{tFlow("needsFirst")}</span>
         {#each detail.depends_on as needs (needs)}
           <span class="dep-chip" class:waiting={detail.waiting_on.includes(needs)} title={titleOf(needs)}>
             #{needs} {titleOf(needs)}
-            <button type="button" aria-label="Remove dependency on #{needs}" onclick={() => removeDependency(detail, needs)}>
+            <button
+              type="button"
+              aria-label={t("removeDependency", { id: needs })}
+              onclick={() => removeDependency(detail, needs)}
+            >
               ×
             </button>
           </span>
@@ -1118,59 +1157,60 @@
         {#if candidates.length > 0}
           <select
             class="dep-add"
-            aria-label="Add dependency"
+            aria-label={t("addDependency")}
             onchange={(event) => {
               const picked = Number(event.currentTarget.value);
               event.currentTarget.value = "";
               if (picked) void addDependency(detail, picked);
             }}
           >
-            <option value="">+ Dependency …</option>
+            <option value="">{t("addDependencyOption")}</option>
             {#each candidates as other (other.id)}<option value={other.id}>#{other.id} {other.title}</option>{/each}
           </select>
         {:else if detail.depends_on.length === 0}
-          <span class="deps-none">none</span>
+          <span class="deps-none">{t("none")}</span>
         {/if}
       </div>
     {/if}
     {#if detailError}<p class="detail-error" role="alert">{detailError}</p>{/if}
 
     <dl>
-      <dt>State</dt>
+      <dt>{t("state")}</dt>
       <dd>
-        {STATE_LABEL[detail.state]}{#if detail.returned_count > 0} · {detail.returned_count}× returned{/if}
+        {STATE_LABEL[detail.state]}{#if detail.returned_count > 0}
+          · {t("returnedTimes", { n: detail.returned_count })}{/if}
       </dd>
       {#if detail.origin_of != null}
         {@const detailPlan = planOfCard(detail, plans)}
         {#if detailPlan}
           {@const steps = progressOf($data?.cards ?? [], detailPlan.id)}
-          <dt>Plan</dt>
+          <dt>{t("plan")}</dt>
           <dd>
             #{detailPlan.id} · {PHASE_LABEL[phaseOf(detailPlan, $data?.cards ?? [])]}
-            · {steps.done}/{steps.total} steps done
+            · {t("stepsDone", { done: steps.done, total: steps.total })}
           </dd>
         {/if}
       {/if}
       {#if detail.input_required}
-        <dt>Question</dt>
+        <dt>{t("question")}</dt>
         <dd>{detail.input_required}</dd>
       {/if}
       {#if detail.due_at}
         {@const due = dueState(detail.due_at)}
-        <dt>Due in</dt>
+        <dt>{t("dueLabel")}</dt>
         <dd class:over={due.overdue}>{due.label}</dd>
       {/if}
       {#if detail.claimed_by}
-        <dt>Claimed by</dt>
+        <dt>{t("claimedBy")}</dt>
         <dd>{actorLabel(detail.claimed_by)}</dd>
       {/if}
       {#if detail.verified_by}
-        <dt>Approved by</dt>
-        <dd>✓ {actorLabel(detail.verified_by)}</dd>
+        <dt>{t("approvedByLabel")}</dt>
+        <dd>{MARK_APPROVED} {actorLabel(detail.verified_by)}</dd>
       {/if}
       {#if detail.archived_at}
-        <dt>Archived</dt>
-        <dd>ja</dd>
+        <dt>{t("archived")}</dt>
+        <dd>{t("yes")}</dd>
       {/if}
     </dl>
 
@@ -1201,54 +1241,68 @@
             class="ax-btn"
             class:primary={waiting}
             title={waiting
-              ? "Every step is ready: take the plan over in the Flow"
-              : "The plan's steps, planner and graph"}
+              ? t("takeOverInFlowTitle")
+              : t("openInFlowTitle")}
             onclick={() => {
               if (actionPlan.project_id == null) return;
               showPlanInFlow(actionPlan.project_id, { boardId: actionPlan.board_id, planId: actionPlan.id });
               leaveForStudio();
             }}
-          >{waiting ? "Take over in the Flow …" : "Open in the Flow"}</button>
+          >{waiting ? t("takeOverInFlow") : t("openInFlow")}</button>
         {:else if canStartAsPlan(detail)}
           <button
             class="ax-btn primary"
-            title="The card becomes a plan: a planner splits it, then it runs by itself"
-            onclick={() => (stepForm = { card: detail.id, step: "plan", state: detail.state })}>Start …</button
+            title={t("startAsPlanTitle")}
+            onclick={() => (stepForm = { card: detail.id, step: "plan", state: detail.state })}
+            >{t("startEllipsis")}</button
           >
         {:else if canStart(detail)}
-          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "start", state: detail.state })}>Start …</button>
+          <button
+            class="ax-btn primary"
+            onclick={() => (stepForm = { card: detail.id, step: "start", state: detail.state })}
+            >{t("startEllipsis")}</button
+          >
         {:else if canReview(detail)}
-          <button class="ax-btn" title="The reviewer starts by itself; here with an engine of your choice" onclick={() => (stepForm = { card: detail.id, step: "review", state: detail.state })}>Start review …</button>
+          <button
+            class="ax-btn"
+            title={t("startReviewTitle")}
+            onclick={() => (stepForm = { card: detail.id, step: "review", state: detail.state })}
+            >{t("startReviewEllipsis")}</button
+          >
         {:else if canTakeOver(detail, plans.find((plan) => plan.id === detail.plan_id) ?? null)}
-          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "take-over", state: detail.state })}>Take over …</button>
+          <button
+            class="ax-btn primary"
+            onclick={() => (stepForm = { card: detail.id, step: "take-over", state: detail.state })}
+            >{t("takeOverEllipsis")}</button
+          >
         {/if}
       {/if}
       {#if detail.state === "working" && detail.claimed_by}
-        <button class="ax-btn" title="The card waits in Open again; the session's secret is withdrawn" onclick={() => releaseCard(detail)}>Release</button>
+        <button class="ax-btn" title={t("releaseTitle")} onclick={() => releaseCard(detail)}>{t("release")}</button>
       {/if}
       {#if detail.state === "proposed"}
-        <button class="ax-btn primary" onclick={() => approveProposal(detail)}>Accept proposal</button>
+        <button class="ax-btn primary" onclick={() => approveProposal(detail)}>{t("acceptProposal")}</button>
       {/if}
       {#if detail.state === "failed" || detail.state === "canceled"}
-        <button class="ax-btn" onclick={() => markCard(detail, "reopen")}>Reopen</button>
+        <button class="ax-btn" onclick={() => markCard(detail, "reopen")}>{t("reopen")}</button>
       {:else if !["taken_over", "integrated", "verified", "planned"].includes(detail.state)}
-        <button class="ax-btn" onclick={() => markCard(detail, "cancel")}>Absagen</button>
+        <button class="ax-btn" onclick={() => markCard(detail, "cancel")}>{t("callOff")}</button>
       {/if}
       <button class="ax-btn" onclick={() => setArchived(detail, detail.archived_at === null)}>
-        {detail.archived_at === null ? "Archive" : "Restore"}
+        {detail.archived_at === null ? t("archive") : t("restore")}
       </button>
       {#if confirmingDelete}
-        <button class="ax-btn danger" onclick={() => removeCard(detail)}>Really delete</button>
-        <button class="ax-btn" onclick={() => (confirmingDelete = false)}>Cancel</button>
+        <button class="ax-btn danger" onclick={() => removeCard(detail)}>{tFlow("reallyDelete")}</button>
+        <button class="ax-btn" onclick={() => (confirmingDelete = false)}>{tFlow("cancel")}</button>
       {:else}
-        <button class="ax-btn danger" onclick={() => (confirmingDelete = true)}>Delete</button>
+        <button class="ax-btn danger" onclick={() => (confirmingDelete = true)}>{tFlow("delete")}</button>
       {/if}
     </div>
 
     <CardUsage card={detail} />
 
-    <section class="history" aria-label="Verlauf">
-      <h4 class="flow-head">Verlauf</h4>
+    <section class="history" aria-label={tFlow("history")}>
+      <h4 class="flow-head">{tFlow("history")}</h4>
       <form
         class="note-form"
         onsubmit={(event) => {
@@ -1256,10 +1310,10 @@
           void writeNote(detail);
         }}
       >
-        <input bind:value={note} placeholder="Write a note …" aria-label="Note for the history" />
+        <input bind:value={note} placeholder={t("writeNote")} aria-label={t("noteLabel")} />
       </form>
       {#if events.length === 0}
-        <p class="history-empty">Noch nichts passiert.</p>
+        <p class="history-empty">{t("nothingYet")}</p>
       {:else}
         <ul>
           {#each [...events].reverse() as event (event.id)}
@@ -1283,17 +1337,17 @@
 {:else if boardId === null}
   <!-- The app opens even with no board at all: it has to offer to create the first one. -->
   <div class="first-board">
-    <EmptyState title="No board yet" text="Create the first one below." />
+    <EmptyState title={t("noBoardYet")} text={t("createFirstBelow")} />
     <KanbanBoards current={null} onChoose={switchBoard} onDeleted={boardGone} />
   </div>
 {:else if $data === null || ($data.loading && $data.board === null)}
-  <p class="notice">Loading …</p>
+  <p class="notice">{t("loading")}</p>
 {:else if $data.error}
   <p class="notice danger">{$data.error}</p>
 {:else if cardId !== null}
   <!-- Detail of a single card. -->
   {#if detail === null}
-    <p class="notice">This card no longer exists.</p>
+    <p class="notice">{t("cardGone")}</p>
   {:else}
     {@render cardDetail(detail)}
   {/if}
@@ -1305,7 +1359,7 @@
       {#if boards.length > 1}
         <select
           class="board-pick"
-          aria-label="Choose a board"
+          aria-label={t("chooseBoard")}
           value={boardId}
           onchange={(event) => switchBoard(Number(event.currentTarget.value))}
         >
@@ -1319,7 +1373,12 @@
       <!-- One toolbar (editor-look B5). -->
       <label class="filter">
           <Icon name="search" size="sm" />
-          <input type="search" placeholder="Filter cards …" bind:value={filterText} aria-label="Filter cards" />
+          <input
+            type="search"
+            placeholder={t("filterPlaceholder")}
+            bind:value={filterText}
+            aria-label={t("filterLabel")}
+          />
         </label>
         <span class="label-filters">
           {#each allLabels as label (label)}
@@ -1336,26 +1395,26 @@
         </span>
         <IconButton
           icon="archive"
-          label={showArchived ? "Hide archived cards" : "Show archived cards"}
+          label={showArchived ? t("hideArchived") : t("showArchived")}
           pressed={showArchived}
           onclick={() => (showArchived = !showArchived)}
         />
       <IconButton
         icon="refresh-cw"
-        label="Reload the board"
+        label={t("reloadBoard")}
         disabled={$data.loading}
         onclick={() => boardId !== null && void refreshBoard(boardId)}
       />
-      <IconButton icon="columns-3" label="Add a column" onclick={addColumn} />
+      <IconButton icon="columns-3" label={t("addColumn")} onclick={addColumn} />
       <IconButton
         icon="settings"
-        label="Boards & view"
+        label={t("boardsAndView")}
         pressed={showBoards}
         onclick={() => (showBoards = !showBoards)}
       />
     </div>
     {#if showBoards}
-      <div class="boards-pop" role="dialog" aria-label="Boards & view">
+      <div class="boards-pop" role="dialog" aria-label={t("boardsAndView")}>
         <KanbanBoards current={boardId} onChoose={chooseBoard} onDeleted={boardGone} onChanged={loadBoards} />
       </div>
     {/if}
@@ -1376,12 +1435,12 @@
                  and form controls never start a drag — without it there is
                  nothing to take hold of. Same idea as the panel's own grip. -->
             <span class="col-grip" aria-hidden="true"><Icon name="grip-vertical" size="sm" /></span>
-            <StatusMark tone={roleTone(column.maps_to_status, cards.length)} title={ROLE_NAMES[column.maps_to_status]} />
+            <StatusMark tone={roleTone(column.maps_to_status, cards.length)} title={roleName(column.maps_to_status)} />
             <input
               class="name"
               value={column.name}
               data-no-drag
-              aria-label="Name of the column"
+              aria-label={t("columnName")}
               onblur={(event) => saveColumn(column, { name: event.currentTarget.value })}
             />
             <span class="count">{cards.length}</span>
@@ -1391,14 +1450,14 @@
               <IconButton
                 icon="ellipsis"
                 size="sm"
-                label="Column {column.name}: actions"
+                label={t("columnActions", { name: column.name })}
                 pressed={colMenu === column.id}
                 onclick={() => (colMenu = colMenu === column.id ? null : column.id)}
               />
             </span>
             {#if colMenu === column.id}
               <div class="col-menu" role="menu" data-no-drag>
-                <p class="menu-label">Role</p>
+                <p class="menu-label">{tFlow("role")}</p>
                 {#each column.stage ? [column.maps_to_status] : ROLES as role (role)}
                   <button
                     type="button"
@@ -1410,13 +1469,13 @@
                       void saveColumn(column, { maps_to_status: role });
                     }}
                   >
-                    <StatusMark tone={roleTone(role, role === "doing" ? 1 : 0)} />{ROLE_NAMES[role]}
+                    <StatusMark tone={roleTone(role, role === "doing" ? 1 : 0)} />{roleName(role)}
                     {#if column.maps_to_status === role}<Icon name="check" size="sm" />{/if}
                   </button>
                 {/each}
                 <hr />
                 <button type="button" role="menuitem" onclick={() => renameColumn(column.id)}>
-                  <Icon name="pencil" size="sm" />Rename
+                  <Icon name="pencil" size="sm" />{t("rename")}
                 </button>
                 {#if column.stage === null}
                   <button
@@ -1428,11 +1487,11 @@
                       removingColumn = { id: column.id, held: cards.length };
                     }}
                   >
-                    <Icon name="trash-2" size="sm" />Remove
+                    <Icon name="trash-2" size="sm" />{t("remove")}
                   </button>
                 {:else}
                   <p class="menu-label">
-                    {column.stage === "review" ? "Review column of the flow" : "Proposal column of the flow"} — stays on every board
+                    {column.stage === "review" ? t("reviewColumn") : t("proposalColumn")}
                   </p>
                 {/if}
               </div>
@@ -1442,21 +1501,21 @@
           {#if removingColumn?.id === column.id}
             <div class="col-remove">
               {#if removingColumn.held === 0}
-                <span>Remove the column?</span>
-                <button class="ax-btn danger" onclick={() => removeColumn(column, null)}>Remove</button>
+                <span>{t("removeColumn")}</span>
+                <button class="ax-btn danger" onclick={() => removeColumn(column, null)}>{t("remove")}</button>
               {:else}
-                <span>{removingColumn.held} cards — where to?</span>
+                <span>{t("cardsWhereTo", { n: removingColumn.held })}</span>
                 <select
-                  aria-label="Zielspalte"
+                  aria-label={t("targetColumn")}
                   onchange={(event) => removeColumn(column, Number(event.currentTarget.value))}
                 >
-                  <option value="">choose …</option>
+                  <option value="">{t("choose")}</option>
                   {#each grouped.filter((g) => g.column.id !== column.id) as other (other.column.id)}
                     <option value={other.column.id}>{other.column.name}</option>
                   {/each}
                 </select>
               {/if}
-              <button class="ax-btn" onclick={() => (removingColumn = null)}>Cancel</button>
+              <button class="ax-btn" onclick={() => (removingColumn = null)}>{tFlow("cancel")}</button>
             </div>
           {/if}
           <div class="cards">
@@ -1501,7 +1560,7 @@
                 {/if}
               </article>
             {:else}
-              <p class="empty">No cards</p>
+              <p class="empty">{t("noCards")}</p>
             {/each}
             {#if marksEndOf(column.id, cards)}
               <div class="marker" aria-hidden="true"></div>
@@ -1521,9 +1580,9 @@
                 autofocus
                 data-no-drag
                 class="quick-field"
-                placeholder="Title, Enter"
+                placeholder={t("newCardPlaceholder")}
                 bind:value={newTitle}
-                aria-label="Title of the new card"
+                aria-label={t("newCardLabel")}
                 onblur={() => (addingTo = newTitle.trim() ? addingTo : null)}
                 onkeydown={(event) => {
                   if (event.key === "Escape") {
@@ -1535,7 +1594,7 @@
             </form>
           {:else}
             <button class="add" data-no-drag onclick={() => ((addingTo = column.id), (newTitle = ""))}>
-              <Icon name="plus" size="sm" /> Card
+              <Icon name="plus" size="sm" /> {t("addCard")}
             </button>
           {/if}
         </section>
@@ -1544,15 +1603,15 @@
     </div>
     {#if sideCardId !== null}
       <!-- B4: the card beside the board, which stays in view; another card's click swaps it. -->
-      <aside class="side-detail" aria-label="Card">
+      <aside class="side-detail" aria-label={t("card")}>
         <header class="side-head">
-          <span>Card</span>
-          <IconButton icon="x" size="sm" label="Close the card (Esc)" onclick={() => showInSide(null)} />
+          <span>{t("card")}</span>
+          <IconButton icon="x" size="sm" label={t("closeCard")} onclick={() => showInSide(null)} />
         </header>
         {#if detail}
           {@render cardDetail(detail)}
         {:else}
-          <p class="notice">This card no longer exists.</p>
+          <p class="notice">{t("cardGone")}</p>
         {/if}
       </aside>
     {/if}
@@ -1579,7 +1638,7 @@
     <div class="sparks" bind:this={sparkLayer} aria-hidden="true"></div>
 
     {#if boardEmpty}
-      <p class="notice">Nothing here yet — create the first card in a column below.</p>
+      <p class="notice">{t("boardEmpty")}</p>
     {/if}
   </div>
 {/if}

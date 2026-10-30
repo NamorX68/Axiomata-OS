@@ -8,6 +8,7 @@ import { texts } from "./texts";
 
 const en = {
   language: "Language",
+  ollamaNoTools: "Ollama (no tools)",
   languageSystem: "System ({lang})",
   languageHint:
     "The app's buttons, notes and the handbook. Names like Studio, Canvas, Flow or Skills stay as they are; " +
@@ -27,7 +28,8 @@ const en = {
   theme: "Theme",
   typeface: "Typeface",
   fontSample: "Aa",
-  typefaceHint: "For the whole interface. Code in the editor and the terminal keep their own fonts.",
+  typefaceHint:
+    "For the whole interface. Code in the editor and the terminal keep their own fonts.",
   motion: "Motion",
   movement: "Movement",
   motionHint:
@@ -56,9 +58,11 @@ const en = {
   fileNames: "File names",
   fileNamesHint: "(next to every note in the Second Brain)",
   shimmer: "Shimmer",
-  shimmerHint: "(how the hex cells catch the light; still unless motion is Full)",
+  shimmerHint:
+    "(how the hex cells catch the light; still unless motion is Full)",
   layout: "Layout",
-  layoutHint: "(the Second Brain: a ring of bundled links, countries or a honeycomb)",
+  layoutHint:
+    "(the Second Brain: a ring of bundled links, countries or a honeycomb)",
   uiSize: "UI size",
   auto: "Auto",
   autoHint: "({percent}% on this display)",
@@ -90,7 +94,8 @@ const en = {
     "theme's own ground veils your image — darker in a dark theme, lighter in a light one —, so text stays " +
     "readable. Menus and text overlays stay dense either way, and macOS “Reduce transparency” makes all of it " +
     "solid.",
-  reduceTransparencyOn: "macOS “Reduce transparency” is on: the glass is solid now.",
+  reduceTransparencyOn:
+    "macOS “Reduce transparency” is on: the glass is solid now.",
   customCss: "Custom CSS",
   notLoaded: "Not loaded.",
   reloading: "Reloading…",
@@ -139,11 +144,13 @@ const en = {
   harnessGlut: "Axiomata's own harness — OpenRouter or Ollama",
   webExaHint: "Works without a key (rate limited); a key raises the limit",
   webTinyfishHint: "Asked when Exa is limited or fails",
-  webTavilyHint: "Asked last, only up to the monthly limit below (the account holds a card)",
+  webTavilyHint:
+    "Asked last, only up to the monthly limit below (the account holds a card)",
 
   // Workspace.
   vault: "Vault",
-  vaultLead: "Root folder of the Second Brain workspace. A change takes effect after a restart.",
+  vaultLead:
+    "Root folder of the Second Brain workspace. A change takes effect after a restart.",
   path: "Path",
   vaultPlaceholder: "/Users/…/Vault",
   saving: "Saving…",
@@ -163,7 +170,8 @@ const en = {
   blurbAnthropic: "Billed through the subscription — no key",
   blurbOpenRouter: "Anthropic-compatible endpoint",
   blurbOllama: "Local model on this machine",
-  anthropicNoKey: "No key or base URL needed — Anthropic is billed through the subscription's CLI login.",
+  anthropicNoKey:
+    "No key or base URL needed — Anthropic is billed through the subscription's CLI login.",
   baseUrl: "Base URL",
   apiKey: "API key",
   apiKeyOptional: "API key (optional)",
@@ -175,10 +183,13 @@ const en = {
   skillsModel: "Skills/routines model",
   modelExample: "e.g. {model}",
   modelOverrideBefore: "A",
-  modelOverrideAfter: "in the SKILL.md frontmatter still overrides the skills model.",
-  unknownProvider: "Unknown provider “{id}” — no settings to edit. Pick one of the known providers above.",
+  modelOverrideAfter:
+    "in the SKILL.md frontmatter still overrides the skills model.",
+  unknownProvider:
+    "Unknown provider “{id}” — no settings to edit. Pick one of the known providers above.",
   saveProvider: "Save provider",
-  providersSaved: "Provider settings saved — they apply from the next agent call.",
+  providersSaved:
+    "Provider settings saved — they apply from the next agent call.",
 
   // AI providers: what a save refuses (Rust's `validate_for_save` is the authority).
   roleChat: "Chat",
@@ -189,11 +200,13 @@ const en = {
   needsKey: "{role} ({provider}) needs an API key.",
   modelEmpty: "{role} ({provider}): {field} must not be empty.",
   modelSpaces: "{role} ({provider}): {field} contains spaces.",
-  modelBrackets: "{role} ({provider}): {field} has unbalanced brackets — “{value}”.",
+  modelBrackets:
+    "{role} ({provider}): {field} has unbalanced brackets — “{value}”.",
   baseUrlHttps: "{role} ({provider}): Base URL must start with https://.",
 
   // AI providers: the model lists.
-  catalogBuiltIn: "Built-in list — Anthropic has no model list to ask without an API key.",
+  catalogBuiltIn:
+    "Built-in list — Anthropic has no model list to ask without an API key.",
   catalogNone: "No model list yet.",
   catalogFailed: "The last fetch failed: {error}",
   catalogFetched: {
@@ -219,7 +232,8 @@ const en = {
   glutOwnEffortElse: "Glut's own setting, else {level}",
   effortNotListed: "{level} (not listed)",
   webSkillBefore: "A skill that reads the web (",
-  webSkillAfter: ") uses Glut's web search — its keys and limits are in the Web search block below.",
+  webSkillAfter:
+    ") uses Glut's web search — its keys and limits are in the Web search block below.",
 
   // AI providers: the app's own Claude Code sign-in.
   claudeSignIn: "Claude Code sign-in",
@@ -227,7 +241,8 @@ const en = {
   unknownEmail: "unknown",
   ownLogin: "— the app's own login, apart from yours in",
   claudeUnreachable: "Claude Code cannot be asked: {error}",
-  notSignedIn: "Not signed in — chat and skills on Claude Code fail until the app's Claude Code signs in.",
+  notSignedIn:
+    "Not signed in — chat and skills on Claude Code fail until the app's Claude Code signs in.",
   waitingForBrowser: "Waiting for the browser…",
   signInAnthropic: "Sign in with Anthropic",
   signInCode: "Code (only if the browser page shows one)",
@@ -251,7 +266,8 @@ const en = {
   notSet: "not set",
   searchesPerDay: "Searches per day (all providers)",
   tavilyPerMonth: "Tavily searches per month",
-  webLimitsHint: "0 turns the search (or Tavily) off. {n} Tavily searches a month are its free credits.",
+  webLimitsHint:
+    "0 turns the search (or Tavily) off. {n} Tavily searches a month are its free credits.",
 
   // AI providers: spend.
   spend: "Spend",
@@ -259,10 +275,12 @@ const en = {
   spendCap: "/ {amount} limit",
   spendMonth: "· {amount} this month",
   roleToProvider: "{role} → {provider}",
-  subscriptionBilled: "{role} → {provider} is billed through the subscription — no cost tracking.",
+  subscriptionBilled:
+    "{role} → {provider} is billed through the subscription — no cost tracking.",
   dailyLimit: "Daily limit (USD, paid providers)",
   noLimit: "empty = no limit",
-  dailyLimitHint: "Once today's total reaches the limit, the next agent call through a paid provider is refused.",
+  dailyLimitHint:
+    "Once today's total reaches the limit, the next agent call through a paid provider is refused.",
   saveAssignment: "Save assignment",
 
   // About.
@@ -274,6 +292,7 @@ const en = {
 
 export const tSettings = texts("settings", en, {
   language: "Sprache",
+  ollamaNoTools: "Ollama (ohne Werkzeuge)",
   languageSystem: "System ({lang})",
   languageHint:
     "Knöpfe, Hinweise und das Handbuch der App. Namen wie Studio, Canvas, Flow oder Skills bleiben, wie sie sind; " +
@@ -291,20 +310,23 @@ export const tSettings = texts("settings", en, {
   theme: "Theme",
   typeface: "Schrift",
   fontSample: "Aa",
-  typefaceHint: "Für die ganze Oberfläche. Code im Editor und das Terminal behalten ihre eigenen Schriften.",
+  typefaceHint:
+    "Für die ganze Oberfläche. Code im Editor und das Terminal behalten ihre eigenen Schriften.",
   motion: "Bewegung",
   movement: "Bewegung",
   motionHint:
     "Voll: das Glühen atmet, Funken fliegen, der Orbit dreht sich. Ruhig: das Glühen steht still, nichts fliegt, " +
     "der Orbit dreht sich weiter. Aus: nichts bewegt sich von selbst.",
-  reduceMotionOn: "„Bewegung reduzieren“ von macOS ist an, deshalb ist die Bewegung aus.",
+  reduceMotionOn:
+    "„Bewegung reduzieren“ von macOS ist an, deshalb ist die Bewegung aus.",
   light: "Licht",
   pointerLight: "Licht unter dem Zeiger",
   pointerLightHint: "(die Hex-Linien glühen, wo die Maus ist)",
   dayLight: "Tageszeit-Licht",
   dayLightHint: "(ein schwaches Licht, das mit der Sonne wandert)",
   ignition: "Zündung beim Start",
-  ignitionHint: "(das Logo leuchtet auf, wenn die App startet; nur bei Bewegung Voll)",
+  ignitionHint:
+    "(das Logo leuchtet auf, wenn die App startet; nur bei Bewegung Voll)",
   sound: "Ton",
   sounds: "Töne",
   soundsHint: "(nur, während Axiomata im Hintergrund ist)",
@@ -320,9 +342,11 @@ export const tSettings = texts("settings", en, {
   fileNames: "Dateinamen",
   fileNamesHint: "(neben jeder Notiz im Second Brain)",
   shimmer: "Schimmer",
-  shimmerHint: "(wie die Hex-Zellen das Licht fangen; still, außer bei Bewegung Voll)",
+  shimmerHint:
+    "(wie die Hex-Zellen das Licht fangen; still, außer bei Bewegung Voll)",
   layout: "Anordnung",
-  layoutHint: "(das Second Brain: ein Ring gebündelter Links, Länder oder eine Wabe)",
+  layoutHint:
+    "(das Second Brain: ein Ring gebündelter Links, Länder oder eine Wabe)",
   uiSize: "UI-Größe",
   auto: "Auto",
   autoHint: "({percent} % auf diesem Bildschirm)",
@@ -355,7 +379,8 @@ export const tSettings = texts("settings", en, {
     "Bild abdunkeln: wie stark der Grund des Themes dein Bild verschleiert — dunkler in einem dunklen Theme, " +
     "heller in einem hellen —, damit Text lesbar bleibt. Menüs und Text-Overlays bleiben so oder so dicht, und " +
     "„Transparenz reduzieren“ von macOS macht alles deckend.",
-  reduceTransparencyOn: "„Transparenz reduzieren“ von macOS ist an: das Glas ist jetzt deckend.",
+  reduceTransparencyOn:
+    "„Transparenz reduzieren“ von macOS ist an: das Glas ist jetzt deckend.",
   customCss: "Eigenes CSS",
   notLoaded: "Nicht geladen.",
   reloading: "Lädt neu…",
@@ -398,18 +423,22 @@ export const tSettings = texts("settings", en, {
 
   harnessClaudeCode: "Nur Anthropic, mit der eigenen Anmeldung der App",
   harnessGlut: "Axiomatas eigener Harness — OpenRouter oder Ollama",
-  webExaHint: "Geht auch ohne Schlüssel (begrenzt); ein Schlüssel hebt die Grenze an",
+  webExaHint:
+    "Geht auch ohne Schlüssel (begrenzt); ein Schlüssel hebt die Grenze an",
   webTinyfishHint: "Wird gefragt, wenn Exa begrenzt ist oder scheitert",
-  webTavilyHint: "Wird zuletzt gefragt, nur bis zur Monatsgrenze unten (auf dem Konto liegt eine Karte)",
+  webTavilyHint:
+    "Wird zuletzt gefragt, nur bis zur Monatsgrenze unten (auf dem Konto liegt eine Karte)",
 
   vault: "Vault",
-  vaultLead: "Wurzelordner des Second-Brain-Workspace. Eine Änderung wirkt nach einem Neustart.",
+  vaultLead:
+    "Wurzelordner des Second-Brain-Workspace. Eine Änderung wirkt nach einem Neustart.",
   path: "Pfad",
   vaultPlaceholder: "/Users/…/Vault",
-  saving: "Speichert…",
+  saving: "Speichere…",
   saveRestart: "Speichern & neu starten",
   vaultEmpty: "Der Vault-Pfad darf nicht leer sein.",
-  vaultSavedRestart: "Vault-Pfad gespeichert — starte Axiomata-OS neu, um zu wechseln.",
+  vaultSavedRestart:
+    "Vault-Pfad gespeichert — starte Axiomata-OS neu, um zu wechseln.",
   vaultSaved: "Vault-Pfad gespeichert.",
   savingFailed: "Speichern fehlgeschlagen: {error}",
 
@@ -436,11 +465,13 @@ export const tSettings = texts("settings", en, {
   skillsModel: "Modell für Skills/Routines",
   modelExample: "z. B. {model}",
   modelOverrideBefore: "Ein",
-  modelOverrideAfter: "im Frontmatter der SKILL.md hat weiterhin Vorrang vor dem Skills-Modell.",
+  modelOverrideAfter:
+    "im Frontmatter der SKILL.md hat weiterhin Vorrang vor dem Skills-Modell.",
   unknownProvider:
     "Unbekannter Anbieter „{id}“ — keine Einstellungen zum Bearbeiten. Wähle oben einen der bekannten Anbieter.",
   saveProvider: "Anbieter speichern",
-  providersSaved: "Anbieter-Einstellungen gespeichert — sie gelten ab dem nächsten Agent-Aufruf.",
+  providersSaved:
+    "Anbieter-Einstellungen gespeichert — sie gelten ab dem nächsten Agent-Aufruf.",
 
   roleChat: "Chat",
   roleSkills: "Skills",
@@ -450,15 +481,19 @@ export const tSettings = texts("settings", en, {
   needsKey: "{role} ({provider}) braucht einen API-Schlüssel.",
   modelEmpty: "{role} ({provider}): {field} darf nicht leer sein.",
   modelSpaces: "{role} ({provider}): {field} enthält Leerzeichen.",
-  modelBrackets: "{role} ({provider}): {field} hat unpaarige Klammern — „{value}“.",
-  baseUrlHttps: "{role} ({provider}): die Basis-URL muss mit https:// beginnen.",
+  modelBrackets:
+    "{role} ({provider}): {field} hat unpaarige Klammern — „{value}“.",
+  baseUrlHttps:
+    "{role} ({provider}): die Basis-URL muss mit https:// beginnen.",
 
-  catalogBuiltIn: "Eingebaute Liste — Anthropic hat ohne API-Schlüssel keine Modellliste zum Abfragen.",
+  catalogBuiltIn:
+    "Eingebaute Liste — Anthropic hat ohne API-Schlüssel keine Modellliste zum Abfragen.",
   catalogNone: "Noch keine Modellliste.",
   catalogFailed: "Der letzte Abruf ist fehlgeschlagen: {error}",
   catalogFetched: {
     one: "{n} Modell, abgerufen {when}; aktualisiert beim Start und einmal am Tag.",
-    other: "{n} Modelle, abgerufen {when}; aktualisiert beim Start und einmal am Tag.",
+    other:
+      "{n} Modelle, abgerufen {when}; aktualisiert beim Start und einmal am Tag.",
   },
   pricesNotSaved: "Die Preise ließen sich nicht speichern: {error}",
   pricesUpdated: "Preise aktualisiert: {models}",
@@ -469,7 +504,8 @@ export const tSettings = texts("settings", en, {
     "Der Harness steuert den Agenten — seine Werkzeuge, Rechte und Schleife; der Anbieter liefert das Modell. Jede " +
     "Rolle wählt beides, z. B. Claude Code für den Chat und Glut mit einem lokalen Ollama für die Digests. Das " +
     "eigene",
-  harnessLeadAfter: "eines Skills hat weiterhin Vorrang vor dem hier gesetzten Harness.",
+  harnessLeadAfter:
+    "eines Skills hat weiterhin Vorrang vor dem hier gesetzten Harness.",
   forChat: "Chat",
   forSkills: "Skills & Routines",
   harnessFor: "Harness für {role}",
@@ -479,7 +515,8 @@ export const tSettings = texts("settings", en, {
   glutOwnEffortElse: "Einstellung von Glut, sonst {level}",
   effortNotListed: "{level} (nicht gelistet)",
   webSkillBefore: "Ein Skill, der im Web liest (",
-  webSkillAfter: "), nutzt die Websuche von Glut — ihre Schlüssel und Grenzen stehen unten im Block Websuche.",
+  webSkillAfter:
+    "), nutzt die Websuche von Glut — ihre Schlüssel und Grenzen stehen unten im Block Websuche.",
 
   claudeSignIn: "Claude-Code-Anmeldung",
   signedInAs: "Angemeldet als {email}",
@@ -511,14 +548,16 @@ export const tSettings = texts("settings", en, {
   notSet: "nicht gesetzt",
   searchesPerDay: "Suchen pro Tag (alle Anbieter)",
   tavilyPerMonth: "Tavily-Suchen pro Monat",
-  webLimitsHint: "0 schaltet die Suche (oder Tavily) ab. {n} Tavily-Suchen im Monat sind ihr Gratis-Kontingent.",
+  webLimitsHint:
+    "0 schaltet die Suche (oder Tavily) ab. {n} Tavily-Suchen im Monat sind ihr Gratis-Kontingent.",
 
   spend: "Ausgaben",
   spendToday: "{amount} heute",
   spendCap: "/ {amount} Grenze",
   spendMonth: "· {amount} diesen Monat",
   roleToProvider: "{role} → {provider}",
-  subscriptionBilled: "{role} → {provider} wird über das Abo abgerechnet — keine Kostenerfassung.",
+  subscriptionBilled:
+    "{role} → {provider} wird über das Abo abgerechnet — keine Kostenerfassung.",
   dailyLimit: "Tagesgrenze (USD, bezahlte Anbieter)",
   noLimit: "leer = keine Grenze",
   dailyLimitHint:

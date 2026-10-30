@@ -50,6 +50,7 @@
   import { invokeBackend } from "../core/backend";
   import type { InstalledApp } from "../core/backend";
   import Window from "../shell/Window.svelte";
+  import { tCanvas } from "../i18n/canvas";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -71,7 +72,8 @@
   // Static after `registerBuiltins()` at boot — unlike the external list,
   // there's nothing to (re-)fetch, so this reads straight off the registry
   // on every render rather than needing its own loaded/loading state.
-  const builtins = listAllRingEligibleBuiltins();
+  // Derived so the names follow a language switch.
+  const builtins = $derived(listAllRingEligibleBuiltins());
   const hiddenTypes = $derived(new Set($hiddenBuiltins));
   const filteredIntern = $derived.by(() => {
     const q = query.trim().toLowerCase();
@@ -117,56 +119,62 @@
 
 {#if open}
   <Window
-    title="Add app"
+    title={tCanvas("addApp")}
     onClose={() => (open = false)}
     style="width: min(calc(420px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); height: min(calc(560px * var(--ax-ui-scale)), calc(100vh - 2 * var(--ax-space-5)));"
   >
     <div class="content">
-      <div class="mode-switch" role="radiogroup" aria-label="Internal or external">
+      <div class="mode-switch" role="radiogroup" aria-label={tCanvas("internalOrExternal")}>
         <label class:active={mode === "intern"}>
           <input type="radio" name="app-add-dialog-mode" checked={mode === "intern"} onchange={() => setMode("intern")} />
-          Intern
+          {tCanvas("internal")}
         </label>
         <label class:active={mode === "extern"}>
           <input type="radio" name="app-add-dialog-mode" checked={mode === "extern"} onchange={() => setMode("extern")} />
-          Extern
+          {tCanvas("external")}
         </label>
       </div>
-      <input type="search" class="filter" placeholder="Search…" aria-label="Filter apps" bind:value={query} />
+      <input
+        type="search"
+        class="filter"
+        placeholder={tCanvas("search")}
+        aria-label={tCanvas("filterApps")}
+        bind:value={query}
+      />
       {#if mode === "intern"}
         {#if filteredIntern.length === 0}
-          <p class="muted">No modules found.</p>
+          <p class="muted">{tCanvas("noModulesFound")}</p>
         {:else}
           <ul>
             {#each filteredIntern as app (app.type)}
               <li>
                 <span class="name">{app.title}</span>
                 <button type="button" class="toggle" onclick={() => toggleIntern(app)}>
-                  {hiddenTypes.has(app.type) ? "Anzeigen" : "Ausblenden"}
+                  {hiddenTypes.has(app.type) ? tCanvas("show") : tCanvas("hide")}
                 </button>
               </li>
             {/each}
           </ul>
         {/if}
       {:else if loading}
-        <p class="muted">Loading…</p>
+        <p class="muted">{tCanvas("loading")}</p>
       {:else if error}
         <p class="muted">{error}</p>
       {:else if filteredExtern.length === 0}
-        <p class="muted">No apps found.</p>
+        <p class="muted">{tCanvas("noAppsFound")}</p>
       {:else}
         <ul>
           {#each filteredExtern as app (app.path)}
             <li>
               <span class="name">{app.name}</span>
               <button type="button" class="toggle" onclick={() => toggleExtern(app)}>
-                {addedPaths.has(app.path) ? "Remove" : "Add"}
+                {addedPaths.has(app.path) ? tCanvas("remove") : tCanvas("add")}
               </button>
             </li>
           {/each}
         </ul>
         {#if truncated}
-          <p class="muted hint">More apps not shown — use the search field.</p>
+          <p class="muted hint">{tCanvas("moreApps")}</p>
         {/if}
       {/if}
     </div>

@@ -31,6 +31,7 @@
     type TodoDoc,
   } from "../core/todo";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
 
   const POLL_MS = 5000;
 
@@ -150,10 +151,16 @@
 
 <div class="todo">
   <div class="head">
-    <span class="count"><strong>{doc.open.length}</strong> open</span>
-    <span class="muted">· {doc.done.length} done</span>
+    <span class="count"><strong>{doc.open.length}</strong> {tModules("openCount")}</span>
+    <span class="muted">{tModules("doneCount", { n: doc.done.length })}</span>
     <span class="spacer"></span>
-    <button type="button" class="reload" title="Reload" aria-label="Reload" onclick={() => void load()}>↻</button>
+    <button
+      type="button"
+      class="reload"
+      title={tModules("reload")}
+      aria-label={tModules("reload")}
+      onclick={() => void load()}
+    >↻</button>
   </div>
 
   {#if error}<p class="error">{error}</p>{/if}
@@ -182,23 +189,33 @@
           <input
             type="checkbox"
             checked={false}
-            aria-label={`Mark "${item.text}" done`}
+            aria-label={tModules("markDone", { name: item.text })}
             onchange={() => void persist(completeTodo(doc, i, todayIso()))}
           />
           <span class="text">{item.text}</span>
-          <button type="button" class="edit" aria-label={`Edit "${item.text}"`} onclick={() => startEditOpen(i)}>✎</button>
-          <button type="button" class="del" aria-label={`Delete "${item.text}"`} onclick={() => void persist(deleteOpen(doc, i))}>✕</button>
+          <button
+            type="button"
+            class="edit"
+            aria-label={tModules("editItem", { name: item.text })}
+            onclick={() => startEditOpen(i)}
+          >✎</button>
+          <button
+            type="button"
+            class="del"
+            aria-label={tModules("deleteItem", { name: item.text })}
+            onclick={() => void persist(deleteOpen(doc, i))}
+          >✕</button>
         {/if}
       </li>
     {/each}
     {#if doc.open.length === 0}
-      <li class="empty muted">Nothing open. Add a task below.</li>
+      <li class="empty muted">{tModules("nothingOpen")}</li>
     {/if}
   </ul>
 
   {#if doc.done.length > 0}
     <button type="button" class="done-toggle" onclick={() => (showDone = !showDone)} aria-expanded={showDone}>
-      {showDone ? "▾" : "▸"} Done · {doc.done.length}
+      {showDone ? "▾" : "▸"} {tModules("doneSection", { n: doc.done.length })}
     </button>
     {#if showDone}
       <ul class="list done">
@@ -225,13 +242,23 @@
               <input
                 type="checkbox"
                 checked={true}
-                aria-label={`Reopen "${item.text}"`}
+                aria-label={tModules("reopenItem", { name: item.text })}
                 onchange={() => void persist(reopenTodo(doc, i))}
               />
               <span class="text struck">{item.text}</span>
               {#if item.doneOn}<span class="date muted">{item.doneOn}</span>{/if}
-              <button type="button" class="edit" aria-label={`Edit "${item.text}"`} onclick={() => startEditDone(i)}>✎</button>
-              <button type="button" class="del" aria-label={`Delete "${item.text}"`} onclick={() => void persist(deleteDone(doc, i))}>✕</button>
+              <button
+                type="button"
+                class="edit"
+                aria-label={tModules("editItem", { name: item.text })}
+                onclick={() => startEditDone(i)}
+              >✎</button>
+              <button
+                type="button"
+                class="del"
+                aria-label={tModules("deleteItem", { name: item.text })}
+                onclick={() => void persist(deleteDone(doc, i))}
+              >✕</button>
             {/if}
           </li>
         {/each}
@@ -240,8 +267,8 @@
   {/if}
 
   <form class="add" onsubmit={(e) => (e.preventDefault(), add())}>
-    <input type="text" placeholder="New task…" bind:value={draft} />
-    <button type="submit" aria-label="Add task" disabled={!draft.trim()}>+</button>
+    <input type="text" placeholder={tModules("newTask")} bind:value={draft} />
+    <button type="submit" aria-label={tModules("addTask")} disabled={!draft.trim()}>+</button>
   </form>
 </div>
 
