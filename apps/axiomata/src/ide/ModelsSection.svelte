@@ -4,23 +4,28 @@
   price proposal. An automatic engine exists for every model that is on; the owner's own engines sit at the bottom
   (`EnginesSection`). Rust decides every rule (`model_tiers`, `engines`); this only shows and sends.
 
-  Accent rule: orange only where something lives — the research run under way — and on the one primary action of a
-  waiting proposal ("Accept"). The owner's chosen tier is a selection (`--ax-selected-bg`), not a glow.
+  Accent rule: orange only where something lives — the research run under way. A waiting proposal carries a warn mark
+  and a plain "Accept"; the owner's chosen tier is a selection (`--ax-selected-bg`), not a glow.
+
+  Every control shows the backend's state: a switch or a select that is changed is put back at once and redrawn from
+  the answer's reload, so a refused change never stays on screen.
 -->
 <script lang="ts">
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
 
   import { listenBackend } from "../core/backend";
   import { messageOf } from "../core/errors";
   import { TIERS, listEngines, type EngineEntry, type Tier } from "../core/roster";
   import { toast } from "../core/toast";
+  import { uiScale } from "../core/uiScale";
   import Notice from "../ui/Notice.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import EnginesSection from "./EnginesSection.svelte";
   import {
+    Latest,
     MODEL_TIERS_UPDATED,
     SMALL_LIST_MAX,
     choiceWithTier,
@@ -28,6 +33,7 @@
     engineOptionsFor,
     filterModels,
     isWebAddress,
+    limitsAfterReload,
     limitsProblem,
     listModels,
     modelResearchRunning,
@@ -36,12 +42,15 @@
     proposalWaits,
     providerHeading,
     researchModelTiers,
+    researchToast,
     setDefaultEngine,
     setModelChoice,
     setTierLimits,
     sourceHost,
     tierOrigin,
     toggledChoice,
+    withBusy,
+    withoutBusy,
     type ModelEntry,
     type ModelsOverview,
   } from "./models";
@@ -49,6 +58,8 @@
 
   /** The catalog was refreshed (`model_watch.rs`): the lists may have changed. */
   const CATALOG_UPDATED = "models:catalog-updated";
+  /** Below this width (unscaled px) a model's tier goes under its name; times the UI scale, like every size. */
+  const NARROW_PX = 640;
 
   let overview = $state<ModelsOverview | null>(null);
   let engines = $state<EngineEntry[]>([]);
@@ -56,11 +67,16 @@
   let running = $state(false);
   /** The filter text of each provider's list. */
   let queries = $state<Record<string, string>>({});
-  /** The price limits as typed, before they are saved. */
+  /** The price limits as typed, before they are saved; `editingLimits` while the owner types them. */
   let lightBelow = $state("");
   let heavyAbove = $state("");
-  /** A model whose change is on its way, so its controls wait for the answer. */
-  let busy = $state<string | null>(null);
+  let editingLimits = $state(false);
+  /** The rows whose change is on its way: each waits on its own answer. */
+  let busy = $state<Set<string>>(new Set());
+  /** Only the newest reload's answer is shown. */
+  const latest = new Latest();
+  let width = $state(0);
+  const narrow = $derived(width > 0 && width < NARROW_PX * $uiScale);
 
   const groups = $derived(overview ? modelsByProvider(overview.models) : []);
   const limitsTyped = $derived({ light: Number(lightBelow), heavy: Number(heavyAbove) });
@@ -71,32 +87,39 @@
   const limitsError = $derived(limitsProblem(limitsTyped.light, limitsTyped.heavy));
 
   async function reload() {
+    const ticket = latest.next();
     try {
       const [models, catalog, researching] = await Promise.all([listModels(), listEngines(), modelResearchRunning()]);
+      if (!latest.current(ticket)) return;
       overview = models;
       engines = catalog;
       running = researching;
-      lightBelow = String(models.tier_limits.light_below);
-      heavyAbove = String(models.tier_limits.heavy_above);
+      ({ lightBelow, heavyAbove } = limitsAfterReload({ lightBelow, heavyAbove }, models.tier_limits, editingLimits));
     } catch (err) {
-      toast(`Could not load the models: ${messageOf(err)}`, "warning");
+      if (latest.current(ticket)) toast(`Could not load the models: ${messageOf(err)}`, "warning");
     } finally {
-      loading = false;
+      if (latest.current(ticket)) loading = false;
     }
   }
 
-  /** Runs a change, then reloads the list and the engine pickers elsewhere (the engines follow the models). */
-  async function change(key: string, act: () => Promise<unknown>) {
-    busy = key;
+  /**
+   * Runs a change, then reloads the list and the engine pickers elsewhere (the engines follow the models). The reload
+   * runs on a refusal too, so what is shown is what the backend holds.
+   */
+  async function change(key: string, act: () => Promise<unknown>): Promise<boolean> {
+    busy = withBusy(busy, key);
+    let done = false;
     try {
       await act();
-      await reload();
+      done = true;
       void refreshEngines();
     } catch (err) {
       toast(messageOf(err), "warning");
     } finally {
-      busy = null;
+      busy = withoutBusy(busy, key);
+      await reload();
     }
+    return done;
   }
 
   const toggle = (model: ModelEntry) => change(model.key, () => setModelChoice(model.key, toggledChoice(model)));
@@ -105,23 +128,28 @@
   const accept = (model: ModelEntry) => (model.proposal ? rate(model, model.proposal.tier) : undefined);
 
   async function research(keys: string[] | null) {
+    // Shown at once; the backend's flag decides from here on (a fast run may end before the answer arrives).
+    running = true;
     try {
       const asked = await researchModelTiers(keys);
-      if (asked.length > 0) running = true;
-      toast(
-        asked.length === 1 ? "Researching the model's tier…" : `Researching the tiers of ${asked.length} models…`,
-        "info",
-      );
+      toast(researchToast(asked.length), "info");
     } catch (err) {
       toast(messageOf(err), "warning");
     }
+    running = await modelResearchRunning().catch(() => false);
   }
 
   const setDefault = (tier: Tier, id: string) => change(`default:${tier}`, () => setDefaultEngine(tier, id || null));
 
   async function saveLimits() {
     if (limitsError) return;
-    await change("limits", () => setTierLimits({ light_below: limitsTyped.light, heavy_above: limitsTyped.heavy }));
+    const limits = { light_below: limitsTyped.light, heavy_above: limitsTyped.heavy };
+    // Saved: the form takes the stored limits again; refused: the owner's typing stays to be corrected.
+    const saved = await change("limits", async () => {
+      await setTierLimits(limits);
+      editingLimits = false;
+    });
+    if (saved) ({ lightBelow, heavyAbove } = limitsAfterReload({ lightBelow, heavyAbove }, limits, false));
   }
 
   /** Opens a proposal's source in the system browser; in the browser mock, in a new tab. */
@@ -140,19 +168,23 @@
 
   const tierLabel = (tier: Tier | null) => TIERS.find((t) => t.id === tier)?.label ?? "—";
 
-  let unlisten: (() => void)[] = [];
   onMount(() => {
+    let destroyed = false;
+    const stops: (() => void)[] = [];
+    /** A listener that arrives after the pane is gone is stopped at once, never left behind. */
+    const keep = (stop: () => void) => (destroyed ? stop() : stops.push(stop));
     void reload();
-    void listenBackend(MODEL_TIERS_UPDATED, () => {
-      running = false;
-      void reload();
-    }).then((stop) => unlisten.push(stop));
-    void listenBackend(CATALOG_UPDATED, () => void reload()).then((stop) => unlisten.push(stop));
+    // `reload` asks the backend whether research still runs: the event's word alone could be stale.
+    void listenBackend(MODEL_TIERS_UPDATED, () => void reload()).then(keep);
+    void listenBackend(CATALOG_UPDATED, () => void reload()).then(keep);
+    return () => {
+      destroyed = true;
+      stops.forEach((stop) => stop());
+    };
   });
-  onDestroy(() => unlisten.forEach((stop) => stop()));
 </script>
 
-<div class="models">
+<div class="models" class:narrow bind:clientWidth={width}>
   <div class="column">
     {#if running}
       <div class="slot">
@@ -184,8 +216,12 @@
               <span class="tier-name">{t.label}</span>
               <select
                 value={chosen}
-                disabled={busy === `default:${t.id}`}
-                onchange={(e) => void setDefault(t.id, e.currentTarget.value)}
+                disabled={busy.has(`default:${t.id}`)}
+                onchange={(e) => {
+                  const picked = e.currentTarget.value;
+                  e.currentTarget.value = chosen;
+                  void setDefault(t.id, picked);
+                }}
               >
                 <option value="">Cheapest{options[0] ? `: ${engineName(options[0])}` : " of the tier"}</option>
                 {#if chosen && !options.some((o) => o.id === chosen)}
@@ -206,16 +242,16 @@
         <div class="limits">
           <label class="limit">
             <span>Light below</span>
-            <input type="number" min="0" step="0.1" bind:value={lightBelow} />
+            <input type="number" min="0" step="0.1" bind:value={lightBelow} oninput={() => (editingLimits = true)} />
           </label>
           <label class="limit">
             <span>Heavy above</span>
-            <input type="number" min="0" step="0.5" bind:value={heavyAbove} />
+            <input type="number" min="0" step="0.5" bind:value={heavyAbove} oninput={() => (editingLimits = true)} />
           </label>
           <button
             type="button"
             class="ax-btn"
-            disabled={!limitsChanged || limitsError !== null || busy === "limits"}
+            disabled={!limitsChanged || limitsError !== null || busy.has("limits")}
             onclick={() => void saveLimits()}>Save limits</button
           >
         </div>
@@ -259,9 +295,12 @@
                     type="checkbox"
                     role="switch"
                     checked={m.enabled}
-                    disabled={busy === m.key}
+                    disabled={busy.has(m.key)}
                     aria-label="{m.short_name} on"
-                    onchange={() => void toggle(m)}
+                    onchange={(e) => {
+                      e.currentTarget.checked = m.enabled;
+                      void toggle(m);
+                    }}
                   />
                   <span class="track" aria-hidden="true"></span>
                 </label>
@@ -284,7 +323,7 @@
                         aria-checked={mine}
                         class:mine
                         class:applies={applies && !mine}
-                        disabled={busy === m.key}
+                        disabled={busy.has(m.key)}
                         title={mine ? "Your tier — click to drop it" : `Set ${t.label.toLowerCase()} as your tier`}
                         onclick={() => void rate(m, mine ? null : t.id)}>{t.label}</button
                       >
@@ -315,7 +354,7 @@
                       <span class="source-text">{m.proposal.source}</span>
                     {/if}
                     {#if proposalWaits(m)}
-                      <button type="button" class="ax-btn small" disabled={busy === m.key} onclick={() => void accept(m)}>
+                      <button type="button" class="ax-btn small" disabled={busy.has(m.key)} onclick={() => void accept(m)}>
                         Accept {tierLabel(m.proposal.tier)}
                       </button>
                     {/if}
@@ -657,15 +696,13 @@
     overflow: hidden;
   }
 
-  /* In a narrow pane the tier and its source go under the name. */
-  @container (max-width: 640px) {
-    .model {
-      grid-template-columns: auto minmax(0, 1fr) auto;
-    }
+  /* In a narrow pane (`NARROW_PX` times the UI scale) the tier and its source go under the name. */
+  .narrow .model {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
 
-    .rating {
-      grid-column: 2 / -1;
-      align-items: flex-start;
-    }
+  .narrow .rating {
+    grid-column: 2 / -1;
+    align-items: flex-start;
   }
 </style>

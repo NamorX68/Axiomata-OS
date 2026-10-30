@@ -120,3 +120,15 @@ describe("role form", () => {
     bad({ maxSteps: "0" }, "maxSteps");
   });
 });
+
+describe("a role form without the engine fields (agents-model.md, Q6)", () => {
+  it("leaves what the file names alone, even a fallback that repeats the engine", () => {
+    const form = { ...blankRoleForm(), name: "old", kind: "implement", engine: "e", fallback: "e, f" };
+    const checked = checkRoleForm(form, null);
+    expect(checked.ok).toBe(true);
+    if (checked.ok) {
+      expect(checked.value.engine).toBe("e");
+      expect(checked.value.fallback_engines).toEqual(["e", "f"]);
+    }
+  });
+});

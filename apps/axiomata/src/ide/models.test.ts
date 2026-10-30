@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  Latest,
   choiceWithTier,
+  limitsAfterReload,
+  researchToast,
+  withBusy,
+  withoutBusy,
   contextLabel,
   engineOptionsFor,
   filterModels,
@@ -118,5 +123,35 @@ describe("the Models tab's helpers", () => {
       "medium",
     );
     expect(options.map((o) => o.id)).toEqual(["glm", "sonnet"]);
+  });
+});
+
+describe("the Models tab's state", () => {
+  it("keeps the limits the owner is typing over a reload, and takes the stored ones otherwise", () => {
+    const typed = { lightBelow: "0.7", heavyAbove: "12" };
+    const stored = { light_below: 1, heavy_above: 10 };
+    expect(limitsAfterReload(typed, stored, true)).toEqual(typed);
+    expect(limitsAfterReload(typed, stored, false)).toEqual({ lightBelow: "1", heavyAbove: "10" });
+  });
+
+  it("shows only the newest reload's answer", () => {
+    const latest = new Latest();
+    const first = latest.next();
+    const second = latest.next();
+    expect(latest.current(first)).toBe(false);
+    expect(latest.current(second)).toBe(true);
+  });
+
+  it("tracks busy rows one by one", () => {
+    const one = withBusy(new Set(), "a");
+    const two = withBusy(one, "b");
+    expect([...withoutBusy(two, "a")]).toEqual(["b"]);
+    expect(one.has("b")).toBe(false);
+  });
+
+  it("says nothing about zero models as if research ran", () => {
+    expect(researchToast(0)).toContain("No model");
+    expect(researchToast(1)).toContain("model's tier");
+    expect(researchToast(3)).toContain("3 models");
   });
 });

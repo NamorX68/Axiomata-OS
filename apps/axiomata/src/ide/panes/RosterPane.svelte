@@ -13,15 +13,33 @@
   type Part = "models" | "roles";
 
   let part = $state<Part>("models");
+  /** Ids of the tabs and their panels; unique, as each layout may hold its own pane. */
+  const uid = crypto.randomUUID();
 </script>
 
 <div class="roster">
   <header>
     <div class="switch" role="tablist" aria-label="Models or roles">
-      <button type="button" role="tab" class:active={part === "models"} aria-selected={part === "models"} onclick={() => (part = "models")}>
+      <button
+        type="button"
+        role="tab"
+        id="{uid}-tab-models"
+        aria-controls="{uid}-panel-models"
+        class:active={part === "models"}
+        aria-selected={part === "models"}
+        onclick={() => (part = "models")}
+      >
         Models
       </button>
-      <button type="button" role="tab" class:active={part === "roles"} aria-selected={part === "roles"} onclick={() => (part = "roles")}>
+      <button
+        type="button"
+        role="tab"
+        id="{uid}-tab-roles"
+        aria-controls="{uid}-panel-roles"
+        class:active={part === "roles"}
+        aria-selected={part === "roles"}
+        onclick={() => (part = "roles")}
+      >
         Roles
       </button>
     </div>
@@ -31,10 +49,10 @@
       a role at a tier on an engine, started as a session with its own branch.
     </p>
   </header>
-  <div class="part" class:off={part !== "models"}>
+  <div class="part" class:off={part !== "models"} role="tabpanel" id="{uid}-panel-models" aria-labelledby="{uid}-tab-models">
     <ModelsSection />
   </div>
-  <div class="part" class:off={part !== "roles"}>
+  <div class="part" class:off={part !== "roles"} role="tabpanel" id="{uid}-panel-roles" aria-labelledby="{uid}-tab-roles">
     <RolesSection />
   </div>
 </div>

@@ -265,11 +265,14 @@ export function checkRoleForm(form: RoleForm, engines: string[] | null): FormRes
   }
   const engine = form.engine.trim();
   const fallback = splitList(form.fallback);
-  const known = engines === null ? null : new Set(engines);
-  if (known && engine && !known.has(engine)) return fail("engine", `There is no engine “${engine}”.`);
-  for (const id of fallback) {
-    if (known && !known.has(id)) return fail("fallback", `There is no engine “${id}”.`);
-    if (id === engine) return fail("fallback", `“${id}” is already the default engine.`);
+  // Without a list of engines the form does not show the engine fields: they go back as the file had them.
+  if (engines !== null) {
+    const known = new Set(engines);
+    if (engine && !known.has(engine)) return fail("engine", `There is no engine “${engine}”.`);
+    for (const id of fallback) {
+      if (!known.has(id)) return fail("fallback", `There is no engine “${id}”.`);
+      if (id === engine) return fail("fallback", `“${id}” is already the default engine.`);
+    }
   }
   const creates = splitList(form.creates);
   const badKind = creates.find((k) => !isSlug(k));

@@ -242,3 +242,52 @@ export function engineOptionsFor<T extends TierEngineOption>(engines: readonly T
     .filter((e) => e.rated_tier === tier && e.unusable === null)
     .sort((a, b) => (a.output_per_m ?? Infinity) - (b.output_per_m ?? Infinity) || a.id.localeCompare(b.id));
 }
+
+/**
+ * The price limits the form shows after a reload: what is stored, unless the owner is typing — then what they typed
+ * stays, so a reload caused by another change never throws their edit away.
+ */
+export function limitsAfterReload(
+  typed: { lightBelow: string; heavyAbove: string },
+  stored: TierLimits,
+  editing: boolean,
+): { lightBelow: string; heavyAbove: string } {
+  return editing ? typed : { lightBelow: String(stored.light_below), heavyAbove: String(stored.heavy_above) };
+}
+
+/**
+ * Hands out numbers to requests and says whether an answer is the newest — so an older reload that answers late never
+ * overwrites a newer one.
+ */
+export class Latest {
+  private last = 0;
+
+  /** The number of a request about to be sent. */
+  next(): number {
+    this.last += 1;
+    return this.last;
+  }
+
+  /** Whether `ticket`'s answer is still the one to show. */
+  current(ticket: number): boolean {
+    return ticket === this.last;
+  }
+}
+
+/** `busy` with `key` added — each row waits on its own change, not on another row's. */
+export function withBusy(busy: ReadonlySet<string>, key: string): Set<string> {
+  return new Set([...busy, key]);
+}
+
+/** `busy` without `key`. */
+export function withoutBusy(busy: ReadonlySet<string>, key: string): Set<string> {
+  const next = new Set(busy);
+  next.delete(key);
+  return next;
+}
+
+/** What "propose again" says when it was answered: nothing was asked for, one model, or several. */
+export function researchToast(asked: number): string {
+  if (asked === 0) return "No model is switched on to research.";
+  return asked === 1 ? "Researching the model's tier…" : `Researching the tiers of ${asked} models…`;
+}

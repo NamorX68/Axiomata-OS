@@ -30,6 +30,9 @@
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
 
+  /** The fields this form shows a problem beside; any other problem is shown above the buttons. */
+  const SHOWN_FIELDS = ["name", "description", "kind", "creates", "maxCost", "maxTokens", "maxSteps"];
+
   let roles = $state<Role[]>([]);
   let skipped = $state<SkippedRole[]>([]);
   let loading = $state(true);
@@ -233,7 +236,8 @@
           {#if problem?.field === "creates"}<em class="problem">{problem.message}</em>{/if}
         </label>
       </details>
-      {#if problem && !problem.field}<p class="problem">{problem.message}</p>{/if}
+      <!-- A problem of a field the form does not show (or of none) is said here, never swallowed. -->
+      {#if problem && !SHOWN_FIELDS.includes(problem.field)}<p class="problem">{problem.message}</p>{/if}
       <div class="actions">
         <button type="button" class="ax-btn primary" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save role"}</button>
         <button type="button" class="ax-btn" onclick={() => (form = null)}>Cancel</button>

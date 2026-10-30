@@ -65,26 +65,34 @@ fn take_back(marked: &Marked) {
 }
 
 /// Starts one run of the research skill for `marked` in the background; hands `marked` back when one is under way.
+///
+/// The run is a task of its own, awaited here: should it panic, this still closes the run, lets go of the flag and only
+/// then tells the frontend — which asks whether research still runs and must hear "no".
 fn start(app: &AppHandle, marked: Marked) -> Result<(), Box<Marked>> {
     let Some(running) = Running::claim() else {
         return Err(Box::new(marked));
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _running = running;
-        let core = app.state::<AxiomataCore>();
-        let config = core.config_read().clone();
-        let run = skills::execute_and_record_skill(model_research::SKILL, &config, &core.db).await;
+        let run_app = app.clone();
+        let run = tauri::async_runtime::spawn(async move {
+            let core = run_app.state::<AxiomataCore>();
+            let config = core.config_read().clone();
+            skills::execute_and_record_skill(model_research::SKILL, &config, &core.db).await
+        })
+        .await;
         match run {
-            Ok(record) => {
+            Ok(Ok(record)) => {
                 tracing::info!(status = ?record.status, "the research of model tiers ended")
             }
-            Err(err) => tracing::warn!(%err, "the research of model tiers did not run"),
+            Ok(Err(err)) => tracing::warn!(%err, "the research of model tiers did not run"),
+            Err(err) => tracing::warn!(%err, "the research of model tiers broke off"),
         }
         // What the run left unanswered is no longer asked for; its attempt time keeps it from starting at once.
         if let Err(err) = model_research::finish(&marked) {
             tracing::warn!(%err, "could not close the research of model tiers");
         }
+        drop(running);
         if let Err(err) = app.emit(MODEL_TIERS_UPDATED, ()) {
             tracing::warn!(%err, "could not tell the frontend about new tier proposals");
         }
