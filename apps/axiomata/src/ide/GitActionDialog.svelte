@@ -28,6 +28,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import { tStudio } from "../i18n/studio";
+
   interface Props {
     action: GitAction;
     agentName: string;
@@ -54,11 +56,12 @@
 
   const needsMessage = $derived(action.kind === "commit" || action.kind === "take-over");
   const canConfirm = $derived(!busy && (!needsMessage || message.trim() !== ""));
-  const CONFIRM_LABEL: Record<GitAction["kind"], string> = {
-    "discard-file": "Discard",
-    "discard-hunk": "Discard",
-    commit: "Commit",
-    "take-over": "Take over",
+  /** The confirming button's word per question, read where it is drawn. */
+  const CONFIRM_LABEL: Record<GitAction["kind"], () => string> = {
+    "discard-file": () => tStudio("discard"),
+    "discard-hunk": () => tStudio("discard"),
+    commit: () => tStudio("commit"),
+    "take-over": () => tStudio("takeOver"),
   };
 
   function confirm(): void {
@@ -89,47 +92,46 @@
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="git-action-title">
     {#if action.kind === "discard-file" || action.kind === "discard-hunk"}
       <h3 id="git-action-title">
-        {action.kind === "discard-file" ? "Discard this file's changes?" : "Discard this change?"}
+        {action.kind === "discard-file" ? tStudio("discardFileAsk") : tStudio("discardHunkAsk")}
       </h3>
       <p>
         <code>{action.path}</code>
         {#if action.kind === "discard-hunk"}<span class="header">{action.header}</span>{/if}
       </p>
       <p class="muted">
-        It goes back to how the base has it — committed work included. The result is an uncommitted change in
-        {agentName}'s worktree, so you can still see it here and undo it until it is committed.
+        {tStudio("discardExplain", { name: agentName })}
       </p>
     {:else if action.kind === "commit"}
-      <h3 id="git-action-title">Commit what {agentName} left uncommitted</h3>
+      <h3 id="git-action-title">{tStudio("commitAsk", { name: agentName })}</h3>
       <label class="field">
-        <span>Message</span>
+        <span>{tStudio("message")}</span>
         <textarea bind:value={message} rows="3" bind:this={messageField}></textarea>
       </label>
     {:else}
-      <h3 id="git-action-title">Take {agentName}'s work over into {action.branch}</h3>
-      <div class="modes" role="radiogroup" aria-label="How">
+      <h3 id="git-action-title">{tStudio("takeOverAsk", { name: agentName, branch: action.branch })}</h3>
+      <div class="modes" role="radiogroup" aria-label={tStudio("how")}>
         <label>
           <input type="radio" name="mode" value="squash" bind:group={mode} />
-          <span><strong>Squash</strong> — one new commit on {action.branch}</span>
+          <span><strong>{tStudio("squash")}</strong> {tStudio("squashExplain", { branch: action.branch })}</span>
         </label>
         <label>
           <input type="radio" name="mode" value="no_ff" bind:group={mode} />
-          <span><strong>Merge (--no-ff)</strong> — keeps {agentName}'s commits</span>
+          <span><strong>{tStudio("mergeNoFf")}</strong> {tStudio("mergeExplain", { name: agentName })}</span>
         </label>
       </div>
       <label class="field">
-        <span>Message</span>
+        <span>{tStudio("message")}</span>
         <textarea bind:value={message} rows="3" bind:this={messageField}></textarea>
       </label>
-      <p class="muted">Never pushes. {agentName}'s branch moves onto the new {action.branch}; its diff is then empty.</p>
+      <p class="muted">{tStudio("neverPushes", { name: agentName, branch: action.branch })}</p>
     {/if}
 
     {#if working && action.kind !== "take-over"}
-      <p class="warn">{agentName} is working right now and may change these files again.</p>
+      <p class="warn">{tStudio("workingNow", { name: agentName })}</p>
     {/if}
     {#if conflictFiles && conflictFiles.length > 0}
       <div class="problem">
-        <p>These files conflict, so nothing was changed:</p>
+        <p>{tStudio("conflict")}</p>
         <ul>
           {#each conflictFiles as file (file)}<li><code>{file}</code></li>{/each}
         </ul>
@@ -139,7 +141,7 @@
     {/if}
 
     <div class="buttons">
-      <button type="button" class="ax-btn" onclick={onCancel}>Cancel</button>
+      <button type="button" class="ax-btn" onclick={onCancel}>{tStudio("cancel")}</button>
       <button
         type="button"
         class="ax-btn"
@@ -149,7 +151,7 @@
         onclick={confirm}
         bind:this={confirmButton}
       >
-        {busy ? "Working…" : CONFIRM_LABEL[action.kind]}
+        {busy ? tStudio("working") : CONFIRM_LABEL[action.kind]()}
       </button>
     </div>
   </div>

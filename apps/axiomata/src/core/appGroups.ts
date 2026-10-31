@@ -9,6 +9,8 @@
 
 import { get, writable, type Writable } from "svelte/store";
 
+import { tCanvas } from "../i18n/canvas";
+
 import type { GraphNode } from "../graph/model";
 
 /** A member is identified the same way its ring node already is: a builtin
@@ -36,19 +38,20 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
-/** Next free "Gruppe N" name, gap-filling rather than counting up forever —
- *  deleting "Gruppe 2" and creating a new group should offer "Gruppe 2"
- *  again, not jump to "Gruppe 4". */
+/** Next free "Group N" name ("Gruppe N" in German), gap-filling rather than
+ *  counting up forever — deleting "Group 2" and creating a new group should
+ *  offer "Group 2" again, not jump to "Group 4". A stored name is data: a name
+ *  given in either language counts as taken, so a switch never doubles one. */
 export function nextGroupName(existingNames: string[]): string {
   const used = new Set(
     existingNames
-      .map((n) => /^Gruppe (\d+)$/.exec(n))
+      .map((n) => /^(?:Group|Gruppe) (\d+)$/.exec(n))
       .filter((m): m is RegExpExecArray => m !== null)
       .map((m) => Number(m[1])),
   );
   let n = 1;
   while (used.has(n)) n++;
-  return `Gruppe ${n}`;
+  return tCanvas("groupName", { n });
 }
 
 /** Creates a new one-member group on `side`, with the shared defaults

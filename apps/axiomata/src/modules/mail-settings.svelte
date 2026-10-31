@@ -9,11 +9,13 @@
   source of truth for it.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { loadTopics, MAIL_SKILL_NAME, saveTopics } from "../core/mail";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
   import SkillNameField from "./SkillNameField.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -33,7 +35,7 @@
       const topics = await loadTopics(ctx.invoke);
       text = topics.join("\n");
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       loading = false;
     }
@@ -52,7 +54,7 @@
       await saveTopics(ctx.invoke, topics);
       saved = true;
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       saving = false;
     }
@@ -61,30 +63,29 @@
 
 <div class="settings">
   <p class="muted">
-    Currently calling <code>{skillName}</code>.
+    {tModules("currentlyCallingBefore")}<code>{skillName}</code>{tModules("currentlyCallingAfter")}
   </p>
   <SkillNameField {ctx} defaultName={MAIL_SKILL_NAME} />
 
   <label class="field" for="mail-topics">
-    Topics (one per line) — mail matching any of these shows up alongside whatever the agent
-    judges important on its own:
+    {tModules("topicsLabel")}
   </label>
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{tModules("loading")}</p>
   {:else}
     <textarea
       id="mail-topics"
       bind:value={text}
       spellcheck="false"
-      placeholder={"Fotografie\nDevelopment\nKI/AI/LLM"}
+      placeholder={tModules("topicsPlaceholder")}
       oninput={() => (saved = false)}
     ></textarea>
     {#if error}<p class="error">{error}</p>{/if}
     <div class="row">
-      {#if saved}<span class="muted saved">Saved.</span>{/if}
+      {#if saved}<span class="muted saved">{tModules("saved")}</span>{/if}
       <span class="spacer"></span>
       <button type="button" class="primary" disabled={saving} onclick={save}>
-        {saving ? "Saving…" : "Save"}
+        {saving ? tModules("saving") : tModules("save")}
       </button>
     </div>
   {/if}

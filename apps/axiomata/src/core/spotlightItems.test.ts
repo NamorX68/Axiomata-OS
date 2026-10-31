@@ -44,7 +44,7 @@ describe("spotlight items", () => {
   it("shows whether a routine is on, with its cron, and opens the Routines board", () => {
     const routines = [{ id: 7, name: "Nightly", cron_expr: "0 0 3 * * *", enabled: false }] as Routine[];
     const [routine] = routineItems(routines);
-    expect(routine.subtitle).toBe("aus · 0 0 3 * * *");
+    expect(routine.subtitle).toBe("off · 0 0 3 * * *");
     expect(routine.payload).toEqual({ type: "routines" });
   });
 

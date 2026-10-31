@@ -4,6 +4,7 @@
  * works on what, and what each of them did last, without opening a terminal.
  */
 import type { BoardCard, BoardPlan, IdeAgent, SessionActivityStep, TaskState } from "../core/backend";
+import { tFlow } from "../i18n/flow";
 
 /** What a session is for, as the tile says it. */
 export type Duty = "worker" | "reviewer" | "planner" | "own";
@@ -67,7 +68,7 @@ export function groupsOf(agents: IdeAgent[], cards: BoardCard[], plans: BoardPla
   const rank = (tile: Tile): number => (tile.card ? ORDER[tile.card.state] : -1);
   const result: TeamGroup[] = [...groups.entries()].map(([planId, tiles]) => ({
     planId,
-    title: planId === null ? "No plan" : `Plan #${planId} · ${planName.get(planId) ?? "?"}`,
+    title: planId === null ? tFlow("noPlan") : tFlow("planGroup", { id: planId, name: planName.get(planId) ?? "?" }),
     tiles: tiles.sort(
       (a, b) =>
         rank(a) - rank(b) ||
@@ -84,11 +85,11 @@ export function groupsOf(agents: IdeAgent[], cards: BoardCard[], plans: BoardPla
 export function dutyLabel(duty: Duty): string {
   switch (duty) {
     case "worker":
-      return "works on";
+      return tFlow("dutyWorker");
     case "reviewer":
-      return "reviews";
+      return tFlow("dutyReviewer");
     case "planner":
-      return "plans";
+      return tFlow("dutyPlanner");
     case "own":
       return "";
   }
@@ -113,9 +114,9 @@ export function stepLabel(step: SessionActivityStep): string {
 /** What the tile's live line says: the newest step, or why there is none. */
 export function nowLine(activity: { readable: boolean; steps: SessionActivityStep[] } | undefined): string {
   if (!activity) return "";
-  if (!activity.readable) return "nothing recorded yet";
+  if (!activity.readable) return tFlow("nothingRecorded");
   const last = activity.steps[activity.steps.length - 1];
-  return last ? stepLabel(last) : "no step yet";
+  return last ? stepLabel(last) : tFlow("noStepYet");
 }
 
 /** When the newest step happened, as the harness wrote it; `null` where there is no step or the record has no time. */

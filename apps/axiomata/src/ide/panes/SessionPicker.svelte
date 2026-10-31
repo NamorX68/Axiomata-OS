@@ -8,6 +8,7 @@
   import type { EngineEntry, Role } from "../../core/roster";
   import { engineLine } from "../rosterStore";
   import { sessionEngine } from "../planning";
+  import { tAgents as t } from "../../i18n/agents";
 
   let {
     label,
@@ -45,17 +46,17 @@
 </label>
 {#if choice.ask}
   <label class="picker">
-    Engine for “{picked}” <span class="muted">(saved in the role)</span>
+    {t("engineFor", { role: picked })} <span class="muted">{t("savedInRole")}</span>
     <select
       value={choice.engineId}
-      aria-label="Engine for {picked}"
+      aria-label={t("engineForLabel", { role: picked })}
       onchange={(event) => (engine = (event.currentTarget as HTMLSelectElement).value)}
     >
       {#each catalog as e (e.id)}<option value={e.id}>{e.label} — {engineLine(e)}</option>{/each}
     </select>
   </label>
 {:else if engineLabel}
-  <span class="muted on" title="The engine belongs to the role; change it under Models &amp; roles">runs on {engineLabel.label}</span>
+  <span class="muted on" title={t("engineBelongsToRole")}>{t("runsOn", { engine: engineLabel.label })}</span>
 {/if}
 
 <style>

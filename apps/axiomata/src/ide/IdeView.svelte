@@ -28,6 +28,7 @@
   one terminal and lives only as long as the app does.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount, tick, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
@@ -97,6 +98,7 @@
   import { applyProjectCwd } from "./paneCwd";
   import { shownFileTab } from "./shownFile";
   import { MODES, MODE_ICON, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
+  import { tStudio } from "../i18n/studio";
   import { balanceCanvas, canvasAgentTarget } from "./canvasLayout";
   import { agentTabsOf, balanceFlow, flowAgentTarget, modeForAgent, resetFlowPanes } from "./planning";
   import { get } from "svelte/store";
@@ -417,7 +419,7 @@
     if (handle?.hasUnsaved()) {
       layout = activateTab(layout, tabId);
       const tab = allTabs(layout).find((t) => t.id === tabId);
-      const name = (tab && filePaneConfig(tab)?.rel) || "This file";
+      const name = (tab && filePaneConfig(tab)?.rel) || tStudio("thisFile");
       const close = await new Promise<boolean>((resolve) => {
         closing = {
           id: tabId,
@@ -466,7 +468,7 @@
     try {
       line = await taskCommandLine(projectRoot(project.id), task.id);
     } catch (err) {
-      toast((err as { message?: string }).message ?? String(err), "danger");
+      toast(messageOf(err), "danger");
       return;
     }
     const existing = allTabs(layout).find((t) => taskIdOf(t) === task.id);
@@ -500,7 +502,7 @@
     try {
       openLineTerminal(`watch:${agentId}`, `Watch ${name}`, await watchLine(agentId));
     } catch (err) {
-      toast(`The session cannot be watched: ${err instanceof Error ? err.message : String(err)}`, "danger");
+      toast(tStudio("watchFailed", { error: messageOf(err) }), "danger");
     }
   }
 
@@ -525,7 +527,7 @@
     const tab = allTabs(layout).find((t) => t.id === tabId);
     const id = tab ? taskIdOf(tab) : null;
     if (id === DEBUG_TERMINAL) {
-      toast("Start the debug session again from the Debug view.", "info");
+      toast(tStudio("debugAgain"), "info");
       return;
     }
     // A watch starts again on its session: its line is asked of Rust anew, as at the first click.
@@ -543,7 +545,7 @@
       const picked = await pickFile();
       if (picked && !picked.folder) openFromQuickOpen({ root: picked.root, rel: picked.rel }, null);
     } catch (err) {
-      toast(`Could not open the dialog: ${(err as { message?: string }).message ?? String(err)}`, "danger");
+      toast(tStudio("dialogFailed", { error: messageOf(err) }), "danger");
     }
   }
 
@@ -658,8 +660,8 @@
       await projectSession.refreshAgents();
       openAgent(projectSession.agentById(master.id) ?? master);
     } catch (err) {
-      const why = err instanceof Error ? err.message : String(err);
-      toast(`The master session could not be opened: ${why}`, "danger");
+      const why = messageOf(err);
+      toast(tStudio("masterFailed", { error: why }), "danger");
     }
   }
 
@@ -681,10 +683,7 @@
           // A session the studio started by itself in another project does not take the owner out of theirs: it is said,
           // and its pane opens when the project does (`openCardPanesOf`, run whenever a project opens).
           if (background === true) {
-            toast(
-              `A card is running in another project (session #${agentId}); its pane appears as soon as you open it.`,
-              "info",
-            );
+            toast(tStudio("cardElsewhere", { id: agentId }), "info");
             continue;
           }
           const next = await projectSession.open(projectId);
@@ -696,8 +695,8 @@
         // Anything made for the board goes beside its tiles in the Flow; only a session of the owner's own stays.
         openAgent(agent, modeForAgent(agent), background === true);
       } catch (err) {
-        const why = err instanceof Error ? err.message : String(err);
-        toast(`The session could not be opened: ${why}`, "danger");
+        const why = messageOf(err);
+        toast(tStudio("sessionFailed", { error: why }), "danger");
       }
     }
   }
@@ -956,17 +955,17 @@
     <div class="titles">
       <div class="brand" style:--tree-w="{tree.visible ? tree.width * $uiScale : 0}px">
         <h1>Studio</h1>
-        <div class="modes" role="group" aria-label="Mode">
+        <div class="modes" role="group" aria-label={tStudio("modes")}>
           {#each MODES as each (each)}
             <button
               type="button"
               class:on={mode === each}
               disabled={!current}
-              title={MODE_LABEL[each]}
-              aria-label={MODE_LABEL[each]}
+              title={MODE_LABEL[each]()}
+              aria-label={MODE_LABEL[each]()}
               onclick={() => switchTo(each)}
             >
-              <Icon name={MODE_ICON[each]} size="md" />{#if mode === each}{MODE_LABEL[each]}{/if}
+              <Icon name={MODE_ICON[each]} size="md" />{#if mode === each}{MODE_LABEL[each]()}{/if}
             </button>
           {/each}
         </div>
@@ -983,19 +982,19 @@
       <IconButton
         size="lg"
         icon="settings"
-        label="Editor settings"
+        label={tStudio("editorSettings")}
         pressed={inspector === "settings"}
         onclick={() => (inspector = inspector === "settings" ? null : "settings")}
       />
       <IconButton
         size="lg"
         icon="keyboard"
-        label="Keyboard shortcuts"
+        label={tStudio("shortcuts")}
         pressed={inspector === "shortcuts"}
         onclick={() => (inspector = inspector === "shortcuts" ? null : "shortcuts")}
       />
       <span class="separator" aria-hidden="true"></span>
-      <IconButton size="lg" icon="layout-grid" label="Back to the OS" onclick={() => (open = false)} />
+      <IconButton size="lg" icon="layout-grid" label={tStudio("backToOs")} onclick={() => (open = false)} />
     </div>
   </header>
 
@@ -1123,9 +1122,9 @@
       {#if mode === "agents" && current && allTabs(layout).length === 0}
         <!-- A new project's Canvas is empty on purpose (no terminal nobody asked for): say so, and offer the terminal. -->
         <div class="canvas-empty">
-          <EmptyState title="The canvas is empty" text="Agents appear here as soon as a card or a session starts.">
+          <EmptyState title={tStudio("canvasEmpty")} text={tStudio("canvasEmptyText")}>
             {#snippet action()}
-              <button class="ax-btn primary" type="button" onclick={openTerminal}>Open terminal</button>
+              <button class="ax-btn primary" type="button" onclick={openTerminal}>{tStudio("openTerminal")}</button>
             {/snippet}
           </EmptyState>
         </div>
@@ -1137,7 +1136,7 @@
       <!-- No project, no panes: a terminal with nowhere to start is worse than
            no terminal. The menu above is the only thing to do here. -->
       <div class="empty">
-        <EmptyState title="No project open" text="Open one from the project bar in the sidebar." />
+        <EmptyState title={tStudio("noProject")} text={tStudio("noProjectText")} />
       </div>
     {/if}
   </div>

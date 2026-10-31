@@ -8,6 +8,7 @@
   import { FRESH_LINK_DAYS } from "./bundle";
   import { readPalette, type NodeKind } from "./model";
   import { drawGlyph } from "./render";
+  import { tBrain } from "../i18n/brain";
 
   /** `app` nodes only exist in orbit mode (the dashboard background's App
    *  Ring) — this legend covers the Second Brain's own bundle/map/hex
@@ -22,19 +23,19 @@
   let { layout = "bundle" }: { layout?: BrainLayout } = $props();
 
   /** A legend row: a node kind, or (Bundle) a link — calm in its note's area colour, or new in the glow. */
-  type Entry = { kind: LegendKind; label: string } | { kind: "link" | "fresh-link"; label: string };
+  type Entry = { kind: LegendKind; label: () => string } | { kind: "link" | "fresh-link"; label: () => string };
 
   const ALL_KINDS: Entry[] = [
-    { kind: "hub", label: "AGENTS.md (hub)" },
-    { kind: "area", label: "Area (folder)" },
-    { kind: "file", label: "Note / page" },
-    { kind: "skill", label: "Skill" },
+    { kind: "hub", label: () => tBrain("legendHub") },
+    { kind: "area", label: () => tBrain("legendArea") },
+    { kind: "file", label: () => tBrain("legendNote") },
+    { kind: "skill", label: () => tBrain("legendSkill") },
   ];
   /** The bundle draws no hub (its middle is where the links run) but its links say something of their own. */
   const BUNDLE_KINDS: Entry[] = [
     ...ALL_KINDS.filter((k) => k.kind !== "hub"),
-    { kind: "link", label: "Link, in its note's area colour" },
-    { kind: "fresh-link", label: `Link of the last ${FRESH_LINK_DAYS} days` },
+    { kind: "link", label: () => tBrain("legendLink") },
+    { kind: "fresh-link", label: () => tBrain("legendFreshLink", { days: FRESH_LINK_DAYS }) },
   ];
   const KINDS = $derived(layout === "bundle" ? BUNDLE_KINDS : ALL_KINDS);
 
@@ -119,7 +120,7 @@
 
 <ul class="legend">
   {#each KINDS as k, i (k.kind)}
-    <li><canvas bind:this={canvases[i]} width="22" height="22"></canvas>{k.label}</li>
+    <li><canvas bind:this={canvases[i]} width="22" height="22"></canvas>{k.label()}</li>
   {/each}
 </ul>
 

@@ -21,20 +21,20 @@ den Ordner `News/`) und `vault-tagging` (der Vault-Lauf, siehe [Tags und Links](
 
 ## Wo die Knöpfe sind
 
-- **Vorderseite der Kachel „Skills Deck“:** je Skill eine Karte mit `/name`, dem Backend und ▶ („Run“). Daneben der
-  Status des letzten Laufs; ein unterbrochener Lauf zeigt „resume“ und „drop“. Ein kaputter Skill erscheint als
-  „⚠ skipped …“. Gibt es neue Fassungen mitgelieferter Skills, steht oben „… bundled skill(s) has/have an update“
-  mit „Review“.
-- **Rückseite (Zahnrad):** „Backend“ (Filter), „Order“ („by name“ / „recently run first“) und der Abschnitt
-  **„Bundled skills“**: je Skill der Stand („up to date“, „outdated“, „missing“, „changed by you“, „differs — may
-  be yours“) mit „Update“, oben „Update all outdated“.
+- **Vorderseite der Kachel „Skills Deck“:** je Skill eine Karte mit `/name`, dem Backend und ▶ („Ausführen“). Daneben
+  der Status des letzten Laufs; ein unterbrochener Lauf zeigt „fortsetzen“ und „verwerfen“. Ein kaputter Skill erscheint
+  als „⚠ übersprungen …“. Gibt es neue Fassungen mitgelieferter Skills, steht oben „Für … mitgelieferte Skills gibt es
+  Updates“ mit „Ansehen“.
+- **Rückseite (Zahnrad):** „Backend“ (Filter), „Reihenfolge“ („nach Name“ / „zuletzt ausgeführte zuerst“) und der
+  Abschnitt **„Mitgelieferte Skills“**: je Skill der Stand („aktuell“, „veraltet“, „fehlt“, „von dir geändert“, „weicht
+  ab — vielleicht deine“) mit „Aktualisieren“, oben „Alle veralteten aktualisieren“.
 - Anderswo: ⌘K findet Skills (Enter startet), `/skills` bzw. `/skills run <name>` im Chat.
 
 ## Häufige Handgriffe
 
 1. **Skill starten:** im Skills Deck ▶ — oder ⌘K, Namen tippen, Enter.
-2. **Mitgelieferte Skills aktualisieren:** „Review“ (oder Rückseite) → „Update“ beim Skill bzw. „Update all
-   outdated“. Bei „changed by you“ fragt die App: „Replace“ oder „Keep mine“.
+2. **Mitgelieferte Skills aktualisieren:** „Ansehen“ (oder Rückseite) → „Aktualisieren“ beim Skill bzw. „Alle veralteten
+   aktualisieren“. Bei „von dir geändert“ fragt die App: „Ersetzen“ oder „Meine behalten“.
 3. **Eigenen Skill anlegen:** den Chat bitten, ihn zu schreiben, oder selbst einen Ordner
    `~/.axiomata/skills/<name>/` mit `SKILL.md` anlegen; das Deck liest die Skills alle paar Sekunden neu.
 
@@ -43,7 +43,7 @@ den Ordner `News/`) und `vault-tagging` (der Vault-Lauf, siehe [Tags und Links](
 - Das Deck zeigt **keine Ausgabe** eines Laufs, nur Status und Zeit; das Ergebnis steht dort, wohin der Skill
   schreibt (Kachel, Vault-Notiz).
 - Mitgelieferte Skills werden nur **einmal** angelegt; eine neuere Fassung im Build überschreibt deine Kopie nicht.
-  „Update all outdated“ fasst eine von dir geänderte Kopie nie an; im Terminal überschreibt
+  „Alle veralteten aktualisieren“ fasst eine von dir geänderte Kopie nie an; im Terminal überschreibt
   `axiomata-cli skills reseed --force` alle mitgelieferten (deine eigenen Skills bleiben).
 - `allowed_tools` sind die ganzen Rechte: fehlt ein Werkzeug dort, darf der Lauf es nicht.
 - Ein Skill mit `backend: axh` (Glut) braucht einen Skill-Provider mit Endpoint (OpenRouter oder Ollama), sonst

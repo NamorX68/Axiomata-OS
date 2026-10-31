@@ -7,6 +7,7 @@
 
   import { messageOf } from "../core/errors";
   import { toast } from "../core/toast";
+  import { tAgents as t } from "../i18n/agents";
   import Notice from "../ui/Notice.svelte";
   import {
     agentsMigrationState,
@@ -43,7 +44,7 @@
 
 {#if view?.problem}
   <div class="slot">
-    <Notice tone="bad" title="The move to roles at tiers did not run" alert>
+    <Notice tone="bad" title={t("migrationFailed")} alert>
       {#snippet details()}
         <p>{view?.problem}</p>
       {/snippet}
@@ -57,22 +58,23 @@
     <Notice tone="ok" title={migrationSummary(report)}>
       {#snippet details()}
         {#if report.backup}
-          <p>The originals are in <code>{report.backup}</code>; delete it in Settings → Storage.</p>
+          <p>{t("migrationBackupBefore")} <code>{report.backup}</code>{t("migrationBackupAfter")}</p>
         {/if}
         {#if report.skipped.length > 0}
-          <p>Left as they were: {report.skipped.join("; ")}.</p>
+          <p>{t("migrationLeft", { items: report.skipped.join("; ") })}</p>
         {/if}
         {#if Object.keys(report.defaults_seeded).length > 0}
           <p>
-            Default engines per tier:
-            {Object.entries(report.defaults_seeded)
-              .map(([tier, engine]) => `${tier} ${engine}`)
-              .join(", ")}.
+            {t("migrationDefaults", {
+              items: Object.entries(report.defaults_seeded)
+                .map(([tier, engine]) => `${tier} ${engine}`)
+                .join(", "),
+            })}
           </p>
         {/if}
       {/snippet}
       {#snippet action()}
-        <button type="button" class="ax-btn" onclick={() => void dismiss()}>OK</button>
+        <button type="button" class="ax-btn" onclick={() => void dismiss()}>{t("ok")}</button>
       {/snippet}
     </Notice>
   </div>

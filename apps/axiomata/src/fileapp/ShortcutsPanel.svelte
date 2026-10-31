@@ -6,6 +6,7 @@
   column: a long chord (Windows/Linux spell `Ctrl+Shift+…` out) never runs into the text beside it (card #102).
 -->
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
   import Icon from "../ui/Icon.svelte";
   import { platform } from "../core/keys";
   import { editorSettings } from "./editorSettings";
@@ -20,9 +21,9 @@
   <div class="head">
     <label class="search">
       <Icon name="search" size="sm" />
-      <input type="search" placeholder="Search keys or actions" spellcheck="false" bind:value={query} />
+      <input type="search" placeholder={tEditor("searchShortcuts")} spellcheck="false" bind:value={query} />
     </label>
-    <span class="count" aria-live="polite">{total} {total === 1 ? "shortcut" : "shortcuts"}</span>
+    <span class="count" aria-live="polite">{tEditor("shortcutCount", { n: total })}</span>
   </div>
   <div class="groups">
     {#each groups as group (group.title)}
@@ -47,7 +48,7 @@
     {:else}
       <div class="none">
         <Icon name="search" />
-        <p>No shortcut matches “{query}”.</p>
+        <p>{tEditor("noShortcutMatches", { query })}</p>
       </div>
     {/each}
   </div>

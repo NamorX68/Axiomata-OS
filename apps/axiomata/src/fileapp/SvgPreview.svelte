@@ -5,6 +5,8 @@
   after the source stops changing.
 -->
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
+
   interface Props {
     text: string;
     rel: string;
@@ -34,7 +36,7 @@
 
 <div class="svg-view">
   {#if broken}
-    <p class="note">This SVG does not draw — check its source.</p>
+    <p class="note">{tEditor("svgBroken")}</p>
   {:else if src}
     <img {src} alt={rel} onerror={() => (broken = true)} />
   {/if}

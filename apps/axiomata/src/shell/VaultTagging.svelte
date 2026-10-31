@@ -5,12 +5,14 @@
   into a preview. Nothing is written into a note until the owner writes the preview (or throws it away).
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { invokeBackend, type RunRecord, type TagProposal, type VaultApplied, type VaultPhase, type VaultTagging } from "../core/backend";
   import { refreshTagProposals } from "../core/tagProposals";
   import { toast } from "../core/toast";
   import { estimateLine } from "../core/vaultTagging";
+  import { tTags } from "../i18n/tags";
   import StatusMark from "../ui/StatusMark.svelte";
 
   let { onChanged }: { onChanged?: () => void } = $props();
@@ -32,24 +34,21 @@
       status = await invokeBackend<VaultTagging>("vault_tagging_status");
       error = null;
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
   async function start(phase: VaultPhase) {
     if (!status) return;
     const estimate = phase === "list" ? status.list_estimate : status.notes_estimate;
-    const what =
-      phase === "list"
-        ? "Propose a tag list? The agent reads the notes and proposes 30–60 tags; you accept or turn down each."
-        : "Plan tags for every note? The agent reads each note; nothing is written until you look at the preview.";
+    const what = phase === "list" ? tTags("confirmList") : tTags("confirmNotes");
     if (!confirm(`${what}\n\n${estimateLine(estimate)}`)) return;
     running = phase;
     try {
       const run = await invokeBackend<RunRecord>("vault_tagging_start", { phase });
-      toast(`vault-tagging: ${run.status}`, run.status === "success" ? "info" : "warning");
+      toast(tTags("runStatus", { status: run.status }), run.status === "success" ? "info" : "warning");
     } catch (err) {
-      toast(`The vault run failed: ${String(err)}`, "danger");
+      toast(tTags("runFailed", { error: messageOf(err) }), "danger");
     } finally {
       running = null;
       await refreshTagProposals(() => invokeBackend<TagProposal[]>("tag_proposals"));
@@ -60,24 +59,28 @@
 
   async function apply() {
     if (!status || status.plan.length === 0) return;
-    const question = `Write the planned tags and links into ${status.plan.length} notes? Only their tags: and ## Related change.`;
-    if (!confirm(question)) return;
+    if (!confirm(tTags("confirmApply", { n: status.plan.length }))) return;
     busy = true;
     try {
       const done = await invokeBackend<VaultApplied>("vault_tagging_apply");
-      toast(`Written into ${done.written} notes${done.unchanged ? `, ${done.unchanged} unchanged` : ""}`, "info");
+      const written = done.unchanged
+        ? tTags("writtenUnchanged", { n: done.written, unchanged: done.unchanged })
+        : tTags("written", { n: done.written });
+      toast(written, "info");
       // The failed notes stay in the preview for another try; a few are named here.
-      if (done.failed.length > 0) toast(`${done.failed.length} notes not written (kept in the preview): ${done.failed[0]}`, "warning");
+      if (done.failed.length > 0) {
+        toast(tTags("notWritten", { n: done.failed.length, first: done.failed[0] }), "warning");
+      }
       await load();
     } catch (err) {
-      toast(`Writing failed: ${String(err)}`, "danger");
+      toast(tTags("writeFailed", { error: messageOf(err) }), "danger");
     } finally {
       busy = false;
     }
   }
 
   async function discard() {
-    if (!confirm("Throw the preview away? No note was changed.")) return;
+    if (!confirm(tTags("confirmDiscard"))) return;
     busy = true;
     try {
       await invokeBackend<void>("vault_tagging_discard");
@@ -100,28 +103,28 @@
   onMount(load);
 </script>
 
-<h3 class="sub">Tag the whole vault</h3>
+<h3 class="sub">{tTags("vaultTitle")}</h3>
 {#if error}
   <p class="status error">{error}</p>
 {:else if status}
-  <p class="hint">Once, for the notes there already are. Each step says first what it reads and costs.</p>
+  <p class="hint">{tTags("vaultHint")}</p>
   <ol class="steps">
     <li>
       <div class="step-head">
-        <span class="title">1 · Propose a tag list</span>
-        {#if running === "list"}<StatusMark tone="live" label="running" />{/if}
+        <span class="title">{tTags("stepList")}</span>
+        {#if running === "list"}<StatusMark tone="live" label={tTags("running")} />{/if}
         <button type="button" disabled={running !== null || busy || stale} onclick={() => void start("list")}>
-          {running === "list" ? "Proposing…" : "Propose"}
+          {running === "list" ? tTags("proposing") : tTags("propose")}
         </button>
       </div>
       <p class="meta">{estimateLine(status.list_estimate)}</p>
     </li>
     <li>
       <div class="step-head">
-        <span class="title">2 · Plan tags and links for every note</span>
-        {#if running === "notes"}<StatusMark tone="live" label="running" />{/if}
+        <span class="title">{tTags("stepNotes")}</span>
+        {#if running === "notes"}<StatusMark tone="live" label={tTags("running")} />{/if}
         <button type="button" disabled={running !== null || busy || stale} onclick={() => void start("notes")}>
-          {running === "notes" ? "Planning…" : status.plan.length > 0 ? "Plan the rest" : "Plan"}
+          {running === "notes" ? tTags("planning") : status.plan.length > 0 ? tTags("planRest") : tTags("plan")}
         </button>
       </div>
       <p class="meta">{estimateLine(status.notes_estimate)}</p>
@@ -129,13 +132,13 @@
   </ol>
   {#if stale}
     <p class="hint">
-      A step is marked as running, but not from this window (the app was closed during it).
-      <button type="button" class="inline" disabled={busy} onclick={() => void endStale()}>End it</button>
+      {tTags("stale")}
+      <button type="button" class="inline" disabled={busy} onclick={() => void endStale()}>{tTags("endIt")}</button>
     </p>
   {/if}
 
   {#if status.plan.length > 0}
-    <h3 class="sub">Preview ({status.plan.length} notes)</h3>
+    <h3 class="sub">{tTags("preview", { n: status.plan.length })}</h3>
     <ul class="preview">
       {#each rows as row (row.note)}
         <li>
@@ -144,27 +147,31 @@
             {#each row.tags as tag (tag)}<span class="chip">#{tag}</span>{/each}
             {#each row.related as name (name)}<span class="link">[[{name}]]</span>{/each}
             {#each row.proposed as tag (tag)}
-              <span class="chip proposed" title="Proposed to you when the plan is written; set once you accept it">
+              <span class="chip proposed" title={tTags("proposedChip")}>
                 #{tag}?
               </span>
             {/each}
             {#if row.skipped}
-              <span class="meta">left out: {row.skipped}</span>
+              <span class="meta">{tTags("leftOut", { reason: row.skipped })}</span>
             {:else if row.tags.length === 0 && row.related.length === 0 && row.proposed.length === 0}
-              <span class="meta">nothing</span>
+              <span class="meta">{tTags("nothing")}</span>
             {/if}
           </span>
         </li>
       {/each}
     </ul>
     {#if status.plan.length > PREVIEW_ROWS && !showAll}
-      <button type="button" class="inline" onclick={() => (showAll = true)}>Show all {status.plan.length}</button>
+      <button type="button" class="inline" onclick={() => (showAll = true)}>
+        {tTags("showAll", { n: status.plan.length })}
+      </button>
     {/if}
     <div class="actions">
       <button type="button" class="primary" disabled={busy || running !== null} onclick={() => void apply()}>
-        Write into {status.plan.length} notes
+        {tTags("writeInto", { n: status.plan.length })}
       </button>
-      <button type="button" disabled={busy || running !== null} onclick={() => void discard()}>Discard</button>
+      <button type="button" disabled={busy || running !== null} onclick={() => void discard()}>
+        {tTags("discard")}
+      </button>
     </div>
   {/if}
 {/if}

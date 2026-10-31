@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -14,10 +15,10 @@
 
 <div class="settings">
   <label>
-    Show the Done section by default
+    {tModules("showDoneDefault")}
     <input type="checkbox" checked={$config.showDone === true} onchange={toggleShowDone} />
   </label>
-  <p class="muted">Backed by <code>ToDo.md</code> in the workspace root.</p>
+  <p class="muted">{tModules("backedByBefore")}<code>ToDo.md</code>{tModules("backedByAfter")}</p>
 </div>
 
 <style>

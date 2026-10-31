@@ -4,19 +4,21 @@
  */
 
 import type { ClaudeLoginStatus, ConfigView, HarnessId, ProviderId } from "./backend";
+import { tSettings } from "../i18n/settings";
 
 export type { HarnessId };
 
 export interface HarnessMeta {
   id: HarnessId;
   label: string;
-  blurb: string;
+  /** One line for Settings, in the current language. */
+  blurb: () => string;
 }
 
 /** Every harness the Settings dialog offers, in display order. */
 export const HARNESSES: readonly HarnessMeta[] = [
-  { id: "claude_code", label: "Claude Code", blurb: "Anthropic only, on the app's own login" },
-  { id: "axh", label: "Glut", blurb: "Axiomata's own harness — OpenRouter or Ollama" },
+  { id: "claude_code", label: "Claude Code", blurb: () => tSettings("harnessClaudeCode") },
+  { id: "axh", label: "Glut", blurb: () => tSettings("harnessGlut") },
 ] as const;
 
 /** Whether `harness` can drive turns of `provider`. */
@@ -80,7 +82,13 @@ export function backendLabel(id: string): string {
 }
 
 /** Every backend a skill or routine may name, for pickers and filters: the three harnesses, then `ollama`. */
-export const BACKEND_CHOICES: readonly { id: string; label: string }[] = [
+export const BACKEND_CHOICES: readonly { id: string; readonly label: string }[] = [
   ...HARNESSES.map((h) => ({ id: h.id, label: h.label })),
-  { id: "ollama", label: "Ollama (no tools)" },
+  {
+    id: "ollama",
+    // A getter: read where it is drawn, it follows a language switch.
+    get label() {
+      return tSettings("ollamaNoTools");
+    },
+  },
 ];

@@ -26,6 +26,7 @@
   import { boardStore, refreshBoard, type BoardData } from "../../core/boardStore";
   import { emit } from "../../core/bus";
   import { messageOf } from "../../core/errors";
+  import { formatUsd } from "../../core/format";
   import { STATE_LABEL, fieldsOf } from "../../core/kanban";
   import { listRoles, type Role } from "../../core/roster";
   import { toast } from "../../core/toast";
@@ -67,15 +68,20 @@
   import SessionPicker from "./SessionPicker.svelte";
   import { engineCatalog, refreshEngines } from "../rosterStore";
   import Icon from "../../ui/Icon.svelte";
+  import { tFlow } from "../../i18n/flow";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
 
   const TIERS: { id: CardTier | ""; label: string }[] = [
     { id: "", label: "—" },
-    { id: "light", label: "leicht" },
-    { id: "medium", label: "mittel" },
-    { id: "heavy", label: "schwer" },
+    // The tiers are names and stay as they are in both languages (`docs/plans/i18n.md`, Q13).
+    { id: "light", label: "light" },
+    { id: "medium", label: "medium" },
+    { id: "heavy", label: "heavy" },
   ];
+
+  /** The config key of the Studio's daily cap: a name, the same in both languages. */
+  const DAY_CAP_KEY = "studio_daily_usd_cap";
 
   let boards = $state<Board[]>([]);
   let boardId = $state<number | null>(null);
@@ -353,7 +359,7 @@
     const current = plan;
     const value = raw.trim() === "" ? null : Number(raw);
     if (value !== null && (!Number.isFinite(value) || value <= 0)) {
-      error = "The cost limit is a positive amount in USD, or empty for none.";
+      error = tFlow("costInvalid");
       return;
     }
     if (value === current.max_cost_usd) return;
@@ -373,12 +379,12 @@
 
   async function startPlanner(): Promise<void> {
     const made = await startSession(plannerRole || plannerSuggested, plannerEngine, false);
-    if (made) toast(`The planner ${made.agent.name} is reading the project.`, "info");
+    if (made) toast(tFlow("plannerReading", { name: made.agent.name }), "info");
   }
 
   async function startGrill(): Promise<boolean> {
     const made = await startSession(grillRole || grillSuggested, grillEngine, true);
-    if (made) toast(`${made.agent.name} is now questioning you about the cards in the terminal.`, "info");
+    if (made) toast(tFlow("grillQuestioning", { name: made.agent.name }), "info");
     return made !== null;
   }
 
@@ -412,7 +418,7 @@
     void startGrill().then((started) => {
       grillStarting = false;
       setGrillWish(current.id, false);
-      if (!started) toast("The grilling could not be started; tick the box again.", "warning");
+      if (!started) toast(tFlow("grillFailed"), "warning");
     });
   });
 
@@ -525,15 +531,10 @@
     const on = box.checked;
     const switched = await run(async () => {
       if (!(await invoke<boolean>("set_plan_auto_rights", { id, on }))) {
-        throw new Error("The plan is closed or gone; its auto mode was not changed.");
+        throw new Error(tFlow("autoModeGone"));
       }
       await reload();
-      toast(
-        on
-          ? "Auto mode on: sessions started from now on may do anything but push."
-          : "Auto mode off: sessions started from now on ask again.",
-        "info",
-      );
+      toast(on ? tFlow("autoOn") : tFlow("autoOff"), "info");
     });
     // Refused (or busy): the box shows what the plan says, not the click.
     if (!switched) box.checked = !on;
@@ -559,10 +560,10 @@
       await Promise.all([reload(), refreshAgents()]);
       toast(
         moved === null
-          ? "The plan is no longer a draft."
+          ? tFlow("noLongerDraft")
           : auto
-            ? `Plan released: ${moved} card(s) are being worked on.`
-            : `Plan released: ${moved} card(s) wait in the first open column.`,
+            ? tFlow("releasedWorking", { n: moved })
+            : tFlow("releasedWaiting", { n: moved }),
         "info",
       );
     });
@@ -595,8 +596,11 @@
         return;
       }
       await Promise.all([reload(), refreshAgents()]);
-      toast(`Plan “${current.name}” was taken over (${result.commit.slice(0, 8)}): ${result.card_ids.length} card(s).`, "info");
-      for (const note of result.cleanup) toast(`Not cleaned up: ${note}`, "warning");
+      toast(
+        tFlow("takenOver", { name: current.name, commit: result.commit.slice(0, 8), n: result.card_ids.length }),
+        "info",
+      );
+      for (const note of result.cleanup) toast(tFlow("notCleaned", { note }), "warning");
       await sayWhatIsNotPushed(result.project_id);
     });
   }
@@ -651,11 +655,11 @@
       const result = await invoke<CardIntegrationResult>("integrate_card", { cardId: card.id });
       if (result.outcome === "done") {
         closePanesOf(result.agent_ids);
-        toast(`Card #${card.id} is integrated into the plan.`, "info");
+        toast(tFlow("cardIntegrated", { id: card.id }), "info");
       } else if (result.outcome === "conflict") {
-        toast(`Card #${card.id} still does not fit into the plan (${result.files.join(", ")}).`, "warning");
+        toast(tFlow("cardStillConflicts", { id: card.id, files: result.files.join(", ") }), "warning");
       } else if (result.outcome === "busy") {
-        toast(`The worker of card #${card.id} is still moving; try again in a moment.`, "warning");
+        toast(tFlow("cardWorkerMoving", { id: card.id }), "warning");
       }
       await Promise.all([reload(), refreshAgents()]);
     });
@@ -665,7 +669,7 @@
     await run(async () => {
       closePanesOf(await invoke<number[]>("redo_card", { cardId: card.id }));
       await Promise.all([reload(), refreshAgents()]);
-      toast(`Card #${card.id} will be redone on the plan's new state.`, "info");
+      toast(tFlow("cardRedone", { id: card.id }), "info");
     });
   }
 
@@ -676,7 +680,7 @@
       await invoke("resume_plan", { id: current.id });
       await reload();
       spend = await invoke<PlanSpend>("plan_spend", { id: current.id });
-      toast(`Plan “${current.name}” keeps running: a new limit was set on top of the current spend.`, "info");
+      toast(tFlow("resumed", { name: current.name }), "info");
     });
   }
 
@@ -696,7 +700,7 @@
       deleting = false;
       planId = null;
       await Promise.all([reload(), refreshAgents()]);
-      toast(`Plan “${current.name}” was deleted; its cards stay on the board, without a plan.`, "info");
+      toast(tFlow("deleted", { name: current.name }), "info");
     });
   }
 
@@ -706,10 +710,7 @@
     // An approved plan may have work on its line that was never taken over: closing is the end of it as a plan.
     if (
       current.status === "approved" &&
-      !confirm(
-        `Close the plan “${current.name}”? Nothing starts from it any more and its line is removed; work on the line ` +
-          "that was not taken over stays on its branch.",
-      )
+      !confirm(tFlow("closeConfirm", { name: current.name }))
     ) {
       return;
     }
@@ -718,7 +719,9 @@
       endPlanner(current.id);
       await Promise.all([reload(), refreshAgents()]);
       // What of the line stayed (work the project's branch lacks is never thrown away) is the owner's to know.
-      if (outcome.cleanup.length > 0) toast(`Plan “${current.name}” was closed. ${outcome.cleanup.join("; ")}`, "info");
+      if (outcome.cleanup.length > 0) {
+        toast(tFlow("closedNote", { name: current.name, notes: outcome.cleanup.join("; ") }), "info");
+      }
     });
   }
 
@@ -773,7 +776,7 @@
       discarding = null;
       // A card that was approved in the Kanban meanwhile is a live card, not a proposal to throw away.
       if (!fresh || fresh.state !== "proposed") {
-        error = "The card is no longer a proposal and stays.";
+        error = tFlow("noLongerProposal");
         return;
       }
       await invoke("delete_card", { id: card.id });
@@ -803,10 +806,10 @@
 
 <div class="plan-pane">
   <div class="plan-grid">
-  <aside class="plans" aria-label="Plans">
+  <aside class="plans" aria-label={tFlow("plans")}>
     {#if boards.length > 1}
       <select
-        aria-label="Board"
+        aria-label={tFlow("board")}
         value={boardId}
         onchange={(event) => chooseBoard(Number((event.currentTarget as HTMLSelectElement).value))}
       >
@@ -815,7 +818,7 @@
     {/if}
     <!-- A quiet way in (UX6b): the column's lasting orange belongs to what works, not to a button always there. -->
     <button class="ax-btn new-plan-btn" type="button" disabled={boardId === null} onclick={() => (creating = !creating)}>
-      <Icon name="plus" size="sm" />New plan …
+      <Icon name="plus" size="sm" />{tFlow("newPlan")}
     </button>
     {#if creating}
       <form
@@ -826,22 +829,24 @@
         }}
       >
         <label>
-          Name
-          <input bind:value={newName} aria-label="Name des Plans" maxlength="200" />
+          {tFlow("name")}
+          <input bind:value={newName} aria-label={tFlow("planName")} maxlength="200" />
         </label>
         <label>
-          Goal
+          {tFlow("goal")}
           <textarea
             bind:value={newGoal}
             rows="10"
             maxlength="8000"
-            aria-label="Goal of the plan"
-            placeholder="Was soll am Ende da sein?"
+            aria-label={tFlow("goalOfPlan")}
+            placeholder={tFlow("goalPlaceholder")}
           ></textarea>
         </label>
         <div class="row">
-          <button class="ax-btn primary" type="submit" disabled={busy || newName.trim() === ""}>Anlegen</button>
-          <button class="ax-btn" type="button" onclick={() => (creating = false)}>Cancel</button>
+          <button class="ax-btn primary" type="submit" disabled={busy || newName.trim() === ""}
+            >{tFlow("create")}</button
+          >
+          <button class="ax-btn" type="button" onclick={() => (creating = false)}>{tFlow("cancel")}</button>
         </div>
       </form>
     {/if}
@@ -859,28 +864,28 @@
       {/each}
     </ul>
     {#if data && plans.length === 0 && !creating}
-      <p class="hint">No plan on this board yet.</p>
+      <p class="hint">{tFlow("noPlanOnBoard")}</p>
     {/if}
     <span class="grow"></span>
     <button
       class="ax-btn"
       type="button"
-      title="Put Planning, Agents and the Flow view back in their places"
-      onclick={() => emit("studio:reset-flow")}>Reset layout</button
+      title={tFlow("resetTitle")}
+      onclick={() => emit("studio:reset-flow")}>{tFlow("resetLayout")}</button
     >
   </aside>
 
-  <section class="detail" aria-label="Plan">
+  <section class="detail" aria-label={tFlow("plan")}>
     {#if error || loadError}<p class="error" role="alert">{error || loadError}</p>{/if}
     {#if boardId === null}
-      <p class="hint">There is no board yet. Create one in the Kanban.</p>
+      <p class="hint">{tFlow("noBoard")}</p>
     {:else if !plan}
-      <p class="hint">Pick a plan or create one: you write the goal, the planner cuts it into cards.</p>
+      <p class="hint">{tFlow("pickPlan")}</p>
     {:else}
       <header>
         <h2>{plan.name}</h2>
         <span class="status {plan.status}">{planStatusLabel(plan.status)}</span>
-        {#if runsByItself(plan)}<span class="status auto">runs by itself</span>{/if}
+        {#if runsByItself(plan)}<span class="status auto">{tFlow("runsByItself")}</span>{/if}
         <span class="spacer"></span>
         {#if plan.status !== "closed"}
           {@const closable = canClosePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))}
@@ -889,69 +894,74 @@
             type="button"
             disabled={busy || !closable}
             title={closable
-              ? "Close the plan: nothing starts from it any more, and its line is removed"
-              : "A session still works on a card of the plan: let it finish or release it first"}
-            onclick={() => void closePlan()}>Close</button
+              ? tFlow("closeTitle")
+              : tFlow("closeBlocked")}
+            onclick={() => void closePlan()}>{tFlow("close")}</button
           >
         {/if}
         {#if deleting}
-          <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void deletePlan()}>Really delete</button>
-          <button class="ax-btn" type="button" onclick={() => (deleting = false)}>Cancel</button>
+          <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void deletePlan()}
+            >{tFlow("reallyDelete")}</button
+          >
+          <button class="ax-btn" type="button" onclick={() => (deleting = false)}>{tFlow("cancel")}</button>
         {:else}
           <button
             class="ax-btn"
             type="button"
             disabled={busy || !canDeletePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))}
             title={canDeletePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))
-              ? "Delete the plan; its cards stay on the board without a plan"
-              : "The plan is still running: take it over or close it first"}
-            onclick={() => (deleting = true)}>Delete</button
+              ? tFlow("deleteTitle")
+              : tFlow("deleteBlocked")}
+            onclick={() => (deleting = true)}>{tFlow("delete")}</button
           >
         {/if}
       </header>
       {#if plan.origin_card_id != null}
         <p class="muted origin">
-          The goal of card #{plan.origin_card_id} on the board. Once released its steps run by themselves, and the card
-          follows them — to Review when everything waits for your take-over.
+          {tFlow("origin", { id: plan.origin_card_id })}
         </p>
       {/if}
 
       <label class="cost">
-        Cost limit (USD)
+        {tFlow("costLimit")}
         <input
           type="number"
           min="0.5"
           step="0.5"
           value={plan.max_cost_usd ?? ""}
-          placeholder="none"
-          aria-label="Cost limit (USD)"
+          placeholder={tFlow("noLimit")}
+          aria-label={tFlow("costLimit")}
           disabled={busy || plan.status === "closed"}
           onchange={(event) => void saveCostLimit(event.currentTarget.value)}
         />
       </label>
 
       <label class="goal">
-        Goal
+        {tFlow("goal")}
         <textarea
           bind:value={goalDraft}
           rows="7"
           maxlength="8000"
-          aria-label="Goal"
+          aria-label={tFlow("goal")}
           disabled={plan.status !== "draft"}
           oninput={() => (goalDirty = true)}
           onblur={() => void saveGoal()}
-          placeholder="Was soll am Ende da sein?"
+          placeholder={tFlow("goalPlaceholder")}
         ></textarea>
       </label>
 
       {#if suggestion && plan.status === "draft"}
-        <section class="suggestion" aria-label="Suggested goal">
-          <h3>Sharpened goal suggested</h3>
-          <p class="muted">From the conversation with the grill session. It replaces your goal only when you take it over.</p>
+        <section class="suggestion" aria-label={tFlow("suggestedGoal")}>
+          <h3>{tFlow("sharpenedTitle")}</h3>
+          <p class="muted">{tFlow("sharpenedText")}</p>
           <pre class="proposed-goal">{suggestion.goal}</pre>
           <div class="row">
-            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverGoal()}>Take over</button>
-            <button class="ax-btn" type="button" disabled={busy} onclick={() => void discardGoal()}>Discard</button>
+            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverGoal()}
+              >{tFlow("takeOver")}</button
+            >
+            <button class="ax-btn" type="button" disabled={busy} onclick={() => void discardGoal()}
+              >{tFlow("discard")}</button
+            >
           </div>
         </section>
       {/if}
@@ -959,18 +969,18 @@
       {#if plan.status === "draft"}
         <div class="planner">
           {#if planner}
-            <span>Planer: <strong>{planner.name}</strong></span>
-            <button class="ax-btn" type="button" onclick={() => showPlanner(planner.id)}>Show pane</button>
+            <span>{tFlow("plannerIs")} <strong>{planner.name}</strong></span>
+            <button class="ax-btn" type="button" onclick={() => showPlanner(planner.id)}>{tFlow("showPane")}</button>
           {/if}
           {#if griller}
-            <span>Grill: <strong>{griller.name}</strong></span>
-            <button class="ax-btn" type="button" onclick={() => showPlanner(griller.id)}>Show pane</button>
+            <span>{tFlow("grillIs")} <strong>{griller.name}</strong></span>
+            <button class="ax-btn" type="button" onclick={() => showPlanner(griller.id)}>{tFlow("showPane")}</button>
           {/if}
           {#if rolesLoaded}
             <div class="start">
               {#if canStartPlanner(plan, $session.agents, roles) && plannerNames.length > 0}
                 <SessionPicker
-                  label="Role of the planner"
+                  label={tFlow("plannerRole")}
                   names={plannerNames}
                   {roles}
                   catalog={$engineCatalog}
@@ -986,11 +996,11 @@
                     checked={grillWanted}
                     onchange={(event) => setGrillWish(plan.id, event.currentTarget.checked)}
                   />
-                  Danach grillen
+                  {tFlow("grillAfter")}
                 </label>
                 {#if grillWanted}
                   <SessionPicker
-                    label="Role for grilling"
+                    label={tFlow("grillRole")}
                     names={grillNames}
                     {roles}
                     catalog={$engineCatalog}
@@ -1005,32 +1015,32 @@
                   class="ax-btn primary"
                   type="button"
                   disabled={busy || goalDraft.trim() === ""}
-                  title={goalDraft.trim() === "" ? "The planner needs a goal." : ""}
+                  title={goalDraft.trim() === "" ? tFlow("needsGoal") : ""}
                   onclick={() => void startPlanner()}
                 >
-                  Planer starten
+                  {tFlow("startPlanner")}
                 </button>
               {/if}
             </div>
             {#if grillWanted && griller === null}
               <span class="muted hint-line">
                 {!grillEngineChosen
-                  ? "Pick an engine for the grill role, or the grilling will not start."
+                  ? tFlow("grillNoEngine")
                   : planner
-                    ? "The grilling starts as soon as the planner has proposed its cards and waits for you."
+                    ? tFlow("grillAfterPlanner")
                     : proposals.length > 0
-                      ? "The grilling starts in a moment: the cards are there, the planner is no longer running."
-                      : "After planning, a grill session questions you about the cards."}
+                      ? tFlow("grillSoon")
+                      : tFlow("grillAfterPlanning")}
               </span>
             {/if}
           {/if}
         </div>
       {/if}
 
-      <h3>Proposals {proposals.length > 0 ? `(${proposals.length})` : ""}</h3>
+      <h3>{proposals.length > 0 ? tFlow("proposalsCount", { n: proposals.length }) : tFlow("proposals")}</h3>
       {#if proposals.length === 0}
         <p class="hint">
-          {planner ? "The planner has not proposed anything yet." : "No proposals waiting for your yes."}
+          {planner ? tFlow("plannerNothingYet") : tFlow("noProposals")}
         </p>
       {/if}
       <ul class="proposals">
@@ -1052,15 +1062,19 @@
           <li>
             <div class="title">
               <strong>{proposalTitle(card)}</strong>
-              <span class="muted">#{card.id}{needsLabel(card) ? ` · braucht ${needsLabel(card)}` : ""}</span>
-              {#if changedByPlanner.includes(card.id)}<span class="status auto" title="The planner changed this proposal after creating it">changed by the planner</span>{/if}
+              <span class="muted"
+                >#{card.id}{needsLabel(card) ? ` · ${tFlow("needs", { ids: needsLabel(card) })}` : ""}</span
+              >
+              {#if changedByPlanner.includes(card.id)}
+                <span class="status auto" title={tFlow("changedTitle")}>{tFlow("changedByPlanner")}</span>
+              {/if}
             </div>
             <div class="fields">
               <label>
-                Role
+                {tFlow("role")}
                 <select
                   value={card.agent ?? ""}
-                  aria-label="Role of {proposalTitle(card)}"
+                  aria-label={tFlow("roleOf", { title: proposalTitle(card) })}
                   onchange={(event) => {
                     const select = event.currentTarget as HTMLSelectElement;
                     void changeProposal(card, select, { agent: select.value || null });
@@ -1071,10 +1085,10 @@
                 </select>
               </label>
               <label>
-                Level
+                {tFlow("level")}
                 <select
                   value={card.tier ?? ""}
-                  aria-label="Level of {proposalTitle(card)}"
+                  aria-label={tFlow("levelOf", { title: proposalTitle(card) })}
                   onchange={(event) => {
                     const select = event.currentTarget as HTMLSelectElement;
                     void changeProposal(card, select, { tier: (select.value || null) as CardTier | null });
@@ -1087,13 +1101,21 @@
             {#if card.agent_reason}<p class="reason">{card.agent_reason}</p>{/if}
             {#if card.acceptance}<p class="acceptance">{card.acceptance}</p>{/if}
             <div class="row">
-              <button class="ax-btn" type="button" disabled={busy} onclick={() => void approveProposal(card)}>Accept</button>
-              <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Edit</button>
+              <button class="ax-btn" type="button" disabled={busy} onclick={() => void approveProposal(card)}
+                >{tFlow("accept")}</button
+              >
+              <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}
+                >{tFlow("edit")}</button
+              >
               {#if discarding === card.id}
-                <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void discardProposal(card)}>Wirklich verwerfen</button>
-                <button class="ax-btn" type="button" onclick={() => (discarding = null)}>Cancel</button>
+                <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void discardProposal(card)}
+                  >{tFlow("reallyDiscard")}</button
+                >
+                <button class="ax-btn" type="button" onclick={() => (discarding = null)}>{tFlow("cancel")}</button>
               {:else}
-                <button class="ax-btn" type="button" disabled={busy} onclick={() => (discarding = card.id)}>Discard</button>
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => (discarding = card.id)}
+                  >{tFlow("discard")}</button
+                >
               {/if}
             </div>
           </li>
@@ -1116,7 +1138,7 @@
         {:else}
           <div class="row">
             <button class="ax-btn" type="button" disabled={busy || newColumnId === null} onclick={() => (editing = "new")}>
-              {plan.status === "draft" ? "Add card" : "Add card to the running plan"}
+              {plan.status === "draft" ? tFlow("addCard") : tFlow("addCardRunning")}
             </button>
           </div>
         {/if}
@@ -1125,32 +1147,32 @@
       {#if plan.status === "draft"}
         <div class="approve">
           <button class="ax-btn primary" type="button" disabled={busy || !canApprove(plan, cards)} onclick={() => void approvePlan()}>
-            Release plan
+            {tFlow("releasePlan")}
           </button>
           {#if plan.origin_card_id == null}
             <label class="check">
               <input type="checkbox" bind:checked={runByItself} />
-              Automatisch abarbeiten
+              {tFlow("runAutomatically")}
             </label>
           {/if}
           <span class="muted">
             {runByItself || plan.origin_card_id != null
-              ? "Cards start by themselves as soon as their predecessors are done, as many at once as possible; the review runs by itself."
-              : "The proposals move to the first open column; you start every card yourself."}
-            Der Planer ist danach fertig.
+              ? tFlow("autoStartText")
+              : tFlow("manualText")}
+            {tFlow("plannerDoneAfter")}
           </span>
           <label class="check">
             <input type="checkbox" bind:checked={autoRights} />
-            Auto mode
+            {tFlow("autoMode")}
           </label>
           <span class="muted">
             {autoRights
-              ? "The plan's workers may run any command and edit without asking. A push, the CLI, the database and config files stay blocked in their plain forms — patterns, not a sandbox: switch it on for cards you have read. Reviewers may run any command too but get no edit tools; taking the plan over stays yours."
-              : "The plan's workers ask before commands their role does not allow."}
+              ? tFlow("autoRightsOn")
+              : tFlow("autoRightsOff")}
           </span>
           {#if !grilled}
             <span class="muted hint-line">
-              This plan was not grilled: its goal has not been questioned yet. You can still release it.
+              {tFlow("notGrilled")}
             </span>
           {/if}
         </div>
@@ -1158,19 +1180,24 @@
 
       {#if spend}
         <div class="approve">
-          <span>Verbrauch: {spendLine(spend)}</span>
+          <span>{tFlow("spend", { line: spendLine(spend) })}</span>
           {#if spend.plan_over}
-            <span class="error" role="status">Pausiert: {spend.plan_over}.</span>
-            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void resumePlan()}>Continue</button>
-            <span class="muted">Sets the plan's limit to the spend so far plus a new allowance.</span>
+            <span class="error" role="status">{tFlow("paused", { reason: spend.plan_over })}</span>
+            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void resumePlan()}
+              >{tFlow("continue")}</button
+            >
+            <span class="muted">{tFlow("continueText")}</span>
           {/if}
           {#if spend.day_over}
             <span class="error" role="status">
-              Daily limit of the Studio sessions reached: {spend.day_over}. Nothing new starts until tomorrow; raise it:
-              <code>studio_daily_usd_cap</code> in der Config.
+              {tFlow("dayCapBefore", { reason: spend.day_over })}
+              <code>{DAY_CAP_KEY}</code>
+              {tFlow("dayCapAfter")}
             </span>
           {:else if spend.day_cap_usd !== null}
-            <span class="muted">Heute: ${spend.today.cost_usd.toFixed(2)} von ${spend.day_cap_usd.toFixed(2)}</span>
+            <span class="muted"
+              >{tFlow("today", { spent: formatUsd(spend.today.cost_usd), cap: formatUsd(spend.day_cap_usd) })}</span
+            >
           {/if}
         </div>
       {/if}
@@ -1184,11 +1211,10 @@
               disabled={busy}
               onchange={(event) => void switchAutoRights(event.currentTarget)}
             />
-            Auto mode
+            {tFlow("autoMode")}
           </label>
           <span class="muted">
-            Anything but a push (blocked by patterns, not a sandbox), without asking. Applies to sessions started from now
-            on; running ones keep their rights — to stop one, stop its card.
+            {tFlow("autoModeRunning")}
           </span>
         </div>
       {/if}
@@ -1196,22 +1222,21 @@
       {#if readyToTakeOver(plan, cards)}
         <div class="approve">
           <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverPlan()}>
-            Take over plan
+            {tFlow("takeOverPlan")}
           </button>
           <span class="muted">
-            All cards are on the plan's line. The work goes into the project's main branch, its commits stay
-            separate as long as the branch has not moved. Nothing is pushed; a conflict is rolled back.
+            {tFlow("takeOverText")}
           </span>
           {#if takeOverConflict.length > 0}
             <p class="error" role="alert">
-              Conflict with the main branch, nothing was changed: {takeOverConflict.join(", ")}
+              {tFlow("conflictMain", { files: takeOverConflict.join(", ") })}
             </p>
           {/if}
         </div>
       {/if}
 
       {#if working.length > 0}
-        <h3>Cards of the plan</h3>
+        <h3>{tFlow("cardsOfPlan")}</h3>
         <ul class="cards">
           {#each working as card (card.id)}
             {#if editing === card.id}
@@ -1232,12 +1257,18 @@
               <span>#{card.id} {proposalTitle(card)}</span>
               <span class="muted">{card.agent ?? "—"} · {STATE_LABEL[card.state]}</span>
               {#if plan.status !== "closed" && cardEditable(card)}
-                <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Edit</button>
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}
+                  >{tFlow("edit")}</button
+                >
               {/if}
               {#if leftCards.includes(card.id)}
-                <span class="error" role="status">Does not fit the plan twice; the Studio gave up.</span>
-                <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(card)}>Erneut integrieren</button>
-                <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(card)}>Neu machen</button>
+                <span class="error" role="status">{tFlow("gaveUp")}</span>
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(card)}
+                  >{tFlow("integrateAgain")}</button
+                >
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(card)}
+                  >{tFlow("redo")}</button
+                >
               {/if}
             </li>
             {/if}

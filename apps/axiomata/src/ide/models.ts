@@ -8,7 +8,9 @@
  */
 
 import { invokeBackend as invoke, type ProviderId } from "../core/backend";
+import { formatNumber, formatUsd } from "../core/format";
 import type { Tier, TierSource } from "../core/roster";
+import { tAgents as t } from "../i18n/agents";
 
 export type { TierSource };
 
@@ -168,14 +170,14 @@ export function tierOrigin(model: Pick<ModelEntry, "tier_source" | "owner_tier" 
   switch (model.tier_source) {
     case "owner":
       return model.proposal && model.proposal.tier !== model.owner_tier
-        ? `Yours · the proposal says ${model.proposal.tier}`
-        : "Yours";
+        ? t("originYoursProposal", { tier: model.proposal.tier })
+        : t("originYours");
     case "research":
-      return "Proposal · not reviewed";
+      return t("originResearch");
     case "price":
-      return "From the price";
+      return t("originPrice");
     case "unrated":
-      return "Unrated · no agent until it has a tier";
+      return t("originUnrated");
   }
 }
 
@@ -186,17 +188,18 @@ export function proposalWaits(model: Pick<ModelEntry, "tier_source" | "proposal"
 
 /** "$0.40 / M out", or "local" / "no price". */
 export function priceLabel(model: Pick<ModelEntry, "provider" | "price">): string {
-  if (model.provider === "ollama") return "local";
-  if (!model.price) return "no price";
+  if (model.provider === "ollama") return t("local");
+  if (!model.price) return t("noPrice");
   const out = model.price.output_per_m;
-  return `$${out < 1 ? out.toFixed(2) : String(Math.round(out * 100) / 100)} / M out`;
+  // Cents below a dollar always; above, only the places the price has ("$20", "$1.5").
+  return t("pricePerMOut", { price: formatUsd(out, 2, out < 1 ? 2 : 0) });
 }
 
 /** A context window as "128K" or "1M" tokens; empty when unknown. */
 export function contextLabel(tokens: number | null | undefined): string {
   if (!tokens) return "";
-  if (tokens >= 1_000_000) return `${Math.round((tokens / 1_000_000) * 10) / 10}M context`;
-  return `${Math.round(tokens / 1000)}K context`;
+  if (tokens >= 1_000_000) return t("contextM", { n: formatNumber(Math.round((tokens / 1_000_000) * 10) / 10) });
+  return t("contextK", { n: formatNumber(Math.round(tokens / 1000)) });
 }
 
 /** The host a source link points at ("lmarena.ai"), for its text; the text itself when it is no URL. */
@@ -221,9 +224,9 @@ export function isWebAddress(source: string): boolean {
 /** What is wrong with price limits typed into the form, or `null` (looser or equal to Rust's check). */
 export function limitsProblem(lightBelow: number, heavyAbove: number): string | null {
   if (!Number.isFinite(lightBelow) || !Number.isFinite(heavyAbove) || lightBelow < 0 || heavyAbove < 0) {
-    return "Both limits are prices in USD per million output tokens.";
+    return t("limitsNotPrices");
   }
-  if (lightBelow > heavyAbove) return "“Light below” must not be above “heavy above”.";
+  if (lightBelow > heavyAbove) return t("limitsOrder");
   return null;
 }
 
@@ -288,6 +291,6 @@ export function withoutBusy(busy: ReadonlySet<string>, key: string): Set<string>
 
 /** What "propose again" says when it was answered: nothing was asked for, one model, or several. */
 export function researchToast(asked: number): string {
-  if (asked === 0) return "No model is switched on to research.";
-  return asked === 1 ? "Researching the model's tier…" : `Researching the tiers of ${asked} models…`;
+  if (asked === 0) return t("researchNone");
+  return asked === 1 ? t("researchOne") : t("researchMany", { n: asked });
 }

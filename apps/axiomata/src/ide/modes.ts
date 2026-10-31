@@ -10,6 +10,7 @@
  * the two-mode time has no `flow`, which is replaced by the starting one.
  */
 
+import { tStudio } from "../i18n/studio";
 import type { IconName } from "../ui/icons/lucide";
 import { emptyLayout, parseLayout, serializeLayout, type Layout } from "./layout";
 
@@ -17,8 +18,12 @@ export type Mode = "editor" | "agents" | "flow";
 
 export const MODES: readonly Mode[] = ["editor", "agents", "flow"];
 
-/** What the header calls each mode. The stored id of the Canvas is still `agents`. */
-export const MODE_LABEL: Record<Mode, string> = { editor: "Editor", agents: "Canvas", flow: "Flow" };
+/** What the header calls each mode, read in the current language. The stored id of the Canvas is still `agents`. */
+export const MODE_LABEL: Record<Mode, () => string> = {
+  editor: () => tStudio("modeEditor"),
+  agents: () => tStudio("modeCanvas"),
+  flow: () => tStudio("modeFlow"),
+};
 
 /** The icon beside each mode's name in the header: code for the files, free panes for the Canvas, linked nodes for the Flow. */
 export const MODE_ICON: Record<Mode, IconName> = { editor: "code", agents: "panels-top-left", flow: "workflow" };

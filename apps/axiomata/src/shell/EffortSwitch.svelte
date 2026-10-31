@@ -7,6 +7,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import { tChat } from "../i18n/chat";
   import { CONFIG_SAVED, type ConfigView, invokeBackend, isEffortLevel } from "../core/backend";
   import { on } from "../core/bus";
   import { busy, turnEffort, turnModel } from "../core/chat";
@@ -50,10 +51,12 @@
   const configured = $derived(config?.agents.chat_effort ?? null);
   const current = $derived(effortState($turnEffort, configured, reasoning));
   const levels = $derived(offeredLevels(reasoning, $turnEffort));
-  const noDefault = $derived(configured ? `default (${configured})` : defaultLabel(reasoning));
+  const noDefault = $derived(configured ? tChat("effortDefaultOf", { level: configured }) : defaultLabel(reasoning));
   const note = $derived(unlistedNote(reasoning, current.level));
   const title = $derived(
-    `Effort: ${current.explanation}${note ? ` (${note})` : ""} — this conversation only; /effort lists the levels`,
+    note
+      ? tChat("effortTitleNote", { explanation: current.explanation, note })
+      : tChat("effortTitle", { explanation: current.explanation }),
   );
 
   function onchange(event: Event): void {
@@ -64,11 +67,11 @@
 
 {#if onGlut}
   <label class="effort" {title}>
-    <span>Effort</span>
-    <select value={$turnEffort ?? DEFAULT} {onchange} disabled={$busy} aria-label="Effort for this conversation">
+    <span>{tChat("effortLabel")}</span>
+    <select value={$turnEffort ?? DEFAULT} {onchange} disabled={$busy} aria-label={tChat("effortFor")}>
       <option value={DEFAULT}>{noDefault}</option>
       {#each levels as level (level)}
-        <option value={level}>{level}{takesLevel(reasoning, level) ? "" : " (not listed)"}</option>
+        <option value={level}>{takesLevel(reasoning, level) ? level : tChat("notListed", { level })}</option>
       {/each}
     </select>
   </label>

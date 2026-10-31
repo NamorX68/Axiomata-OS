@@ -19,7 +19,8 @@ use serde::Serialize;
 use crate::board::Plan;
 use crate::config::Config;
 use crate::error::AxiomataError;
-use crate::roster::refusal;
+use crate::error::coded;
+use crate::roster::no_plan;
 use crate::spend;
 use axiomata_ide::usage::Usage;
 
@@ -216,7 +217,7 @@ pub fn plan_spend(
     plan_id: i64,
 ) -> Result<PlanSpend, AxiomataError> {
     let Some(plan) = crate::board::flow::get_plan(db, plan_id)? else {
-        return Err(refusal("plan", format!("no plan with id {plan_id}")));
+        return Err(no_plan(plan_id));
     };
     let spent = plan_spent(db, plan_id)?;
     let limits = plan_limits(config, &plan);
@@ -240,13 +241,14 @@ pub fn plan_spend(
 /// A database error, a plan that does not exist, or one that has not reached a limit.
 pub fn resume_plan(db: &Connection, config: &Config, plan_id: i64) -> Result<Plan, AxiomataError> {
     let Some(plan) = crate::board::flow::get_plan(db, plan_id)? else {
-        return Err(refusal("plan", format!("no plan with id {plan_id}")));
+        return Err(no_plan(plan_id));
     };
     let spent = plan_spent(db, plan_id)?;
     let limits = plan_limits(config, &plan);
     if plan_over(spent, limits).is_none() {
-        return Err(refusal(
-            "plan",
+        return Err(coded(
+            "plan.noLimitReached",
+            &[("plan", &plan_id.to_string())],
             format!("plan #{plan_id} has not reached a limit; there is nothing to go on from"),
         ));
     }
@@ -267,8 +269,7 @@ pub fn resume_plan(db: &Connection, config: &Config, plan_id: i64) -> Result<Pla
                 .max(spent.tokens.saturating_add(config.agents.plan_max_tokens)),
         ),
     };
-    crate::board::flow::update_plan(db, plan_id, &fields)?
-        .ok_or_else(|| refusal("plan", format!("no plan with id {plan_id}")))
+    crate::board::flow::update_plan(db, plan_id, &fields)?.ok_or_else(|| no_plan(plan_id))
 }
 
 #[cfg(test)]

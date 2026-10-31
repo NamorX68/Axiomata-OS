@@ -1,7 +1,9 @@
 <!-- Flip side of routines-board: display options + the add-routine form. -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import type { NewRoutine, Routine } from "../core/backend";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
   import RoutineForm, { type RoutineFormFields } from "./RoutineForm.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -37,10 +39,10 @@
     };
     try {
       const created = await ctx.invoke<Routine>("add_routine", { new: routine });
-      result = `Added #${created.id}.`;
+      result = tModules("added", { id: created.id });
       formKey += 1;
     } catch (err) {
-      result = `Add failed: ${String(err)}`;
+      result = tModules("addFailed", { error: messageOf(err) });
     } finally {
       adding = false;
     }
@@ -50,20 +52,20 @@
 <div class="settings">
   <label class="row">
     <input type="checkbox" checked={$config.showDisabled !== false} onchange={setShowDisabled} />
-    Show disabled routines
+    {tModules("showDisabled")}
   </label>
   <label class="row">
-    Sort
+    {tModules("sort")}
     <select value={$config.sort === "name" ? "name" : "next"} onchange={setSort}>
-      <option value="next">soonest first</option>
-      <option value="name">by name</option>
+      <option value="next">{tModules("sortNext")}</option>
+      <option value="name">{tModules("sortName")}</option>
     </select>
   </label>
 
   <div class="add-form">
-    <h3>Add routine</h3>
+    <h3>{tModules("addRoutine")}</h3>
     {#key formKey}
-      <RoutineForm submitLabel={adding ? "Adding…" : "Add"} busy={adding} onSubmit={add} />
+      <RoutineForm submitLabel={adding ? tModules("adding") : tModules("add")} busy={adding} onSubmit={add} />
     {/key}
     {#if result}<p class="result">{result}</p>{/if}
   </div>

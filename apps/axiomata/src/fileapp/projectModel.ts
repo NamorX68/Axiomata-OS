@@ -7,6 +7,7 @@
  */
 
 import type { IdeProject } from "../core/backend";
+import { tEditor } from "../i18n/editor";
 
 /** The file-service root of a project's folder. */
 export function projectRootId(id: number): string {
@@ -36,9 +37,9 @@ export function otherProjects(projects: readonly IdeProject[], current: number |
  */
 export function folderNameProblem(name: string): string | null {
   const n = name.trim();
-  if (n === "") return "Enter a project name first.";
-  if (n.length > 100) return "That name is too long.";
-  if (n.startsWith(".")) return "The name must not start with a dot.";
-  if (/[/\\:\0]/.test(n)) return "The name must not contain / \\ or :.";
+  if (n === "") return tEditor("projectNameMissing");
+  if (n.length > 100) return tEditor("projectNameTooLong");
+  if (n.startsWith(".")) return tEditor("projectNameDot");
+  if (/[/\\:\0]/.test(n)) return tEditor("projectNameChars");
   return null;
 }

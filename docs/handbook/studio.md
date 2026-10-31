@@ -22,57 +22,60 @@ er steht als Karte ganz oben in der Agentenliste und lässt sich dort entfernen.
 
 ## Wo die Knöpfe sind
 
-- **Öffnen:** App-Ring oder Dock „Studio“; „Back to the OS“ oben führt zurück. Daneben „Editor settings“ und
-  „Keyboard shortcuts“.
-- **Projektleiste** (Seitenleiste oben): „Open project…“, „New project…“ („Project name“, „Start a git repository“,
-  „Choose where…“), „Close project“, „Change folder…“, „Remove from list“ (der Ordner bleibt), Farbmarke.
-- **Leiste links:** „Files“, „Search the project“ (⇧⌘F), „Git“, „Run — build, test, start“, „Debug“, „Agents“;
-  dazu „New terminal“ und „Open a file…“ (⌘O).
-- **„Agents“** (in jedem Modus derselbe Reiter), von oben nach unten:
+- **Öffnen:** App-Ring oder Dock „Studio“; „Zurück zum OS“ oben führt zurück. Daneben „Editor-Einstellungen“ und
+  „Tastenkürzel“.
+- **Projektleiste** (Seitenleiste oben): „Projekt öffnen…“, „Neues Projekt…“ („Projektname“, „Ein Git-Repository
+  anlegen“, „Ort wählen…“), „Projekt schließen“, „Ordner ändern…“, „Aus der Liste entfernen“ (der Ordner bleibt),
+  Farbmarke.
+- **Leiste links:** „Dateien“, „Projekt durchsuchen“ (⇧⌘F), „Git“, „Run — bauen, testen, starten“, „Debug“, „Agenten“;
+  dazu „Neues Terminal“ und „Datei öffnen…“ (⌘O).
+- **„Agenten“** (in jedem Modus derselbe Reiter), von oben nach unten:
   - **„Master“** — die Master-Kacheln Glut, Claude Code und Opencode.
-  - **„Favorites“** — deine gemerkten Agenten als Kacheln; ein Klick startet. Ein Favorit, dessen Engine gerade nicht
+  - **„Favoriten“** — deine gemerkten Agenten als Kacheln; ein Klick startet. Ein Favorit, dessen Engine gerade nicht
     laufen kann, ist abgeblendet und wird nie still auf eine andere Engine gelegt.
-  - **„Start an agent“** — die sieben Rollen als Kacheln (Sechseck und Name). Ein Klick öffnet darunter das Menü, ein
+  - **„Agenten starten“** — die sieben Rollen als Kacheln (Sechseck und Name). Ein Klick öffnet darunter das Menü, ein
     zweiter Klick auf dieselbe Kachel oder „Start“ schließt es: Light · Medium · Heavy (vorgewählt die Standard-Stufe
-    der Rolle), dann die Engine aus einer Liste, die bei vielen Modellen scrollt („Default of the tier“ oder eine
-    Engine der Stufe, die Standard-Engine mit „standard“ markiert), „Start“. Kürzester Weg: Rolle → „Start“. Der Stern („Keep this choice as a favorite“) merkt die Wahl.
-  - **„Sessions“** — nur, was dich angeht: laufende und wartende Sitzungen und unter „Waiting for you: take over or
-    discard“ beendete mit Arbeit, die noch nicht übernommen ist. Ist nichts davon da: „No session runs or waits for
-    you.“ Jede Sitzung hat einen Stern („Keep this agent as a favorite“).
-  - unten „New agent…“ und **„Models & roles…“** (Reiter „Models“ und „Roles“, [Modelle und Rollen](modelle-rollen.md)).
-- **Agenten-Pane:** Reiter „Terminal“, „Plan“, „Diffs“, „Inbox“ (Nachrichten an die Sitzung, ⌘↩ sendet);
-  „Restart the agent“. Unter „Diffs“: „Discard file“, „Commit…“, „Take over…“ (Squash oder Merge, „Never pushes.“).
-- **„Git“:** Branch wechseln, „New branch from here“, „Fetch …“, „Stage all“, Commit-Nachricht (⌘↩), ✨ schreibt
-  einen Vorschlag (ein bezahlter Aufruf), „Commit“, „Commit & Push“, „Push“ / „Publish branch“.
-- **„Run“:** Aufgaben aus Cargo.toml, package.json, pyproject.toml und Makefile, gruppiert nach Run / Build / Test /
-  Check / Other; „New task“.
-- **„Debug“:** Python, Rust, C/C++ und Swift; „What to debug“, „Debug“, „New configuration…“, Schritt-Knöpfe,
-  Variablen, Watch, Haltepunkte, Konsole.
+    der Rolle), dann die Engine aus einer Liste, die bei vielen Modellen scrollt („Standard der Stufe“ oder eine Engine
+    der Stufe, die Standard-Engine mit „Standard“ markiert), „Start“. Kürzester Weg: Rolle → „Start“. Der Stern („Diese
+    Wahl als Favoriten behalten“) merkt die Wahl.
+  - **„Sitzungen“** — nur, was dich angeht: laufende und wartende Sitzungen und unter „Wartet auf dich: übernehmen oder
+    verwerfen“ beendete mit Arbeit, die noch nicht übernommen ist. Ist nichts davon da: „Keine Sitzung läuft oder wartet
+    auf dich.“ Jede Sitzung hat einen Stern („Diesen Agenten als Favoriten behalten“).
+  - unten „New agent…“ und **„Modelle & Rollen…“** (Reiter „Modelle“ und „Rollen“, [Modelle und
+    Rollen](modelle-rollen.md)).
+- **Agenten-Pane:** Reiter „Terminal“, „Plan“, „Diffs“, „Posteingang“ (Nachrichten an die Sitzung, ⌘↩ sendet);
+  „Agenten neu starten“. Unter „Diffs“: „Datei verwerfen“, „Commit…“, „Übernehmen…“ (Squash oder Merge, „Pusht nie.“).
+- **„Git“:** Branch wechseln, „Neuer Branch von hier“, „Vom Remote holen …“, „Alle vormerken“, Commit-Nachricht (⌘↩), ✨
+  schreibt einen Vorschlag (ein bezahlter Aufruf), „Commit“, „Commit & Push“, „Push“ / „Branch veröffentlichen“.
+- **„Run“:** Aufgaben aus Cargo.toml, package.json, pyproject.toml und Makefile, gruppiert nach Starten / Bauen / Testen
+  / Prüfen / Sonstiges; „Neue Aufgabe“.
+- **„Debug“:** Python, Rust, C/C++ und Swift; „Was debuggt wird“, „Debug“, „Neue Konfiguration…“, Schritt-Knöpfe,
+  Variablen, „Beobachten“, Haltepunkte, Konsole.
 - **Tasten:** ⌘\ / ⇧⌘\ teilen, ⌘1–9 Reiter, ⌃⇥ nächster Reiter, ⌘P Datei, ⌘B Baum, ⌘W Reiter schließen, ⌘N neue
   Notiz (Windows/Linux die Buchstaben mit Ctrl+Shift).
 
 ## Häufige Handgriffe
 
-1. **Projekt anlegen:** Projektleiste → „New project…“ → Name, Ort, ggf. „Start a git repository“.
-2. **Agenten starten:** „Agents“ → „Start an agent“ → Rolle → ggf. Stufe und Engine → „Start“ — oder einen Favoriten
-   anklicken, oder eine Karte im Kanban mit „Start …“ starten ([Kanban](kanban.md)).
-3. **Einen Agenten merken:** in „Start an agent“ oder an einer Sitzung den Stern klicken; er steht dann unter
-   „Favorites“. Ein Favorit mit „Default of the tier“ zieht mit, wenn du die Standard-Engine der Stufe änderst.
-4. **Arbeit eines Agenten übernehmen:** Agenten-Pane → „Diffs“ → prüfen → „Take over…“ → Squash oder Merge.
+1. **Projekt anlegen:** Projektleiste → „Neues Projekt…“ → Name, Ort, ggf. „Ein Git-Repository anlegen“.
+2. **Agenten starten:** „Agenten“ → „Agenten starten“ → Rolle → ggf. Stufe und Engine → „Start“ — oder einen Favoriten
+   anklicken, oder eine Karte im Kanban mit „Starten…“ starten ([Kanban](kanban.md)).
+3. **Einen Agenten merken:** in „Agenten starten“ oder an einer Sitzung den Stern klicken; er steht dann unter
+   „Favoriten“. Ein Favorit mit „Standard der Stufe“ zieht mit, wenn du die Standard-Engine der Stufe änderst.
+4. **Arbeit eines Agenten übernehmen:** Agenten-Pane → „Diffs“ → prüfen → „Übernehmen…“ → Squash oder Merge.
 
 ## Fallen
 
 - Aufgaben aus `.axiomata/tasks.json`, Debug-Setups und Rollen aus `.axiomata/agents/` eines Projekts laufen erst,
-  nachdem du sie geprüft hast („… need your review“ → „Review…“ → „Allow …“). Ändert sich die Datei, fragt die App
-  erneut.
+  nachdem du sie geprüft hast („… brauchen deine Prüfung“ → „Prüfen…“ → „Diese … erlauben“). Ändert sich die Datei,
+  fragt die App erneut.
 - Einen Agenten entfernen nimmt **Worktree und Branch** mit; ungesicherte Arbeit ist dann weg (die App fragt).
 - Eine beendete Sitzung **ohne eigene Arbeit** (nichts Ungesichertes, kein Commit über ihre Basis, keine offene Karte)
   steht nicht mehr in der Liste. Die wöchentliche Wartung prüft sie erneut und räumt sie dann weg — Worktree, leerer
-  Branch, Eintrag — und nennt sie unter Settings → Storage ([Storage](storage.md)). Arbeit wird nie von selbst
+  Branch, Eintrag — und nennt sie unter Einstellungen → Speicher ([Storage](storage.md)). Arbeit wird nie von selbst
   gelöscht.
-- Ein Modell ohne Stufe ist kein Agent und fehlt unter „Start an agent“; schalte es unter „Models“ ein und gib ihm
+- Ein Modell ohne Stufe ist kein Agent und fehlt unter „Agenten starten“; schalte es unter „Modelle“ ein und gib ihm
   eine Stufe.
-- „Take over…“ und „Commit & Push“ pushen nie mit Gewalt; „Take over…“ pusht gar nicht.
+- „Übernehmen…“ und „Commit & Push“ pushen nie mit Gewalt; „Übernehmen…“ pusht gar nicht.
 - Der Opencode-Master ist nur dein eigenes `opencode` im Projektordner, ohne Team-Werkzeuge.
 - Mehrere Master arbeiten im **selben** Ordner: ändern zwei dieselbe Datei, kommen sie sich in die Quere. Für
   getrennte Arbeit einen Agenten mit eigenem Worktree starten.

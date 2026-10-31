@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { languageSetting } from "../i18n/lang.svelte";
 import type { SessionUsage } from "../core/backend";
 import { formatTokens, unmeasuredNote, usageLines } from "./cardUsage";
 
@@ -24,7 +25,10 @@ describe("formatTokens", () => {
   it("speaks of a token count the way a limit is spoken of", () => {
     expect(formatTokens(950)).toBe("950");
     expect(formatTokens(340_000)).toBe("340 k");
+    expect(formatTokens(1_500_000)).toBe("1.5 M");
+    languageSetting.set("de");
     expect(formatTokens(1_500_000)).toBe("1,5 M");
+    languageSetting.set("system");
   });
 });
 

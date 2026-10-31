@@ -20,6 +20,7 @@
   import CardUsage from "../../modules/CardUsage.svelte";
   import EmptyState from "../../ui/EmptyState.svelte";
   import Icon from "../../ui/Icon.svelte";
+  import { tFlow } from "../../i18n/flow";
   import { agentStatus, describeStatus } from "../agentStatus";
   import { engineChoiceLabel } from "../agentStart";
   import { session } from "../projectSession";
@@ -107,6 +108,9 @@
     };
   });
 
+  /** The mark before a tile's unread count: a sign, the same in both languages. */
+  const MAIL_MARK = "✉";
+
   let open = $state<Record<number, boolean>>({});
   function toggle(agentId: number): void {
     open = { ...open, [agentId]: !open[agentId] };
@@ -127,8 +131,8 @@
 <div class="team">
   {#if groups.length === 0}
     <EmptyState
-      title="Nothing is running yet"
-      text="Once a plan is approved and its cards start (or a planner works), every session appears here as a tile — with what it is doing right now."
+      title={tFlow("nothingRunning")}
+      text={tFlow("nothingRunningText")}
     />
   {/if}
   {#each groups as group (group.planId ?? "none")}
@@ -152,39 +156,39 @@
               {/if}
               {#if tile.agent.branch}
                 <!-- Where the work sits: the branch its worktree has checked out (a reviewer has none, it is detached). -->
-                <span class="chip branch" title="Checked out in its worktree: {tile.agent.branch}"
+                <span class="chip branch" title={tFlow("branchTitle", { branch: tile.agent.branch })}
                   >{tile.agent.branch}</span
                 >
               {/if}
               {#if (unread[tile.agent.id] ?? 0) > 0}
-                <span class="chip mail" title="Unread messages in the session's inbox">✉ {unread[tile.agent.id]}</span>
+                <span class="chip mail" title={tFlow("unreadTitle")}>{MAIL_MARK} {unread[tile.agent.id]}</span>
               {/if}
               <span class="spacer"></span>
               {#if tile.agent.harness === "glut"}
                 <button
                   class="ax-btn terminal"
                   type="button"
-                  title="Follow this session read-only in a pane of its own: nothing typed there reaches it"
+                  title={tFlow("watchTitle")}
                   onclick={() => watch(tile.agent.id, tile.agent.name)}
                 >
                   <Icon name="eye" size="sm" />
-                  Watch
+                  {tFlow("watch")}
                 </button>
               {/if}
               <button
                 class="ax-btn terminal"
                 class:primary={status.tone === "waiting"}
                 type="button"
-                title="Bring this session's terminal to the front; it does not start a new one"
+                title={tFlow("terminalTitle")}
                 onclick={() => showTerminal(tile.agent.id)}
               >
                 <Icon name="terminal" size="sm" />
-                Terminal
+                {tFlow("terminal")}
               </button>
             </header>
 
             {#if status.tone === "waiting"}
-              <p class="waiting" role="status">Waiting for you: a question or an approval in the terminal.</p>
+              <p class="waiting" role="status">{tFlow("waitingForYou")}</p>
             {/if}
 
             {#if tile.card}
@@ -195,10 +199,10 @@
                 <span class="state">{STATE_LABEL[tile.card.state]}</span>
               </p>
               {#if tile.card.input_required}
-                <p class="question" role="status">Fragt: {tile.card.input_required}</p>
+                <p class="question" role="status">{tFlow("asks", { question: tile.card.input_required })}</p>
               {/if}
             {:else if tile.duty === "planner"}
-              <p class="card-line"><span class="muted">{dutyLabel("planner")}</span> the plan</p>
+              <p class="card-line"><span class="muted">{dutyLabel("planner")}</span> {tFlow("thePlan")}</p>
             {/if}
 
             <button class="now" type="button" aria-expanded={open[tile.agent.id] ?? false} onclick={() => toggle(tile.agent.id)}>
@@ -211,7 +215,7 @@
 
             {#if open[tile.agent.id]}
               {#if live && live.steps.length > 1}
-                <ol class="trail" aria-label="Latest steps">
+                <ol class="trail" aria-label={tFlow("latestSteps")}>
                   {#each live.steps.slice(0, -1).reverse() as step, index (index)}
                     <li class:said={step.kind === "say"}>{stepLabel(step)}</li>
                   {/each}

@@ -11,6 +11,7 @@
 
   import { keyHints } from "../core/keyHints";
   import { platform } from "../core/keys";
+  import { tCanvas } from "../i18n/canvas";
   import Icon from "./Icon.svelte";
   import IconButton from "./IconButton.svelte";
   import type { IconName } from "./icons/lucide";
@@ -49,7 +50,7 @@
   {#if actions}{@render actions()}{/if}
   {#if onClose}
     <kbd class="key" aria-hidden="true">{closeKey}</kbd>
-    <IconButton icon="x" label="Close ({closeKey})" onclick={onClose} />
+    <IconButton icon="x" label={tCanvas("closeKeys", { keys: closeKey })} onclick={onClose} />
   {/if}
 </header>
 

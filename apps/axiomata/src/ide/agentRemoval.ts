@@ -4,10 +4,12 @@
  * yes lets the backend throw it away.
  */
 
-/** The plan's own words for the second question (A3c). */
-export const UNSAVED_WORK_QUESTION = "Unsaved work in the worktree — delete anyway?";
+import { tAgents } from "../i18n/agents";
+
+/** The plan's own words for the second question (A3c), in the current language. */
+export const unsavedWorkQuestion = (): string => tAgents("unsavedWorkQuestion");
 
 /** The confirm text: `question`, and the unsaved-work question below it when the worktree holds such work. */
 export function removalQuestion(question: string, unsaved: boolean): string {
-  return unsaved ? `${question}\n\n${UNSAVED_WORK_QUESTION}` : question;
+  return unsaved ? `${question}\n\n${unsavedWorkQuestion()}` : question;
 }

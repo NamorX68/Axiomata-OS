@@ -26,6 +26,7 @@
   device) won't show until the next ↻.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
@@ -44,10 +45,11 @@
     type CalendarEvent,
     type NewCalendarEvent,
   } from "../core/calendar";
-  import { dayLabel, relativeTime } from "../core/format";
+  import { dayLabel, formatDate, relativeTime } from "../core/format";
   import { monthDiff, monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
   import { resolveSkillName, staleDigestNote, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
   import CalendarCreateForm from "./CalendarCreateForm.svelte";
   import Clock from "./Clock.svelte";
   import MiniCalendar from "./MiniCalendar.svelte";
@@ -121,7 +123,7 @@
 
   const agendaEnd = $derived(agendaDayList[agendaDayList.length - 1]);
   const agendaCaption = $derived(
-    `${dayLabel(selectedDay)} – ${new Date(`${agendaEnd}T00:00:00`).toLocaleDateString(undefined, {
+    `${dayLabel(selectedDay)} – ${formatDate(`${agendaEnd}T00:00:00`, {
       day: "numeric",
       month: "short",
     })}`,
@@ -177,7 +179,7 @@
       digest = { ...digest, events: [...digest.events, event].sort((a, b) => a.start.localeCompare(b.start)) };
       showCreate = false;
     } catch (err) {
-      createError = String(err instanceof Error ? err.message : err);
+      createError = messageOf(err);
     } finally {
       creating = false;
     }
@@ -193,7 +195,7 @@
       await deleteCalendarEvent(ctx.invoke, ev.id);
       digest = { ...digest, events: digest.events.filter((e) => e.id !== ev.id) };
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       deletingId = null;
     }
@@ -218,7 +220,7 @@
    *  the re-resolved digest actually came from. */
   async function applyFreshRun(run: RunRecord) {
     if (runFailed(run.status)) {
-      error = run.error ?? "Last run failed.";
+      error = run.error ?? tModules("lastRunFailed");
       await loadLatest();
       return;
     }
@@ -241,7 +243,7 @@
       error = result.error ?? "";
       staleNote = staleDigestNote(result);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
       staleNote = "";
     } finally {
       loading = false;
@@ -255,7 +257,7 @@
       const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       await applyFreshRun(full);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       running = false;
     }
@@ -294,18 +296,34 @@
 
 <div class="calendar">
   <div class="head">
-    <select value={selectedCalendar} onchange={selectCalendar} aria-label="Filter by calendar">
-      <option value="">All calendars</option>
+    <select value={selectedCalendar} onchange={selectCalendar} aria-label={tModules("filterByCalendar")}>
+      <option value="">{tModules("allCalendars")}</option>
       {#each digest.calendars as name (name)}
         <option value={name}>{name}</option>
       {/each}
     </select>
     <span class="spacer"></span>
-    <span class="muted last-run" title={lastRun ? `Last run: ${lastRun.started_at}` : "No run yet"}>
-      {lastRun ? relativeTime(lastRun.started_at) : "never run"}
+    <span
+      class="muted last-run"
+      title={lastRun ? tModules("lastRunTitle", { when: lastRun.started_at }) : tModules("noRunYet")}
+    >
+      {lastRun ? relativeTime(lastRun.started_at) : tModules("neverRun")}
     </span>
-    <button type="button" class="add" title="New event" aria-label="New event" onclick={openCreate}>+</button>
-    <button type="button" class="refresh" title="Run calendar-digest now" aria-label="Refresh" disabled={running} onclick={() => void refreshNow()}>
+    <button
+      type="button"
+      class="add"
+      title={tModules("newEvent")}
+      aria-label={tModules("newEvent")}
+      onclick={openCreate}
+    >+</button>
+    <button
+      type="button"
+      class="refresh"
+      title={tModules("runNow", { skill: skillName })}
+      aria-label={tModules("refresh")}
+      disabled={running}
+      onclick={() => void refreshNow()}
+    >
       {running ? "…" : "↻"}
     </button>
   </div>
@@ -329,7 +347,7 @@
   </div>
 
   {#if atRangeEnd}
-    <p class="range-hint muted">Only this and the next month are loaded — ↻ refreshes.</p>
+    <p class="range-hint muted">{tModules("rangeHint")}</p>
   {/if}
 
   {#if showCreate}
@@ -348,19 +366,18 @@
   {#if staleNote}<p class="muted">{staleNote}</p>{/if}
 
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{tModules("loading")}</p>
   {:else if !lastRun && running}
-    <p class="muted empty">Running <code>{skillName}</code> for the first time…</p>
+    <p class="muted empty">{tModules("firstRunBefore")}<code>{skillName}</code>{tModules("firstRunAfter")}</p>
   {:else if !lastRun}
     <p class="muted empty">
-      No data yet — run <code>{skillName}</code> from the Skills Deck, schedule it as a
-      Routine, or hit ↻ above.
+      {tModules("noDataBefore")}<code>{skillName}</code>{tModules("noDataAfter")}
     </p>
   {:else}
     <div class="agenda-caption muted">{agendaCaption}</div>
     {#if agendaEmpty}
       <p class="muted empty">
-        No events {selectedCalendar ? `in “${selectedCalendar}” ` : ""}in this period.
+        {selectedCalendar ? tModules("noEventsIn", { calendar: selectedCalendar }) : tModules("noEvents")}
       </p>
     {:else}
       <ul class="agenda">
@@ -380,7 +397,7 @@
                     <button
                       type="button"
                       class="del"
-                      aria-label={`Delete "${ev.title}"`}
+                      aria-label={tModules("deleteItem", { name: ev.title })}
                       disabled={deletingId === ev.id}
                       onclick={() => void removeEvent(ev)}
                     >

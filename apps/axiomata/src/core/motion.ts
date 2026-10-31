@@ -16,10 +16,12 @@
 
 import { derived, writable, type Readable, type Writable } from "svelte/store";
 
+import { tSettings } from "../i18n/settings";
+/** The levels in the order of the select; `label` reads the current language. */
 export const MOTION_LEVELS = [
-  { id: "full", label: "Full" },
-  { id: "calm", label: "Calm" },
-  { id: "off", label: "Off" },
+  { id: "full", label: () => tSettings("motionFull") },
+  { id: "calm", label: () => tSettings("motionCalm") },
+  { id: "off", label: () => tSettings("motionOff") },
 ] as const;
 
 export type MotionLevel = (typeof MOTION_LEVELS)[number]["id"];

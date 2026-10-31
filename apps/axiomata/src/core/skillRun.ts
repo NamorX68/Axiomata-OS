@@ -16,6 +16,7 @@
  * before a third connector repeats it a third time.
  */
 
+import { tModules } from "../i18n/modules";
 import { type RunRecord, type RunSummary, runFailed } from "./backend";
 import { relativeTime } from "./format";
 
@@ -89,26 +90,26 @@ export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Pro
     if (run.status === "running") continue;
     if (runFailed(run.status)) {
       newestFailed ??= run;
-      skipped ??= { run, reason: run.error ?? "the run failed" };
+      skipped ??= { run, reason: run.error ?? tModules("reasonRunFailed") };
       continue;
     }
     const full = await invoke<RunRecord | null>("get_run", { id: run.id });
     if (!full) {
       newestMissing ??= run;
-      skipped ??= { run, reason: "its record was not found" };
+      skipped ??= { run, reason: tModules("reasonRecordMissing") };
       continue;
     }
     const stripped = stripCodeFence(full.stdout);
     if (!stripped) {
       newestEmpty ??= run;
-      skipped ??= { run, reason: "it produced no output" };
+      skipped ??= { run, reason: tModules("reasonNoOutput") };
       continue;
     }
     const object = firstJsonObject(stripped);
     let unusable = false;
     if (object === null) {
       unusable = true;
-      unparseableReason ??= "no JSON object found";
+      unparseableReason ??= tModules("noJsonObject");
     } else {
       try {
         JSON.parse(object);
@@ -119,23 +120,25 @@ export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Pro
     }
     if (unusable) {
       newestUnparseable ??= run;
-      skipped ??= { run, reason: "its output held no readable JSON" };
+      skipped ??= { run, reason: tModules("reasonNoJson") };
       continue;
     }
     return { run, stdout: full.stdout, error: null, skipped };
   }
   // No usable run at all: the error itself is what gets shown, so nothing was "skipped".
-  if (newestFailed) return { run: newestFailed, stdout: null, error: newestFailed.error ?? "Last run failed.", skipped: null };
-  if (newestMissing) return { run: newestMissing, stdout: null, error: "Run record not found.", skipped: null };
+  if (newestFailed) {
+    return { run: newestFailed, stdout: null, error: newestFailed.error ?? tModules("lastRunFailed"), skipped: null };
+  }
+  if (newestMissing) return { run: newestMissing, stdout: null, error: tModules("runRecordNotFound"), skipped: null };
   if (newestUnparseable) {
     return {
       run: newestUnparseable,
       stdout: null,
-      error: `${skillName} output was not valid JSON: ${unparseableReason}`,
+      error: tModules("outputNotJson", { skill: skillName, reason: unparseableReason ?? "" }),
       skipped: null,
     };
   }
-  if (newestEmpty) return { run: newestEmpty, stdout: null, error: "Last run produced no output.", skipped: null };
+  if (newestEmpty) return { run: newestEmpty, stdout: null, error: tModules("lastRunNoOutput"), skipped: null };
   return { run: null, stdout: null, error: null, skipped: null };
 }
 
@@ -147,8 +150,9 @@ export function staleDigestNote(
 ): string {
   const { run, skipped } = latest;
   if (!skipped) return "";
-  const shown = run ? ` — showing the digest from ${relativeTime(run.started_at, now)}` : "";
-  return `The latest run (${relativeTime(skipped.run.started_at, now)}) could not be used: ${skipped.reason}${shown}.`;
+  const when = relativeTime(skipped.run.started_at, now);
+  if (!run) return tModules("staleNote", { when, reason: skipped.reason });
+  return tModules("staleNoteShown", { when, reason: skipped.reason, shown: relativeTime(run.started_at, now) });
 }
 
 /**

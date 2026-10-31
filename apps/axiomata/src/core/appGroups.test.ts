@@ -39,29 +39,29 @@ function appNode(overrides: Partial<GraphNode> = {}): GraphNode {
 
 describe("nextGroupName", () => {
   it("starts at 1", () => {
-    expect(nextGroupName([])).toBe("Gruppe 1");
+    expect(nextGroupName([])).toBe("Group 1");
   });
 
   it("fills gaps instead of always counting up", () => {
-    expect(nextGroupName(["Gruppe 1", "Gruppe 3"])).toBe("Gruppe 2");
+    expect(nextGroupName(["Group 1", "Gruppe 3"])).toBe("Group 2");
   });
 
   it("ignores names that don't match the pattern", () => {
-    expect(nextGroupName(["Meine Gruppe", "Gruppe 1"])).toBe("Gruppe 2");
+    expect(nextGroupName(["My group", "Group 1"])).toBe("Group 2");
   });
 });
 
 describe("createGroup / addToGroup / removeFromGroup", () => {
   it("creates a one-member group with a default name and glyph", () => {
     const g = createGroup("user", "/Applications/Foo.app");
-    expect(g).toMatchObject({ side: "user", name: "Gruppe 1", glyph: "group", members: ["/Applications/Foo.app"] });
+    expect(g).toMatchObject({ side: "user", name: "Group 1", glyph: "group", members: ["/Applications/Foo.app"] });
     expect(get(appGroups)).toEqual([g]);
   });
 
   it("names successive groups on the same side independently per side", () => {
     createGroup("user", "/Applications/Foo.app");
     const b = createGroup("builtin", "todo");
-    expect(b.name).toBe("Gruppe 1"); // builtin side starts fresh, not "Gruppe 2"
+    expect(b.name).toBe("Group 1"); // builtin side starts fresh, not "Group 2"
   });
 
   it("addToGroup appends, ignoring an already-present member", () => {
@@ -112,7 +112,7 @@ describe("renameGroup / setGroupGlyph", () => {
   it("ignores a blank/whitespace-only rename", () => {
     const g = createGroup("user", "/Applications/Foo.app");
     renameGroup(g.id, "   ");
-    expect(get(appGroups).find((x) => x.id === g.id)?.name).toBe("Gruppe 1");
+    expect(get(appGroups).find((x) => x.id === g.id)?.name).toBe("Group 1");
   });
 
   it("changes the glyph", () => {

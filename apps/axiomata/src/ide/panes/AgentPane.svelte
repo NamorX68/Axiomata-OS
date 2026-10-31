@@ -24,12 +24,14 @@
     to connect it — `launch_command` / `launch_env`, never the profile's own.
 -->
 <script lang="ts">
+  import { messageOf } from "../../core/errors";
   import type { IdeAgent, ProvisionedAgent } from "../../core/backend";
   import AgentTeamEntry from "../AgentTeamEntry.svelte";
   import SessionMail from "../SessionMail.svelte";
   import { ownerIsQuiet, shouldAsk } from "../nudge";
   import { createContext } from "../../core/registry";
   import { toast } from "../../core/toast";
+  import { tAgents as t } from "../../i18n/agents";
   import type { OutputRef } from "../../core/outputLinks";
   import { relativeInside } from "../outputPath";
   import { renderMarkdown } from "../../core/markdown";
@@ -88,19 +90,19 @@
         if (agent.id === id) ready = provisioned;
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = messageOf(err);
         if (agent.id === id) failure = message;
         toast(`${agent.name}: ${message}`, "danger");
       });
   });
 
-  type SideTab = { id: string; label: string; icon: IconName; waiting?: string };
-  // An icon rail, as editors have (editor-look I2); the label is the tooltip.
+  type SideTab = { id: string; label: () => string; icon: IconName; waiting?: () => string };
+  // An icon rail, as editors have (editor-look I2); the label is the tooltip, read where it is drawn.
   const SIDE_TABS: SideTab[] = [
-    { id: "terminal", label: "Terminal", icon: "terminal" },
-    { id: "plan", label: "Plan", icon: "list-checks" },
-    { id: "diffs", label: "Diffs", icon: "git-compare" },
-    { id: "inbox", label: "Inbox", icon: "inbox" },
+    { id: "terminal", label: () => t("sideTerminal"), icon: "terminal" },
+    { id: "plan", label: () => t("sidePlan"), icon: "list-checks" },
+    { id: "diffs", label: () => t("sideDiffs"), icon: "git-compare" },
+    { id: "inbox", label: () => t("sideInbox"), icon: "inbox" },
   ];
   /** How many files the agent changed, once the Diffs view has looked (its badge). */
   let changedFiles = $state<number | null>(null);
@@ -112,7 +114,7 @@
   function openOutputLink(ref: OutputRef): void {
     const rel = relativeInside(ref.path, ready?.cwd ?? cwd);
     if (!rel) {
-      toast(`“${ref.path}” is not inside this agent's folder.`, "warning");
+      toast(t("notInsideFolder", { path: ref.path }), "warning");
       return;
     }
     openFile(agent.id, rel, ref.line - 1);
@@ -220,7 +222,7 @@
   <div class="body">
     {#if ask}
       <!-- The agent asks for a right: answered here, over its terminal (card #88). -->
-      <div class="ask-strip" role="alert" aria-label="{agent.name} asks for a permission">
+      <div class="ask-strip" role="alert" aria-label={t("asksPermission", { name: agent.name })}>
         <AskAnswer agentId={agent.id} {ask} compact />
       </div>
     {/if}
@@ -244,7 +246,7 @@
       {:else if failure}
         <p class="pending error">{failure}</p>
       {:else}
-        <p class="pending">Preparing this agent's worktree…</p>
+        <p class="pending">{t("preparingWorktree")}</p>
       {/if}
     </div>
 
@@ -277,11 +279,11 @@
                they sit in their own framed block with a count, above the
                plan-mode document, and say so when there are none yet
                (owner, live test: "hard to tell whether there was a task"). -->
-          <section class="tasks" class:stale={plan?.from_earlier_session} aria-label="Tasks">
+          <section class="tasks" class:stale={plan?.from_earlier_session} aria-label={t("tasks")}>
             <header>
-              <h3>Tasks</h3>
+              <h3>{t("tasks")}</h3>
               {#if plan}
-                <span class="count">{finishedSteps} / {plan.steps.length} done</span>
+                <span class="count">{t("tasksDone", { done: finishedSteps, total: plan.steps.length })}</span>
               {/if}
             </header>
             {#if plan}
@@ -289,7 +291,7 @@
                 <div class="fill" style:width="{(finishedSteps / plan.steps.length) * 100}%"></div>
               </div>
               {#if plan.from_earlier_session}
-                <p class="note">From an earlier session — the agent has not written new tasks since it started.</p>
+                <p class="note">{t("fromEarlierSession")}</p>
               {/if}
               <ol>
                 {#each plan.steps as step, index (index)}
@@ -300,7 +302,7 @@
                 {/each}
               </ol>
             {:else}
-              <p class="note">No tasks yet — they appear once the agent starts working on the plan below.</p>
+              <p class="note">{t("noTasksYet")}</p>
             {/if}
           </section>
           {#if planDocument}
@@ -310,7 +312,9 @@
                  comes from the agent. -->
             <details class="document" class:stale={planDocument.from_earlier_session} open={!plan}>
               <summary>
-                Plan (plan mode) · {planDocument.name}{planDocument.from_earlier_session ? " · earlier session" : ""}
+                {t("planModeDoc", { name: planDocument.name })}{planDocument.from_earlier_session
+                  ? ` · ${t("earlierSession")}`
+                  : ""}
               </summary>
               <div class="md">{@html renderMarkdown(planDocument.markdown)}</div>
             </details>
@@ -318,7 +322,7 @@
         {:else if statusView.tone === "none"}
           <p class="note">{statusView.title}</p>
         {:else}
-          <p class="note">No plan yet. It appears here as soon as the agent writes one.</p>
+          <p class="note">{t("noPlanYet")}</p>
         {/if}
       </div>
     {:else if sideTab === "inbox"}
@@ -329,13 +333,13 @@
     {:else if sideTab !== "terminal" && sideTab !== "diffs"}
       {@const tab = SIDE_TABS.find((t) => t.id === sideTab)}
       <div class="waiting" id="agent-view-{sideTab}" role="tabpanel" aria-labelledby="agent-tab-{sideTab}">
-        <p>{tab?.waiting}</p>
+        <p>{tab?.waiting?.()}</p>
       </div>
     {/if}
   </div>
 
 
-  <div class="side" role="tablist" aria-orientation="vertical" aria-label="{agent.name} views">
+  <div class="side" role="tablist" aria-orientation="vertical" aria-label={t("agentViews", { name: agent.name })}>
     {#each SIDE_TABS as tab (tab.id)}
       <button
         type="button"
@@ -345,8 +349,8 @@
         id="agent-tab-{tab.id}"
         aria-selected={sideTab === tab.id}
         aria-controls="agent-view-{tab.id}"
-        title={tab.waiting ?? tab.label}
-        aria-label={tab.label}
+        title={tab.waiting?.() ?? tab.label()}
+        aria-label={tab.label()}
         onclick={() => (sideTab = tab.id)}
       >
         <Icon name={tab.icon} />
@@ -363,15 +367,13 @@
     <span class="name">{agent.name}</span>
     <span class="harness">{agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
     {#if ready?.shared_folder}
-      <span class="branch" title="The project is not a git repository, so agents share its folder">
-        shared folder
-      </span>
+      <span class="branch" title={t("sharedFolderTitle")}>{t("sharedFolder")}</span>
     {:else if ready?.agent.branch}
       <span class="branch" title={ready.cwd}>{ready.agent.branch}</span>
     {/if}
-    {#if ready?.agent.port}<span class="port" title="AXIOMATA_PORT">:{ready.agent.port}</span>{/if}
+    {#if ready?.agent.port}<span class="port" title={"AXIOMATA_PORT"}>:{ready.agent.port}</span>{/if}
     <code class="command" title={command}>{command}</code>
-    <IconButton icon="rotate-ccw" size="sm" label="Restart the agent" onclick={() => (restarts += 1)} />
+    <IconButton icon="rotate-ccw" size="sm" label={t("restartAgent")} onclick={() => (restarts += 1)} />
   </footer>
 </div>
 

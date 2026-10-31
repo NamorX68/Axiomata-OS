@@ -5,6 +5,7 @@
  * the Help panel is opened (`shell:handbook`).
  */
 
+import { lang } from "../i18n/lang.svelte";
 import { invokeBackend } from "./backend";
 import { emit } from "./bus";
 
@@ -27,12 +28,12 @@ export const HANDBOOK_EVENT = "shell:handbook";
 
 /** Every page, in the handbook's order. */
 export function listHandbook(): Promise<HandbookEntry[]> {
-  return invokeBackend<HandbookEntry[]>("handbook_pages");
+  return invokeBackend<HandbookEntry[]>("handbook_pages", { language: lang() });
 }
 
 /** One page by its name. */
 export function readHandbookPage(name: string): Promise<HandbookPage> {
-  return invokeBackend<HandbookPage>("handbook_page", { name });
+  return invokeBackend<HandbookPage>("handbook_page", { name, language: lang() });
 }
 
 /** Opens the Help panel, on `page` when given (else on the page last shown, or the overview). */

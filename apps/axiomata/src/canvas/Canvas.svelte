@@ -12,6 +12,7 @@
   import { getModule } from "../core/registry";
   import { canvasSize, guides, instances, showGrid, updateInstance } from "../core/stores";
   import { uiScale } from "../core/uiScale";
+  import { tCanvas } from "../i18n/canvas";
   import BackgroundHost from "./BackgroundHost.svelte";
   import EmptyCanvas from "./EmptyCanvas.svelte";
   import { anchorFor } from "./snap";
@@ -67,7 +68,7 @@
 
 <!-- A glass scope (docs/plans/glass.md, `.ax-glass-scope`): the tiles' cards, rows and fields take the transparency knob
      over the ground, like the Studio's. -->
-<section class="canvas ax-glass-scope" class:grid={$showGrid} aria-label="Module canvas" bind:this={section}>
+<section class="canvas ax-glass-scope" class:grid={$showGrid} aria-label={tCanvas("moduleCanvas")} bind:this={section}>
   {#each $guides as g, i (i)}
     <div
       class="guide {g.axis}"

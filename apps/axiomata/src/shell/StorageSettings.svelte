@@ -5,6 +5,7 @@
   answer it is simply not there. Nothing here touches projects, the vault or `~/.glut` directly.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { invokeBackend } from "../core/backend";
@@ -19,12 +20,16 @@
     freeableTotal,
     glutLabel,
     ITEM_RULES,
+    itemLabel,
+    keepText,
     RULE_BOUNDS,
     ruleProblem,
     rulesChanged,
+    unitCount,
     waitingWorktrees,
   } from "../core/maintenance";
   import { toast } from "../core/toast";
+  import { tStorage } from "../i18n/storage";
   import { deleteAgentsBackup, listAgentsBackups, type AgentsBackup } from "../ide/agentsMigration";
   import IconButton from "../ui/IconButton.svelte";
 
@@ -42,6 +47,9 @@
   const changed = $derived(view !== null && draft !== null && rulesChanged(view.settings, draft));
   const waiting = $derived(view ? waitingWorktrees(view.axiomata) : []);
   const freeable = $derived(view ? freeableTotal(view) : 0);
+  /** The texts around a folder name, which is shown as code. */
+  const lead = $derived(tStorage("lead").split("{home}"));
+  const glutKeep = $derived(tStorage("glutKeep").split("{folder}"));
 
   async function load() {
     loading = true;
@@ -53,7 +61,7 @@
       if (!draft || !changed) draft = { ...loaded.settings };
       loadError = null;
     } catch (err) {
-      loadError = String(err);
+      loadError = messageOf(err);
     } finally {
       loading = false;
     }
@@ -65,10 +73,10 @@
     try {
       const saved = await invokeBackend<MaintenanceSettings>("maintenance_save_settings", { settings: draft });
       draft = { ...saved };
-      toast("Storage rules saved", "info");
+      toast(tStorage("rulesSaved"), "info");
       await load();
     } catch (err) {
-      toast(`Could not save the rules: ${String(err)}`, "danger");
+      toast(tStorage("saveRulesFailed", { error: messageOf(err) }), "danger");
     } finally {
       saving = false;
     }
@@ -78,46 +86,46 @@
     if (!view) return;
     const question =
       freeable > 0
-        ? `Clean up now? This frees about ${formatBytes(freeable)}. Worktrees with changes stay.`
-        : "Clean up now? Nothing is due right now; the database is still compacted if it needs it.";
+        ? tStorage("confirmCleanFrees", { size: formatBytes(freeable) })
+        : tStorage("confirmCleanNothing");
     if (!confirm(question)) return;
     cleaning = true;
     try {
       const outcome = await invokeBackend<CleanOutcome>("maintenance_clean");
-      toast(`Cleaned up — ${formatBytes(outcome.freed)} freed`, "info");
+      toast(tStorage("cleaned", { size: formatBytes(outcome.freed) }), "info");
       if (outcome.glut_note) toast(outcome.glut_note, "warning");
       view = outcome.view;
     } catch (err) {
-      toast(`Clean-up failed: ${String(err)}`, "danger");
+      toast(tStorage("cleanFailed", { error: messageOf(err) }), "danger");
     } finally {
       cleaning = false;
     }
   }
 
   async function removeWorktree(orphan: OrphanWorktree) {
-    const what = orphan.dirty ? "It has changes nobody saved" : "Git cannot tell whether it has changes";
-    if (!confirm(`Delete the worktree ${orphan.path}? ${what}; they are gone for good.`)) return;
+    const what = orphan.dirty ? tStorage("worktreeDirty") : tStorage("worktreeUnknown");
+    if (!confirm(tStorage("confirmDeleteWorktree", { path: orphan.path, what }))) return;
     removing = orphan.path;
     try {
       await invokeBackend<void>("maintenance_remove_worktree", { path: orphan.path });
-      toast("Worktree deleted", "info");
+      toast(tStorage("worktreeDeleted"), "info");
       await load();
     } catch (err) {
-      toast(`Could not delete the worktree: ${String(err)}`, "danger");
+      toast(tStorage("worktreeDeleteFailed", { error: messageOf(err) }), "danger");
     } finally {
       removing = null;
     }
   }
 
   async function removeBackup(backup: AgentsBackup) {
-    if (!confirm(`Delete the backup ${backup.path}? The old role files and engines in it are gone for good.`)) return;
+    if (!confirm(tStorage("confirmDeleteBackup", { path: backup.path }))) return;
     removing = backup.path;
     try {
       await deleteAgentsBackup(backup.path);
-      toast("Backup deleted", "info");
+      toast(tStorage("backupDeleted"), "info");
       await load();
     } catch (err) {
-      toast(`Could not delete the backup: ${String(err)}`, "danger");
+      toast(tStorage("backupDeleteFailed", { error: messageOf(err) }), "danger");
     } finally {
       removing = null;
     }
@@ -130,13 +138,13 @@
 
   function amount(item: MaintenanceItem): string {
     const size = item.bytes !== null ? formatBytes(item.bytes) : "";
-    const count = item.unit ? `${item.count} ${item.unit}` : "";
+    const count = item.unit ? unitCount(item.count, item.unit) : "";
     return [size, count].filter(Boolean).join(" · ");
   }
 
   function frees(item: MaintenanceItem): string {
     if (item.freeableBytes) return formatBytes(item.freeableBytes);
-    if (item.freeableCount > 0) return `${item.freeableCount} ${item.unit}`;
+    if (item.freeableCount > 0) return unitCount(item.freeableCount, item.unit);
     return "—";
   }
 
@@ -144,16 +152,13 @@
 </script>
 
 <section>
-  <h3>Storage</h3>
-  <p class="lead">
-    Axiomata cleans up its own data in <code>~/.axiomata</code> once a week at start. Your projects, the vault and
-    Glut's own folder are never touched here.
-  </p>
+  <h3>{tStorage("title")}</h3>
+  <p class="lead">{lead[0]}<code>~/.axiomata</code>{lead[1]}</p>
 
   {#if loadError}
-    <p class="status error">Could not measure the storage: {loadError}</p>
+    <p class="status error">{tStorage("measureError", { error: loadError })}</p>
   {:else if !view || !draft}
-    <p class="status">{loading ? "Measuring…" : "—"}</p>
+    <p class="status">{loading ? tStorage("measuring") : "—"}</p>
   {:else}
     {#if view.axiomata.error}
       <p class="status error">{view.axiomata.error}</p>
@@ -161,9 +166,9 @@
     <dl class="summary">
       <dt>{shortPath(view.axiomata.home, 1)}</dt>
       <dd>{formatBytes(view.axiomata.totalBytes)}</dd>
-      <dt>Last clean-up</dt>
-      <dd>{view.axiomata.lastRun ? absoluteTime(view.axiomata.lastRun) : "never"}</dd>
-      <dt>Would free</dt>
+      <dt>{tStorage("lastCleanup")}</dt>
+      <dd>{view.axiomata.lastRun ? absoluteTime(view.axiomata.lastRun) : tStorage("never")}</dd>
+      <dt>{tStorage("wouldFree")}</dt>
       <dd>{formatBytes(freeable)}</dd>
     </dl>
 
@@ -171,7 +176,7 @@
       {#each view.axiomata.items as item (item.key)}
         <li class="item">
           <div class="head">
-            <span class="title">{item.label}</span>
+            <span class="title">{itemLabel(item.key, item.label)}</span>
             <span class="amount">{amount(item)}</span>
           </div>
           <div class="rule">
@@ -186,13 +191,13 @@
                     value={Number.isNaN(draft[rule.field]) ? "" : draft[rule.field]}
                     oninput={(e) => setRule(rule.field, e.currentTarget.value)}
                   />
-                  <span>{rule.unit === "days" ? "days" : "kept"}</span>
+                  <span>{rule.unit === "days" ? tStorage("days") : tStorage("kept")}</span>
                 </label>
               {/each}
             {:else}
-              <span class="keep">{item.keep}</span>
+              <span class="keep">{keepText(item)}</span>
             {/if}
-            <span class="frees">frees {frees(item)}</span>
+            <span class="frees">{tStorage("frees", { amount: frees(item) })}</span>
           </div>
           {#if item.error}
             <p class="item-error">{item.error}</p>
@@ -207,8 +212,12 @@
               <span class="amount">{formatBytes(view.glut.report.totalBytes)}</span>
             </div>
             <div class="rule">
-              <span class="keep">Glut cleans <code>~/.glut</code> by its own rules, once a day and with "Clean up now"</span>
-              <span class="frees">frees {view.glut.report.freeableBytes ? formatBytes(view.glut.report.freeableBytes) : "—"}</span>
+              <span class="keep">{glutKeep[0]}<code>~/.glut</code>{glutKeep[1]}</span>
+              <span class="frees">
+                {tStorage("frees", {
+                  amount: view.glut.report.freeableBytes ? formatBytes(view.glut.report.freeableBytes) : "—",
+                })}
+              </span>
             </div>
             <ul class="glut-items">
               {#each view.glut.report.items.filter((part) => part.bytes > 0) as part (part.name)}
@@ -223,7 +232,7 @@
             <div class="head"><span class="title">Glut</span></div>
             <p class="item-error">{view.glut.message}</p>
           {:else}
-            <div class="head"><span class="title">Glut: unknown format</span></div>
+            <div class="head"><span class="title">{tStorage("glutUnknown")}</span></div>
           {/if}
         </li>
       {/if}
@@ -231,7 +240,7 @@
 
     <label class="opt">
       <input type="checkbox" bind:checked={draft.enabled} />
-      Clean up once a week at start
+      {tStorage("weekly")}
     </label>
     {#if problem}
       <p class="status invalid">{problem}</p>
@@ -239,23 +248,20 @@
 
     <div class="actions">
       <button type="button" disabled={!changed || !!problem || saving} onclick={saveRules}>
-        {saving ? "Saving…" : "Save rules"}
+        {saving ? tStorage("saving") : tStorage("saveRules")}
       </button>
       <button type="button" disabled={cleaning || changed} onclick={cleanNow}>
-        {cleaning ? "Cleaning up…" : "Clean up now"}
+        {cleaning ? tStorage("cleaningUp") : tStorage("cleanNow")}
       </button>
     </div>
     {#if changed}
-      <p class="hint">Save the rules first: "Clean up now" cleans by the saved ones.</p>
+      <p class="hint">{tStorage("saveFirst")}</p>
     {/if}
 
     {#if view.axiomata.endedSessions.length > 0}
       {@const sessions = view.axiomata.endedSessions}
-      <h3 class="sub">{view.axiomata.dryRun ? "Ended sessions a clean-up removes" : "Ended sessions removed"}</h3>
-      <p class="hint">
-        Sessions whose harness ended days ago with no work of their own — nothing uncommitted, no commit beyond their
-        base, no open card. Their worktree and branch go with them; a session with work always stays.
-      </p>
+      <h3 class="sub">{view.axiomata.dryRun ? tStorage("endedToRemove") : tStorage("endedRemoved")}</h3>
+      <p class="hint">{tStorage("endedHint")}</p>
       <ul class="orphans">
         {#each sessions as session (session.id)}
           <li class="orphan"><span class="path">{session.name}</span></li>
@@ -264,16 +270,18 @@
     {/if}
 
     {#if waiting.length > 0}
-      <h3 class="sub">Orphaned worktrees waiting for you</h3>
-      <p class="hint">Their agent is gone, but they hold work nobody saved, so no clean-up removes them.</p>
+      <h3 class="sub">{tStorage("orphansTitle")}</h3>
+      <p class="hint">{tStorage("orphansHint")}</p>
       <ul class="orphans">
         {#each waiting as orphan (orphan.path)}
           <li class="orphan">
             <span class="path" title={orphan.path}>{shortPath(orphan.path, 2)}</span>
-            <span class="amount">{formatBytes(orphan.bytes)}{orphan.dirty === null ? " · unknown state" : ""}</span>
+            <span class="amount">
+              {formatBytes(orphan.bytes)}{orphan.dirty === null ? ` · ${tStorage("unknownState")}` : ""}
+            </span>
             <IconButton
               icon="trash-2"
-              label="Delete {orphan.path}"
+              label={tStorage("deleteWorktree", { path: orphan.path })}
               size="sm"
               disabled={removing !== null}
               onclick={() => void removeWorktree(orphan)}
@@ -284,11 +292,8 @@
     {/if}
 
     {#if backups.length > 0}
-      <h3 class="sub">Backups of the old roles and engines</h3>
-      <p class="hint">
-        The role copies and engines the move to roles at tiers put aside. Nothing uses them; delete one when you no
-        longer need it.
-      </p>
+      <h3 class="sub">{tStorage("backupsTitle")}</h3>
+      <p class="hint">{tStorage("backupsHint")}</p>
       <ul class="orphans">
         {#each backups as backup (backup.path)}
           <li class="orphan">
@@ -296,7 +301,7 @@
             <span class="amount">{formatBytes(backup.bytes)}</span>
             <IconButton
               icon="trash-2"
-              label="Delete backup {backup.path}"
+              label={tStorage("deleteBackup", { path: backup.path })}
               size="sm"
               disabled={removing !== null}
               onclick={() => void removeBackup(backup)}

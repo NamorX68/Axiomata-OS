@@ -5,6 +5,7 @@
   is only replaced after the question under its row.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount, tick } from "svelte";
 
   import type { BundledSkill } from "../core/backend";
@@ -13,6 +14,7 @@
   import Notice from "../ui/Notice.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
+  import { tCanvas } from "../i18n/canvas";
   import { bundledFocus, bundledSkills, isOwners, stateLabel, stateTone, updatableCount } from "./bundledSkills";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -38,7 +40,7 @@
       bundledSkills.set(await ctx.invoke<BundledSkill[]>(cmd, args));
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       busy = false;
     }
@@ -67,35 +69,35 @@
 
 <div class="settings">
   <label>
-    Backend
+    {tCanvas("backend")}
     <select value={typeof $config.filterBackend === "string" ? $config.filterBackend : ""} onchange={(e) => set("filterBackend", value(e))}>
-      <option value="">all</option>
+      <option value="">{tCanvas("allBackends")}</option>
       {#each BACKEND_CHOICES as c (c.id)}<option value={c.id}>{c.label}</option>{/each}
     </select>
   </label>
   <label>
-    Order
+    {tCanvas("order")}
     <select value={$config.order === "recent" ? "recent" : "name"} onchange={(e) => set("order", value(e))}>
-      <option value="name">by name</option>
-      <option value="recent">recently run first</option>
+      <option value="name">{tCanvas("byName")}</option>
+      <option value="recent">{tCanvas("recentFirst")}</option>
     </select>
   </label>
 
-  <section class="bundled" bind:this={section} aria-label="Bundled skills">
-    <SectionHead label="Bundled skills" rule>
+  <section class="bundled" bind:this={section} aria-label={tCanvas("bundledSkills")}>
+    <SectionHead label={tCanvas("bundledSkills")} rule>
       {#snippet actions()}
         <button
           type="button"
           class="ax-btn"
           disabled={busy || updatable === 0}
-          title="Updates every outdated or missing bundled skill; never a copy you changed"
-          onclick={() => void call("bundled_skills_update_outdated")}>Update all outdated</button
+          title={tCanvas("updateAllTitle")}
+          onclick={() => void call("bundled_skills_update_outdated")}>{tCanvas("updateAll")}</button
         >
       {/snippet}
     </SectionHead>
     {#if error}<p class="error">{error}</p>{/if}
     {#if $bundledSkills === null}
-      <p class="muted">Reading the bundled skills…</p>
+      <p class="muted">{tCanvas("readingBundled")}</p>
     {:else}
       <ul>
         {#each $bundledSkills as skill (skill.name)}
@@ -110,24 +112,24 @@
                 type="button"
                 class="ax-btn"
                 disabled={busy || skill.state === "up_to_date"}
-                aria-label="Update {skill.name}"
-                onclick={() => update(skill)}>Update</button
+                aria-label={tCanvas("updateName", { name: skill.name })}
+                onclick={() => update(skill)}>{tCanvas("update")}</button
               >
             </span>
             {#if asking === skill.name}
-              <Notice title="Your copy of /{skill.name} will be replaced by the bundled version." alert>
+              <Notice title={tCanvas("replaceNotice", { name: skill.name })} alert>
                 {#snippet action()}
                   <button type="button" class="ax-btn danger" disabled={busy} onclick={() => replace(skill.name)}>
-                    Replace
+                    {tCanvas("replace")}
                   </button>
-                  <button type="button" class="ax-btn" onclick={() => (asking = null)}>Keep mine</button>
+                  <button type="button" class="ax-btn" onclick={() => (asking = null)}>{tCanvas("keepMine")}</button>
                 {/snippet}
               </Notice>
             {/if}
           </li>
         {/each}
       </ul>
-      <p class="muted">Only skills that ship with the app are listed; your own skills are never touched.</p>
+      <p class="muted">{tCanvas("onlyBundled")}</p>
     {/if}
   </section>
 </div>

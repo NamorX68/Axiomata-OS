@@ -16,11 +16,12 @@
   import { agentStatus, describeStatus, type StatusView } from "./agentStatus";
   import { getDock } from "./dockContext";
   import type { PaneTab, TabGroup } from "./layout";
-  import { filePaneConfig, isAreaTab, TASK_PANE } from "./paneKinds";
+  import { filePaneConfig, isAreaTab, paneTitle, TASK_PANE } from "./paneKinds";
   import { SLOT_ATTR } from "./paneStore";
   import { session } from "./projectSession";
   import { harnessBadge, harnessLabel } from "./rosterLook";
   import StatusDot from "./StatusDot.svelte";
+  import { tStudio } from "../i18n/studio";
 
   let { group }: { group: TabGroup } = $props();
 
@@ -91,12 +92,12 @@
         {:else if tab.kind === "terminal" || tab.kind === TASK_PANE}
           <span class="kind-icon"><Icon name="terminal" size="sm" /></span>
         {/if}
-        <span class="title">{tab.title}</span>
+        <span class="title">{paneTitle(tab)}</span>
         {#if !tab.pinned}
           <button
             class="close"
             type="button"
-            aria-label="Close {tab.title}"
+            aria-label={tStudio("closeTab", { title: paneTitle(tab) })}
             onpointerdown={(event) => event.stopPropagation()}
             onclick={() => dock.requestClose(tab.id)}><Icon name="x" size="sm" /></button
           >

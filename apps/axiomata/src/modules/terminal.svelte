@@ -109,6 +109,7 @@
   longer reach this component at all.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onDestroy, onMount } from "svelte";
   import { Channel } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -148,6 +149,7 @@
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
   import { DEFAULT_THEME, THEME_DEFAULT_COLORS, THEMES } from "./terminalThemes";
   import { mergeEnv, parseEnvLines } from "./terminalEnv";
+  import { tCanvas } from "../i18n/canvas";
 
   let {
     ctx,
@@ -348,7 +350,7 @@
     void ctx
       .invoke("clipboard_write", { text })
       .then(() => {
-        copyNote = `the program copied ${text.length} characters`;
+        copyNote = tCanvas("programCopied", { n: text.length });
         clearTimeout(copyNoteTimeout);
         copyNoteTimeout = setTimeout(() => (copyNote = ""), COPY_NOTE_MS);
       })
@@ -914,7 +916,7 @@
           });
       }
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -1493,9 +1495,9 @@
       }}
     ></canvas>
     {#if ended}
-      <div class="banner">[process exited]</div>
+      <div class="banner">{tCanvas("processExited")}</div>
     {:else if scrollOffset > 0}
-      <div class="banner">history — scroll down to return</div>
+      <div class="banner">{tCanvas("historyBanner")}</div>
     {:else if copyNote}
       <div class="banner">{copyNote}</div>
     {/if}

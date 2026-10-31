@@ -17,7 +17,7 @@ Ein **Agent** im Studio ist immer **Rolle + Stufe + Engine** — ausgerechnet, n
   aus der Auswahl, laufende Sitzungen bleiben.
 
 **Woher die Stufe eines Modells kommt**, in dieser Reihenfolge: deine eigene Wahl → der Vorschlag der Recherche → der
-Vorschlag aus dem Preis → keine („Unrated“, dann ist das Modell noch kein Agent). Der **Preisvorschlag** misst den
+Vorschlag aus dem Preis → keine („ohne Stufe“, dann ist das Modell noch kein Agent). Der **Preisvorschlag** misst den
 Ausgabepreis je Million Tokens: unter 1 $ Light, 1–10 $ Medium, über 10 $ Heavy. Die **Recherche** ist der
 mitgelieferte Skill `model-tiering`: er schlägt auf Bewertungsseiten nach (Artificial Analysis, LMArena,
 OpenRouter-Ranglisten) und legt je Modell eine Stufe mit einem Satz Begründung und Quelle als Vorschlag ab — nie als
@@ -33,23 +33,24 @@ kreuzt an, was du willst.
 
 ## Wo die Knöpfe sind
 
-Studio → Leiste „Agents“ → **„Models & roles…“** öffnet ein großes Pane mit zwei Reitern:
+Studio → Leiste „Agenten“ → **„Modelle & Rollen…“** öffnet ein großes Pane mit zwei Reitern:
 
-- **„Models“**
-  - **„Default engine per tier“**: je Stufe eine Auswahl; „Cheapest: …“ heißt ohne eigene Wahl.
-  - **„Price limits“**: „Light below“, „Heavy above“, „Save limits“.
-  - **„Models“** mit „Propose all again“; darunter je Provider die Modelle mit Filterfeld („Filter … models…“), je
-    Modell ein Schalter („Switch on“ / „Switch off“), Preis und Kontext, die Stufen-Knöpfe Light · Medium · Heavy (ein
-    Klick auf deine Wahl nimmt sie zurück: „Your tier — click to drop it“), die Herkunft („Yours“, „Proposal · not
-    reviewed“, „From the price“, „Unrated · no agent until it has a tier“), bei offenem Vorschlag die Marke „Waits for
-    your review“ und „Accept“, die Begründung mit Quelle und „Propose again for …“. Läuft die Recherche, steht oben
-    „Researching model tiers…“.
-  - **„Own engines“** ganz unten: „Add engine…“ mit „Label“, „Harness“, „Model“, „Tier“ („The tier of its model“ ohne
-    Wahl) und unter „Advanced“ „Command (empty = the harness default)“, „Environment“ und „Billing“.
-- **„Roles“**: die Rollen; „Add role…“ und je Rolle „Name“, „Description“, „Kind of work“, „Default tier“, „Working
-  instructions (Markdown)“, „Rights (harness rules, one per line)“, unter „Advanced“ die Grenzen („Step limit“, „Token
-  limit“, „Cost limit (USD)“) und „Creates cards without asking“; „Save role“.
-- **Umstellungs-Hinweis** im Reiter „Roles“ unter der Kopfzeile (nur nach der Umstellung): eine Zeile, was geschah,
+- **„Modelle“**
+  - **„Standard-Engine je Stufe“**: je Stufe eine Auswahl; „Günstigste: …“ heißt ohne eigene Wahl.
+  - **„Preisgrenzen“**: „Light unter“, „Heavy über“, „Grenzen speichern“.
+  - **„Modelle“** mit „Alle neu vorschlagen“; darunter je Provider die Modelle mit Filterfeld („… Modelle filtern…“), je
+    Modell ein Schalter („Einschalten“ / „Ausschalten“), Preis und Kontext, die Stufen-Knöpfe Light · Medium · Heavy
+    (ein Klick auf deine Wahl nimmt sie zurück: „Deine Stufe — klicke, um sie zu entfernen“), die Herkunft („Deine“,
+    „Vorschlag · nicht geprüft“, „Aus dem Preis“, „Ohne Stufe · kein Agent, bis es eine Stufe hat“), bei offenem
+    Vorschlag die Marke „Wartet auf deine Prüfung“ und „Annehmen“, die Begründung mit Quelle und „Für … neu
+    vorschlagen“. Läuft die Recherche, steht oben „Stufen der Modelle werden recherchiert…“.
+  - **„Eigene Engines“** ganz unten: „Engine hinzufügen…“ mit „Bezeichnung“, „Harness“, „Modell“, „Stufe“ („Die Stufe
+    seines Modells“ ohne Wahl) und unter „Erweitert“ „Befehl (leer = Standard des Harness)“, „Umgebung“ und
+    „Abrechnung“.
+- **„Rollen“**: die Rollen; „Rolle hinzufügen…“ und je Rolle „Name“, „Beschreibung“, „Art der Arbeit“, „Standardstufe“,
+  „Arbeitsanweisungen (Markdown)“, „Rechte (Harness-Regeln, eine pro Zeile)“, unter „Erweitert“ die Grenzen
+  („Schrittgrenze“, „Token-Grenze“, „Kostengrenze (USD)“) und „Legt Karten an, ohne zu fragen“; „Rolle speichern“.
+- **Umstellungs-Hinweis** im Reiter „Rollen“ unter der Kopfzeile (nur nach der Umstellung): eine Zeile, was geschah,
   wo die Sicherung liegt, „OK“.
 
 Im Terminal: `axiomata-cli ide models list|set|limits|default`, `ide engines list`, `ide roles list|show`,
@@ -57,13 +58,13 @@ Im Terminal: `axiomata-cli ide models list|set|limits|default`, `ide engines lis
 
 ## Häufige Handgriffe
 
-1. **Ein Modell nutzbar machen:** „Models“ → Modell suchen → einschalten; hat es keine Stufe, wartet es auf die
+1. **Ein Modell nutzbar machen:** „Modelle“ → Modell suchen → einschalten; hat es keine Stufe, wartet es auf die
    Recherche oder du klickst selbst eine Stufe.
-2. **Einen Vorschlag annehmen oder ändern:** beim Modell „Accept“ — oder eine andere Stufe klicken; deine Wahl gilt
+2. **Einen Vorschlag annehmen oder ändern:** beim Modell „Annehmen“ — oder eine andere Stufe klicken; deine Wahl gilt
    immer vor jedem Vorschlag.
-3. **Festlegen, worauf eine Stufe läuft:** „Default engine per tier“ → je Stufe die Engine wählen.
-4. **Eine Rolle schärfer machen:** „Roles“ → Rolle → Anweisung, Rechte oder „Default tier“ ändern → „Save role“.
-5. **Eine eigene Engine** (eigener Befehl, eigene Umgebung, eigene Stufe): „Own engines“ → „Add engine…“.
+3. **Festlegen, worauf eine Stufe läuft:** „Standard-Engine je Stufe“ → je Stufe die Engine wählen.
+4. **Eine Rolle schärfer machen:** „Rollen“ → Rolle → Anweisung, Rechte oder „Standardstufe“ ändern → „Rolle speichern“.
+5. **Eine eigene Engine** (eigener Befehl, eigene Umgebung, eigene Stufe): „Eigene Engines“ → „Engine hinzufügen…“.
 
 ## Die Umstellung beim ersten Start
 
@@ -81,16 +82,17 @@ neuen Modell stellt die App einmalig um:
   Namen, Worktrees und Branches der Sitzungen bleiben.
 - **Gelöscht wird nichts:** Jeder Lauf legt einen eigenen Sicherungsordner `~/.axiomata/agents-backup-<Datum>` an
   (beim zweiten Lauf am selben Tag mit `-2` …) mit den Originalen der Rollen und den entfernten Engines
-  (`engines.toml`). Er bleibt, bis du ihn unter Settings → Storage löschst ([Storage](storage.md)).
+  (`engines.toml`). Er bleibt, bis du ihn unter Einstellungen → Speicher löschst ([Storage](storage.md)).
 
 ## Fallen
 
-- Ein Modell ohne Stufe ist **kein Agent**: es taucht unter „Start an agent“ nicht auf.
+- Ein Modell ohne Stufe ist **kein Agent**: es taucht unter „Agenten starten“ nicht auf.
 - Die Recherche ist ein bezahlter Skill-Lauf auf dem Skill-Harness ([Kosten](kosten.md)).
 - Eine Rolle nennt keine Engine; ein `engine:` in einer Rollendatei wird ignoriert — auch in den Rollen eines Projekts
   (`.axiomata/agents/`), das sagt die App beim Bestätigen.
-- Chat und Skills wählen ihr Modell weiter unter Settings → „AI providers“ ([Provider](provider.md)), nicht hier.
-- Eine Standard-Engine, die nicht zur Stufe passt, steht als „— not of this tier“ in der Auswahl; besser neu wählen.
+- Chat und Skills wählen ihr Modell weiter unter Einstellungen → KI-Anbieter ([Provider](provider.md)), nicht hier.
+- Eine Standard-Engine, die nicht zur Stufe passt, steht als „— nicht von dieser Stufe“ in der Auswahl; besser neu
+  wählen.
 
 ## Siehe auch
 

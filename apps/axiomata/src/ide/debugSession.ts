@@ -7,6 +7,7 @@
  * is tested without a Tauri window.
  */
 
+import { messageOf } from "../core/errors";
 import { isFullScreen, stripAnsi } from "./ansi";
 import type { BreakpointSpec } from "./breakpoints";
 import { writable, get, type Readable } from "svelte/store";
@@ -201,7 +202,7 @@ export interface DebugController {
   removeWatch: (index: number) => void;
 }
 
-const message = (err: unknown): string => (err as { message?: string })?.message ?? String(err);
+const message = (err: unknown): string => messageOf(err);
 
 export function createDebugController(backend: Backend, hooks: Hooks = {}): DebugController {
   const state = writable<DebugState>(IDLE);

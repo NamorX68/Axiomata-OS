@@ -7,6 +7,7 @@
   text.
 -->
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
   import { kindTag, type CompletionItem } from "../editor/lsp/completion";
 
   interface Props {
@@ -35,7 +36,7 @@
 </script>
 
 <div class="completion" style:left="{x}px" style:top="{y}px" role="presentation" onmousedown={(e) => e.preventDefault()}>
-  <div class="items" role="listbox" aria-label="Suggestions" bind:this={list} style:--rows={VISIBLE_ROWS}>
+  <div class="items" role="listbox" aria-label={tEditor("suggestions")} bind:this={list} style:--rows={VISIBLE_ROWS}>
     {#each items as item, i (i)}
       <button
         type="button"

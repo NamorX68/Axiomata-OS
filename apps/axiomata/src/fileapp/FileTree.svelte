@@ -30,6 +30,7 @@
   import { messageOf } from "../core/errors";
   import { toast } from "../core/toast";
   import { countTree, createFile, deleteTree, listDir, makeDir, renameEntry, type Listing } from "./backend";
+  import { tEditor } from "../i18n/editor";
   import type { FileRef } from "./tabs";
   import Icon from "../ui/Icon.svelte";
   import FileIcon from "./FileIcon.svelte";
@@ -310,7 +311,7 @@
       const found = await invokeBackend<RenameCount>("rename_note_links", { oldRel, newRel, dryRun: true });
       if (found.links > 0) relinking = { root, from, to, oldRel, newRel, ...found };
     } catch (err) {
-      onError(`The links to ${baseName(from)} were not checked: ${messageOf(err)}`);
+      onError(tEditor("linksNotChecked", { name: baseName(from), error: messageOf(err) }));
     }
   }
 
@@ -318,7 +319,7 @@
   async function sayFolderLinks(root: string): Promise<void> {
     if ((await vaultPrefix(root)) === null) return;
     invalidateNoteIndex();
-    toast("Links into the renamed folder by path were not updated — links by note name still work", "info");
+    toast(tEditor("folderLinksKept"), "info");
   }
 
   async function commitRelink(): Promise<void> {
@@ -331,13 +332,17 @@
         newRel: r.newRel,
         dryRun: false,
       });
-      toast(`Updated ${plural(done.links, "link")} in ${plural(done.files, "note")}`, "info");
+      toast(tEditor("linksUpdated", linkCounts(done)), "info");
     } catch (err) {
-      onError(`The links were not updated: ${messageOf(err)}`);
+      onError(tEditor("linksNotUpdated", { error: messageOf(err) }));
     }
   }
 
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  /** "3 links" and "2 notes", counted in the current language, for the sentences about following links. */
+  const linkCounts = (c: { links: number; files: number }) => ({
+    links: tEditor("linkCount", { n: c.links }),
+    notes: tEditor("noteCount", { n: c.files }),
+  });
 
   async function commitDelete(): Promise<void> {
     const c = confirming;
@@ -378,7 +383,7 @@
   <div class="row edit" style:--depth={depth}>
     <input
       class="name-input"
-      aria-label="Name"
+      aria-label={tEditor("name")}
       bind:value={editing!.value}
       onkeydown={onEditKey}
       onblur={() => {
@@ -396,7 +401,7 @@
     {@render nameInput(depth)}
   {/if}
   {#if loaded === "loading" || loaded === undefined}
-    <div class="row note" style:--depth={depth}>Loading…</div>
+    <div class="row note" style:--depth={depth}>{tEditor("loading")}</div>
   {:else if "error" in loaded}
     <div class="row note error" style:--depth={depth}>{loaded.error}</div>
   {:else}
@@ -419,7 +424,7 @@
             class="row"
             class:ignored={entry.ignored}
             style:--depth={depth}
-            title={entry.kind === "link" ? `${path} (a link)` : path}
+            title={entry.kind === "link" ? tEditor("aLink", { path }) : path}
             onpointerdown={(e) => onEntryPointerDown(e, root, path, entry.name)}
             onclick={() =>
               entry.kind === "dir" ? toggle(root, path) : entry.kind === "file" && onOpen({ root, rel: path }, true)}
@@ -435,8 +440,8 @@
           <button
             type="button"
             class="more"
-            aria-label="Actions for {entry.name}"
-            onclick={(e) => openMenu(e, root, path, entry.kind === "dir" ? "dir" : "file")}>⋯</button
+            aria-label={tEditor("actionsFor", { name: entry.name })}
+            onclick={(e) => openMenu(e, root, path, entry.kind === "dir" ? "dir" : "file")}>{"⋯"}</button
           >
         </div>
       {/if}
@@ -444,33 +449,36 @@
         <div class="row confirm" style:--depth={depth}>
           <span>
             {confirming.count === null && entry.kind === "dir"
-              ? "Counting…"
+              ? tEditor("counting")
               : entry.kind === "dir"
-                ? `Delete ${entry.name} and ${confirming.count} entr${confirming.count === 1 ? "y" : "ies"} in it?`
-                : `Delete ${entry.name}?`}
+                ? tEditor("deleteFolder", {
+                    name: entry.name,
+                    entries: tEditor("entryCount", { n: confirming.count ?? 0 }),
+                  })
+                : tEditor("deleteFile", { name: entry.name })}
           </span>
-          <button type="button" class="danger" onclick={() => void commitDelete()}>Delete</button>
-          <button type="button" onclick={() => (confirming = null)}>Cancel</button>
+          <button type="button" class="danger" onclick={() => void commitDelete()}>{tEditor("delete")}</button>
+          <button type="button" onclick={() => (confirming = null)}>{tEditor("cancel")}</button>
         </div>
       {/if}
       {#if relinking && relinking.root === root && relinking.to === path}
         <div class="row confirm" style:--depth={depth}>
-          <span>Update {plural(relinking.links, "link")} in {plural(relinking.files, "note")}?</span>
-          <button type="button" onclick={() => void commitRelink()}>Update</button>
-          <button type="button" onclick={() => (relinking = null)}>Keep</button>
+          <span>{tEditor("updateLinks", linkCounts(relinking))}</span>
+          <button type="button" onclick={() => void commitRelink()}>{tEditor("update")}</button>
+          <button type="button" onclick={() => (relinking = null)}>{tEditor("keep")}</button>
         </div>
       {/if}
       {#if entry.kind === "dir" && isOpen(root, path)}
         {@render folder(root, path, depth + 1)}
       {/if}
     {/each}
-    {#if loaded.truncated}<div class="row note" style:--depth={depth}>…more entries than shown</div>{/if}
+    {#if loaded.truncated}<div class="row note" style:--depth={depth}>{tEditor("moreEntries")}</div>{/if}
   {/if}
 {/snippet}
 
 <nav
   class="tree"
-  aria-label="Files"
+  aria-label={tEditor("files")}
   onclickcapture={(e) => {
     if (!swallowClick) return;
     swallowClick = false;
@@ -502,8 +510,8 @@
       <button
         type="button"
         class="more"
-        aria-label="Actions for {root.label}"
-        onclick={(e) => openMenu(e, root.id, "", "root")}>⋯</button
+        aria-label={tEditor("actionsFor", { name: root.label })}
+        onclick={(e) => openMenu(e, root.id, "", "root")}>{"⋯"}</button
       >
     </div>
     {#if isOpen(root.id, "")}
@@ -529,13 +537,25 @@
   {@const m = menu}
   <div class="menu" role="menu" style:left="{m.x}px" style:top="{m.y}px">
     {#if m.kind !== "file"}
-      <button type="button" role="menuitem" onclick={() => startNew("new-file", m.root, m.rel)}>New file</button>
-      <button type="button" role="menuitem" onclick={() => startNew("new-dir", m.root, m.rel)}>New folder</button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => startNew("new-file", m.root, m.rel)}
+      >{tEditor("newFile")}</button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => startNew("new-dir", m.root, m.rel)}
+      >{tEditor("newFolder")}</button>
     {/if}
     {#if m.kind !== "root"}
-      <button type="button" role="menuitem" onclick={() => startRename(m.root, m.rel, m.kind === "dir")}>Rename</button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => startRename(m.root, m.rel, m.kind === "dir")}
+      >{tEditor("rename")}</button>
       <button type="button" role="menuitem" class="danger" onclick={() => void startDelete(m.root, m.rel, m.kind === "dir")}
-        >Delete…</button
+        >{tEditor("deleteDots")}</button
       >
     {/if}
   </div>

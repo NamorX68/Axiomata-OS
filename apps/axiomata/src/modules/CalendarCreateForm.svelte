@@ -10,13 +10,37 @@
 -->
 <script lang="ts">
   import type { NewCalendarEvent, RepeatFrequency } from "../core/calendar";
+  import { tModules } from "../i18n/modules";
 
-  const REPEATS: { id: RepeatFrequency | ""; label: string; unit: string }[] = [
-    { id: "", label: "Does not repeat", unit: "" },
-    { id: "daily", label: "Daily", unit: "days" },
-    { id: "weekly", label: "Weekly", unit: "weeks" },
-    { id: "monthly", label: "Monthly", unit: "months" },
-    { id: "yearly", label: "Yearly", unit: "years" },
+  /** The repeat choices; `label`, `every` and `unit` (counted by the interval) read the current language — `every`
+   *  counts too, so an interval of 1 reads "Every day" / "Jeden Tag", not "Alle 1 Tag". */
+  type Counted = (n: number) => string;
+  const REPEATS: { id: RepeatFrequency | ""; label: () => string; every: Counted; unit: Counted }[] = [
+    { id: "", label: () => tModules("repeatNone"), every: () => "", unit: () => "" },
+    {
+      id: "daily",
+      label: () => tModules("repeatDaily"),
+      every: (n) => tModules("everyDays", { n }),
+      unit: (n) => tModules("unitDays", { n }),
+    },
+    {
+      id: "weekly",
+      label: () => tModules("repeatWeekly"),
+      every: (n) => tModules("everyWeeks", { n }),
+      unit: (n) => tModules("unitWeeks", { n }),
+    },
+    {
+      id: "monthly",
+      label: () => tModules("repeatMonthly"),
+      every: (n) => tModules("everyMonths", { n }),
+      unit: (n) => tModules("unitMonths", { n }),
+    },
+    {
+      id: "yearly",
+      label: () => tModules("repeatYearly"),
+      every: (n) => tModules("everyYears", { n }),
+      unit: (n) => tModules("unitYears", { n }),
+    },
   ];
 
   let {
@@ -53,7 +77,9 @@
   let interval = $state(1);
   let until = $state("");
 
-  const repeatUnit = $derived(REPEATS.find((r) => r.id === repeat)?.unit ?? "");
+  const repeatChoice = $derived(REPEATS.find((r) => r.id === repeat));
+  const repeatEvery = $derived(repeatChoice?.every(interval) ?? "");
+  const repeatUnit = $derived(repeatChoice?.unit(interval) ?? "");
   const intervalOk = $derived(Number.isInteger(interval) && interval >= 1 && interval <= 99);
   const untilOk = $derived(until === "" || until >= date);
   const canSubmit = $derived(
@@ -75,47 +101,47 @@
 </script>
 
 <form class="create" onsubmit={(e) => (e.preventDefault(), submit())}>
-  <input type="text" placeholder="Title…" bind:value={title} disabled={busy} />
+  <input type="text" placeholder={tModules("titlePlaceholder")} bind:value={title} disabled={busy} />
   <div class="row">
-    <select bind:value={calendar} disabled={busy} aria-label="Calendar">
+    <select bind:value={calendar} disabled={busy} aria-label={tModules("calendar")}>
       {#each calendars as name (name)}
         <option value={name}>{name}</option>
       {/each}
     </select>
     <input type="date" bind:value={date} disabled={busy} />
   </div>
-  <label class="row check"><input type="checkbox" bind:checked={allDay} disabled={busy} /> All day</label>
+  <label class="row check"><input type="checkbox" bind:checked={allDay} disabled={busy} /> {tModules("allDay")}</label>
   {#if !allDay}
     <div class="row">
-      <input type="time" bind:value={startTime} disabled={busy} aria-label="Start time" />
-      <input type="time" bind:value={endTime} disabled={busy} aria-label="End time" />
+      <input type="time" bind:value={startTime} disabled={busy} aria-label={tModules("startTime")} />
+      <input type="time" bind:value={endTime} disabled={busy} aria-label={tModules("endTime")} />
     </div>
   {/if}
-  <input type="text" placeholder="Location (optional)…" bind:value={location} disabled={busy} />
-  <select bind:value={repeat} disabled={busy} aria-label="Repeat">
+  <input type="text" placeholder={tModules("locationPlaceholder")} bind:value={location} disabled={busy} />
+  <select bind:value={repeat} disabled={busy} aria-label={tModules("repeat")}>
     {#each REPEATS as r (r.id)}
-      <option value={r.id}>{r.label}</option>
+      <option value={r.id}>{r.label()}</option>
     {/each}
   </select>
   {#if repeat !== ""}
     <div class="row repeat">
       <label>
-        Every
-        <input type="number" min="1" max="99" bind:value={interval} disabled={busy} aria-label="Interval" />
+        {repeatEvery}
+        <input type="number" min="1" max="99" bind:value={interval} disabled={busy} aria-label={tModules("interval")} />
         {repeatUnit}
       </label>
       <label>
-        until
-        <input type="date" min={date} bind:value={until} disabled={busy} aria-label="Repeat until" />
+        {tModules("until")}
+        <input type="date" min={date} bind:value={until} disabled={busy} aria-label={tModules("repeatUntil")} />
       </label>
     </div>
-    {#if !untilOk}<p class="error">The repetition ends before the first event.</p>{/if}
+    {#if !untilOk}<p class="error">{tModules("untilBeforeStart")}</p>{/if}
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
   <div class="row">
-    <button type="button" onclick={onCancel} disabled={busy}>Cancel</button>
+    <button type="button" onclick={onCancel} disabled={busy}>{tModules("cancel")}</button>
     <button type="submit" class="primary" disabled={!canSubmit}>
-      {busy ? "Creating…" : "Create"}
+      {busy ? tModules("creating") : tModules("create")}
     </button>
   </div>
 </form>

@@ -10,6 +10,7 @@
   import { onMount } from "svelte";
 
   import { ARM_MS, answerChatAsk, askerLabel, chatAsks, dropStale } from "../core/chatAsks";
+  import { tShell } from "../i18n/shell";
   import Icon from "../ui/Icon.svelte";
 
   /** The clock the arming and the staleness are read against; ticks while questions wait. */
@@ -42,7 +43,7 @@
 </script>
 
 {#if $chatAsks.length > 0}
-  <section class="asks" aria-label="Questions for you">
+  <section class="asks" aria-label={tShell("questionsForYou")}>
     {#each $chatAsks as ask (ask.id)}
       <div class="ask" role="group" aria-label="{askerLabel(ask.origin)}: {ask.what}">
         <span class="mark" aria-hidden="true"><Icon name="circle-question-mark" size="sm" /></span>
@@ -52,16 +53,16 @@
         </p>
         <div class="answers">
           <button type="button" class="answer" onclick={() => answer(ask.id, false)}>
-            Deny
+            {tShell("deny")}
           </button>
           <button
             type="button"
             class="answer allow"
             disabled={!ask.complete || now - ask.at < ARM_MS}
-            title={ask.complete ? "Run it now" : "Too long to show in full: set it up yourself"}
+            title={ask.complete ? tShell("runNow") : tShell("tooLongTitle")}
             onclick={() => answer(ask.id, true)}
           >
-            Allow
+            {tShell("allow")}
           </button>
         </div>
         {#if ask.detail}
@@ -69,7 +70,7 @@
           <p class="detail">{ask.detail}</p>
         {/if}
         {#if !ask.complete}
-          <p class="note">Too long to show in full — it cannot be allowed from here.</p>
+          <p class="note">{tShell("tooLongNote")}</p>
         {/if}
       </div>
     {/each}

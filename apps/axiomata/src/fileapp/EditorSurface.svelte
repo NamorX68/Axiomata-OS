@@ -43,6 +43,7 @@
 -->
 <script lang="ts">
   import { keyHints } from "../core/keyHints";
+  import { tEditor } from "../i18n/editor";
   import { onMount, tick as nextTick, untrack } from "svelte";
   import type { Tree } from "web-tree-sitter";
 
@@ -304,6 +305,8 @@
   const wrapOn = $derived(settings.wrap);
   const tabSize = $derived(settings.tabSize);
   const fontSpec = $derived(`${settings.fontWeight} ${settings.fontSize}px "${settings.fontFamily}"`);
+  /** The chosen family first, the app's mono stack behind it while it loads or when it is missing. */
+  const fontStack = $derived(`"${settings.fontFamily}", var(--ax-font-mono)`);
 
   $effect(() => {
     layout.setOptions({ wrap: wrapOn, width: wrapCells, tabSize });
@@ -1744,7 +1747,7 @@
   style:--cell="{charW}px"
   style:--row="{rowH}px"
   style:--fold-shift="{foldSlide?.shift ?? 0}px"
-  style:font-family={`"${settings.fontFamily}", var(--ax-font-mono)`}
+  style:font-family={fontStack}
   style:font-weight={settings.fontWeight}
   style:font-size="{settings.fontSize}px"
   style:font-variant-ligatures={settings.ligatures ? "normal" : "none"}
@@ -1786,7 +1789,7 @@
       >
         {#each view.rows as r (r.row)}
           {#if r.sub === 0 && execLine === r.line}
-            <div class="exec-arrow" style:top="{r.row * rowH}px" aria-hidden="true">▶</div>
+            <div class="exec-arrow" style:top="{r.row * rowH}px" aria-hidden="true">{"▶"}</div>
           {/if}
           {#if r.sub === 0 && breakpoints?.has(r.line)}
             <div class="bp-mark" class:conditional={conditionalBreakpoints?.has(r.line)} style:top="{r.row * rowH}px" aria-hidden="true"></div>
@@ -1817,8 +1820,11 @@
               class="fold-chevron"
               class:closed={r.fold.chevron === "closed"}
               style:top="{r.row * rowH}px"
-              title={keyHints(r.fold.chevron === "closed" ? "Unfold (⌥⌘])" : "Fold (⌥⌘[)", $platform)}
-              aria-label={r.fold.chevron === "closed" ? "Unfold" : "Fold"}
+              title={keyHints(
+                r.fold.chevron === "closed" ? `${tEditor("unfold")} (⌥⌘])` : `${tEditor("fold")} (⌥⌘[)`,
+                $platform,
+              )}
+              aria-label={r.fold.chevron === "closed" ? tEditor("unfold") : tEditor("fold")}
               onmousedown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1923,13 +1929,13 @@
               class="fold-pill {r.slide ?? ''}"
               style:top="{r.row * rowH}px"
               style:left="{r.fold.pill.cell * charW}px"
-              title={keyHints("Unfold (⌥⌘])", $platform)}
+              title={keyHints(`${tEditor("unfold")} (⌥⌘])`, $platform)}
               onmousedown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 toggleFoldAt(r.line);
                 input.focus();
-              }}>⋯ {r.fold.pill.lines} {r.fold.pill.lines === 1 ? "line" : "lines"}</button
+              }}>{"⋯"} {tEditor("foldedLines", { n: r.fold.pill.lines })}</button
             >
           {/if}
           {#if r.diag?.inline}
@@ -1985,7 +1991,7 @@
           spellcheck="false"
           autocapitalize="off"
           autocomplete="off"
-          aria-label="Editor"
+          aria-label={tEditor("editor")}
           readonly={readOnly && !vi}
           onkeydown={onKeydown}
           oninput={onInput}
@@ -2010,7 +2016,7 @@
           tabindex="-1"
           class="sticky-row"
           style:top="{h.top}px"
-          title="Go to line {h.line + 1}"
+          title={tEditor("goToLine", { line: h.line + 1 })}
           onmousedown={(e) => {
             e.preventDefault();
             jumpToHeader(i);
@@ -2062,7 +2068,7 @@
       {/each}
       {#if hover.fix}
         <button type="button" class="fix" onmousedown={(e) => e.preventDefault()} onclick={fixFromHover}>
-          Fix…
+          {tEditor("fix")}
         </button>
       {/if}
       {#if hover.html}

@@ -30,6 +30,8 @@
     type Beat,
     type Fuel,
   } from "../core/heartbeat";
+  import { formatTime, formatUsd } from "../core/format";
+  import { tShell } from "../i18n/shell";
   import { openKanban } from "../modules/kanbanApp";
   import StatusMark from "../ui/StatusMark.svelte";
 
@@ -102,10 +104,10 @@
     };
   });
 
-  const clock = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const clock = (ms: number): string => formatTime(ms);
 
   function describe(beat: Beat): string {
-    const until = beat.end === null ? "now" : clock(beat.end);
+    const until = beat.end === null ? tShell("now") : clock(beat.end);
     return `${beat.label} · ${clock(beat.start)}–${until}`;
   }
 
@@ -135,7 +137,7 @@
   }
 
   const nowLeft = $derived(dayShare(now, now));
-  const money = (usd: number): string => `$${usd.toFixed(2)}`;
+  const money = (usd: number): string => formatUsd(usd);
   const runMeta = (r: RunRecord): string =>
     `${clock(Date.parse(r.started_at))} · ${Math.round(r.duration_ms / 1000)} s · ${r.source} · ${r.backend}`;
   const excerpt = (text: string): string =>
@@ -150,7 +152,7 @@
   <div
     class="strip"
     role="group"
-    aria-label="Today's work: {beats.length} runs and sessions"
+    aria-label={tShell("todayStrip", { n: beats.length })}
     onmouseenter={() => (listOpen = !shown)}
     onfocusin={() => (listOpen = !shown)}
   >
@@ -177,8 +179,8 @@
       class="tank"
       class:hot={tank.hot}
       title={tank.capUsd === null
-        ? `Spent today: ${money(tank.todayUsd)}, no daily limit`
-        : `Spent today: ${money(tank.todayUsd)} of ${money(tank.capUsd)}`}
+        ? tShell("spentNoCap", { amount: money(tank.todayUsd) })
+        : tShell("spentOfCap", { amount: money(tank.todayUsd), cap: money(tank.capUsd) })}
     >
       {#if tank.capUsd !== null}
         <span class="cells" aria-hidden="true">
@@ -190,10 +192,10 @@
   {/if}
 
   {#if listOpen && !shown}
-    <div class="list" role="dialog" aria-label="Today's work">
-      <p class="list-head">Today · {beats.length === 1 ? "1 entry" : `${beats.length} entries`}</p>
+    <div class="list" role="dialog" aria-label={tShell("todaysWork")}>
+      <p class="list-head">{tShell("todayHead", { n: beats.length })}</p>
       {#if beats.length === 0}
-        <p class="meta">Nothing ran today yet.</p>
+        <p class="meta">{tShell("nothingToday")}</p>
       {:else}
         <ul>
           {#each [...beats].reverse() as beat (beat.key)}
@@ -202,7 +204,7 @@
                 <StatusMark tone={beat.tone} />
                 <span class="when">{clock(beat.start)}</span>
                 <span class="what">{beat.label}</span>
-                <span class="long">{beat.end === null ? "running" : durationText(beat, now)}</span>
+                <span class="long">{beat.end === null ? tShell("running") : durationText(beat, now)}</span>
               </button>
             </li>
           {/each}
@@ -212,7 +214,7 @@
   {/if}
 
   {#if shown}
-    <div class="run" role="dialog" aria-label="Run {shown.skill_name}">
+    <div class="run" role="dialog" aria-label={tShell("runLabel", { name: shown.skill_name })}>
       <p class="run-head">
         <strong>{shown.skill_name}</strong>
         <span class="status {shown.status}">{shown.status}</span>

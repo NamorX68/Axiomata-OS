@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
   import { type ModelOption, filterOptions } from "../core/modelCatalog";
+  import { tCanvas } from "../i18n/canvas";
   import IconButton from "./IconButton.svelte";
 
   interface Props {
@@ -115,7 +116,13 @@
       {onkeydown}
     />
     {#if onRefresh}
-      <IconButton icon="refresh-cw" label="Fetch the model list again" size="sm" disabled={refreshing} onclick={onRefresh} />
+      <IconButton
+        icon="refresh-cw"
+        label={tCanvas("refetchModels")}
+        size="sm"
+        disabled={refreshing}
+        onclick={onRefresh}
+      />
     {/if}
   </div>
   {#if open && hits.length > 0}
@@ -143,9 +150,9 @@
     </ul>
   {/if}
   {#if unknown}
-    <span class="note">Not in the provider's catalog — kept as typed.</span>
+    <span class="note">{tCanvas("notInCatalog")}</span>
   {:else if refreshing}
-    <span class="note">Fetching the model list…</span>
+    <span class="note">{tCanvas("fetchingModels")}</span>
   {:else if status}
     <span class="note">{status}</span>
   {/if}

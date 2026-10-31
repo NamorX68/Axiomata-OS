@@ -11,17 +11,19 @@
  * are listed by hand; their groups are not `checked`.
  *
  * Keys are written as on a Mac: `⌃⌥⇧⌘` and then the key; alternatives are
- * separated by ` / `. Vi keys are written in Vim's own notation.
+ * separated by ` / `. Vi keys are written in Vim's own notation. A group's title and an entry's description are keys of
+ * the editor catalog (`i18n/editor.ts`); `visibleShortcuts` hands them out in the current language.
  */
 
 import { keyHints } from "../core/keyHints";
 import type { Platform } from "../core/keys";
 import type { KeyInput } from "../editor/keymap";
+import { tEditor, type EditorText } from "../i18n/editor";
 import { VI_CTRL_KEYS } from "./editorKeys";
 
 export interface Shortcut {
   keys: string;
-  what: string;
+  what: EditorText;
   /** A move that ⇧ turns into extending the selection: the test checks both. */
   extends?: boolean;
   /**
@@ -33,13 +35,13 @@ export interface Shortcut {
   /** The keys there while Vi is on, where they differ from `other` (`null`: none, Vi has its own). */
   otherVi?: string | null;
   /** The description there, where it differs. */
-  otherWhat?: string;
+  otherWhat?: EditorText;
   /** An entry that exists only on Windows and Linux; `keys` is then already in their words. */
   onlyOther?: boolean;
 }
 
 export interface ShortcutGroup {
-  title: string;
+  title: EditorText;
   items: Shortcut[];
   /** Run through the real key map by the test (see the module doc). */
   checked?: boolean;
@@ -49,255 +51,271 @@ export interface ShortcutGroup {
 
 export const SHORTCUTS: ShortcutGroup[] = [
   {
-    title: "Moving",
+    title: "scgMoving",
     checked: true,
     items: [
-      { keys: "← / →", what: "One character left / right", extends: true },
-      { keys: "⌥← / ⌥→", what: "One word left / right", extends: true, other: "Ctrl+← / Ctrl+→" },
-      { keys: "⌘← / ⌘→", what: "Start / end of the line", extends: true, other: null },
-      { keys: "↑ / ↓", what: "One line up / down", extends: true },
-      { keys: "⌘↑ / ⌘↓", what: "Start / end of the file", extends: true, other: "Ctrl+Home / Ctrl+End" },
-      { keys: "Home / End", what: "Start / end of the line", extends: true },
-      { keys: "⌘Home / ⌘End", what: "Start / end of the file", extends: true, other: null },
-      { keys: "PgUp / PgDn", what: "One page up / down", extends: true },
-      { keys: "⇧ + any move", what: "Extend the selection" },
+      { keys: "← / →", what: "scOneCharacterLeftRight", extends: true },
+      { keys: "⌥← / ⌥→", what: "scOneWordLeftRight", extends: true, other: "Ctrl+← / Ctrl+→" },
+      { keys: "⌘← / ⌘→", what: "scStartEndOfTheLine", extends: true, other: null },
+      { keys: "↑ / ↓", what: "scOneLineUpDown", extends: true },
+      { keys: "⌘↑ / ⌘↓", what: "scStartEndOfTheFile", extends: true, other: "Ctrl+Home / Ctrl+End" },
+      { keys: "Home / End", what: "scStartEndOfTheLine", extends: true },
+      { keys: "⌘Home / ⌘End", what: "scStartEndOfTheFile", extends: true, other: null },
+      { keys: "PgUp / PgDn", what: "scOnePageUpDown", extends: true },
+      { keys: "⇧ + any move", what: "scExtendTheSelection" },
     ],
   },
   {
-    title: "Editing",
+    title: "scgEditing",
     checked: true,
     items: [
       {
         keys: "⌫ / ⌥⌫ / ⌘⌫",
-        what: "Delete a character / word / to the line start backwards",
+        what: "scDeleteACharacterWordTo",
         other: "Backspace / Ctrl+Backspace",
-        otherWhat: "Delete a character / word backwards",
+        otherWhat: "scDeleteACharacterWordBackwards",
       },
-      { keys: "⌦ / ⌥⌦", what: "Delete a character / word forwards", other: "Delete / Ctrl+Delete" },
-      { keys: "⏎", what: "New line" },
-      { keys: "⇥ / ⇧⇥", what: "Indent / outdent" },
-      { keys: "⌥↑ / ⌥↓", what: "Move the lines up / down" },
-      { keys: "⌥⇧↑ / ⌥⇧↓", what: "Duplicate the lines up / down" },
-      { keys: "⌘/", what: "Comment / uncomment the lines" },
-      { keys: "⌘Z / ⇧⌘Z", what: "Undo / redo" },
-      { keys: "⌘X / ⌘C / ⌘V", what: "Cut / copy / paste" },
-      { keys: "⌘A", what: "Select everything" },
-      { keys: "⌘L", what: "Select the line (again: the next one too) — code actions where a language server runs" },
-      { keys: "⌘S", what: "Save (formats first where that is on)" },
-      { keys: "⌘O", what: "Open a file" },
-      { keys: "⇧⌘V", what: "Source / preview / side by side (Markdown, HTML, SVG)" },
-      { keys: "⌥Z", what: "Wrap long lines on / off" },
-      { keys: "Esc", what: "Back to one cursor" },
+      { keys: "⌦ / ⌥⌦", what: "scDeleteACharacterWordForwards", other: "Delete / Ctrl+Delete" },
+      { keys: "⏎", what: "scNewLine" },
+      { keys: "⇥ / ⇧⇥", what: "scIndentOutdent" },
+      { keys: "⌥↑ / ⌥↓", what: "scMoveTheLinesUpDown" },
+      { keys: "⌥⇧↑ / ⌥⇧↓", what: "scDuplicateTheLinesUpDown" },
+      { keys: "⌘/", what: "scCommentUncommentTheLines" },
+      { keys: "⌘Z / ⇧⌘Z", what: "scUndoRedo" },
+      { keys: "⌘X / ⌘C / ⌘V", what: "scCutCopyPaste" },
+      { keys: "⌘A", what: "scSelectEverything" },
+      { keys: "⌘L", what: "scSelectTheLineAgainThe" },
+      { keys: "⌘S", what: "scSaveFormatsFirstWhereThat" },
+      { keys: "⌘O", what: "scOpenAFile" },
+      { keys: "⇧⌘V", what: "scSourcePreviewSideBySide" },
+      { keys: "⌥Z", what: "scWrapLongLinesOnOff" },
+      { keys: "Esc", what: "scBackToOneCursor" },
     ],
   },
   {
-    title: "Multiple cursors",
+    title: "scgMultipleCursors",
     checked: true,
     items: [
-      { keys: "⌥⌘↑ / ⌥⌘↓", what: "Add a cursor above / below" },
-      { keys: "⌘D", what: "Add the next occurrence" },
-      { keys: "⌘U", what: "Remove the last cursor" },
-      { keys: "⇧⌘L", what: "Select every occurrence" },
+      { keys: "⌥⌘↑ / ⌥⌘↓", what: "scAddACursorAboveBelow" },
+      { keys: "⌘D", what: "scAddTheNextOccurrence" },
+      { keys: "⌘U", what: "scRemoveTheLastCursor" },
+      { keys: "⇧⌘L", what: "scSelectEveryOccurrence" },
     ],
   },
   {
-    title: "Find",
+    title: "scgFind",
     checked: true,
     items: [
-      { keys: "⌘F", what: "Find in the file", otherVi: null },
-      { keys: "⌥⌘F", what: "Find and replace" },
-      { keys: "⌘G / ⇧⌘G", what: "Next / previous match" },
-      { keys: "⌘E", what: "Search for the selection" },
+      { keys: "⌘F", what: "scFindInTheFile", otherVi: null },
+      { keys: "⌥⌘F", what: "scFindAndReplace" },
+      { keys: "⌘G / ⇧⌘G", what: "scNextPreviousMatch" },
+      { keys: "⌘E", what: "scSearchForTheSelection" },
     ],
   },
   {
-    title: "Folding",
+    title: "scgFolding",
     checked: true,
     items: [
-      { keys: "⌥⌘[ / ⌥⌘]", what: "Fold / unfold here", other: "Ctrl+Shift+[ / Ctrl+Shift+]" },
-      { keys: "⌥⌘0 / ⌥⌘J", what: "Fold / unfold everything" },
+      { keys: "⌥⌘[ / ⌥⌘]", what: "scFoldUnfoldHere", other: "Ctrl+Shift+[ / Ctrl+Shift+]" },
+      { keys: "⌥⌘0 / ⌥⌘J", what: "scFoldUnfoldEverything" },
     ],
   },
   {
-    title: "Language server",
+    title: "scgLanguageServer",
     items: [
-      { keys: "F12 / ⌘-click", what: "Go to the definition" },
-      { keys: "⌘F12", what: "Implementations" },
-      { keys: "⇧F12", what: "All uses" },
-      { keys: "Mouse rest", what: "What the server says about the symbol" },
-      { keys: "F8 / ⇧F8", what: "Next / previous problem" },
-      { keys: "⌘. / ⌘L", what: "Code actions (quick fixes, refactorings)" },
-      { keys: "F2", what: "Rename the symbol" },
-      { keys: "⇧⌥F", what: "Format the file" },
-      { keys: "⌃Space", what: "Complete" },
-      { keys: "⇧⌘Space", what: "Show the call's signature" },
+      { keys: "F12 / ⌘-click", what: "scGoToTheDefinition" },
+      { keys: "⌘F12", what: "scImplementations" },
+      { keys: "⇧F12", what: "scAllUses" },
+      { keys: "Mouse rest", what: "scWhatTheServerSaysAbout" },
+      { keys: "F8 / ⇧F8", what: "scNextPreviousProblem" },
+      { keys: "⌘. / ⌘L", what: "scCodeActionsQuickFixesRefactorings" },
+      { keys: "F2", what: "scRenameTheSymbol" },
+      { keys: "⇧⌥F", what: "scFormatTheFile" },
+      { keys: "⌃Space", what: "scComplete" },
+      { keys: "⇧⌘Space", what: "scShowTheCallSSignature" },
     ],
   },
   {
     // `docs/plans/tags-links.md`, TL2: handled by `FileEditor.svelte` and `jumpHistory.ts`, not the key map.
-    title: "Notes (wikilinks and tags)",
+    title: "scgNotesWikilinksAndTags",
     items: [
-      { keys: "⌘-click", what: "Follow a [[wikilink]] (into nothing: create the note beside this one), or show a #tag" },
-      { keys: "Click", what: "In the reading view: follow a wikilink or show a tag" },
-      { keys: "⌃- / ⌃⇧-", what: "Back / forward along the jumps across files", other: "Ctrl+Alt+← / Ctrl+Alt+→" },
-      { keys: "[[ / #", what: "Complete a note name / a tag" },
+      { keys: "⌘-click", what: "scFollowAWikilinkIntoNothing" },
+      { keys: "Click", what: "scInTheReadingViewFollow" },
+      { keys: "⌃- / ⌃⇧-", what: "scBackForwardAlongTheJumps", other: "Ctrl+Alt+← / Ctrl+Alt+→" },
+      { keys: "[[ / #", what: "scCompleteANoteNameA" },
     ],
   },
   {
-    title: "Completion and code-action menus",
+    title: "scgCompletionAndCodeActionMenus",
     items: [
-      { keys: "↓ / ↑ / ⌃N / ⌃P", what: "Choose" },
-      { keys: "⌃Y / ⏎", what: "Take (⏎ and ⇥ in completion only without Vi)" },
-      { keys: "1–9", what: "Take that code action" },
-      { keys: "Typing / ⌫", what: "Narrow / widen the code actions" },
-      { keys: "⌃E / Esc", what: "Close" },
+      { keys: "↓ / ↑ / ⌃N / ⌃P", what: "scChoose" },
+      { keys: "⌃Y / ⏎", what: "scTakeAndInCompletionOnly" },
+      { keys: "1–9", what: "scTakeThatCodeAction" },
+      { keys: "Typing / ⌫", what: "scNarrowWidenTheCodeActions" },
+      { keys: "⌃E / Esc", what: "scClose" },
     ],
   },
   {
-    title: "Everywhere in the app",
+    title: "scgEverywhereInTheApp",
     items: [
-      { keys: "⌘K", what: "Open / close the search (the spotlight)" },
-      { keys: "⌘,", what: "Open the settings" },
-      { keys: "⌘N", what: "In the chat input: a new conversation (the Studio's new note elsewhere)" },
-      { keys: "⇧⇥", what: "In the chat input: switch between Plan and Build" },
-      { keys: "⌘W", what: "Close the topmost window (the spotlight, else the top panel); not in a terminal" },
-      { keys: "Esc", what: "Close the topmost window — in a file window only on a rendered page or a picture" },
-      { keys: "F1 / F5, F2 / F10, F3, F4", what: "While the debugger is stopped: continue, step over, out, into" },
+      { keys: "⌘K", what: "scOpenCloseTheSearchThe" },
+      { keys: "⌘,", what: "scOpenTheSettings" },
+      { keys: "⌘N", what: "scInTheChatInputA" },
+      { keys: "⇧⇥", what: "scInTheChatInputSwitch" },
+      { keys: "⌘W", what: "scCloseTheTopmostWindowThe" },
+      { keys: "Esc", what: "scCloseTheTopmostWindowIn" },
+      { keys: "F1 / F5, F2 / F10, F3, F4", what: "scWhileTheDebuggerIsStopped" },
       {
         keys: "Ctrl+Shift+…",
-        what: "In a terminal pane every app shortcut takes Ctrl+Shift — plain Ctrl belongs to the shell",
+        what: "scInATerminalPaneEvery",
         onlyOther: true,
       },
-      { keys: "Ctrl+Shift+C / Ctrl+Shift+V", what: "Copy / paste in a terminal pane", onlyOther: true },
+      { keys: "Ctrl+Shift+C / Ctrl+Shift+V", what: "scCopyPasteInATerminal", onlyOther: true },
     ],
   },
   {
-    title: "Studio",
+    title: "scgStudio",
     items: [
-      { keys: "⌘P", what: "Open a file by name (name:12 goes to line 12)" },
-      { keys: "⌘O", what: "Open a file with the file dialog" },
-      { keys: "⇧⌘F", what: "Search the project (the sidebar's Search view)" },
-      { keys: "⌘N", what: "New note" },
-      { keys: "⌘W", what: "Close the file tab" },
-      { keys: "⌘1 – ⌘9", what: "Go to tab 1–9" },
-      { keys: "⌃⇥ / ⌃⇧⇥", what: "Next / previous tab (in the focused group)" },
-      { keys: "⌘\\ / ⇧⌘\\", what: "Move the tab into a new group to the right / below" },
-      { keys: "Drag a tab", what: "Onto a group: join it — onto an edge: split" },
-      { keys: "Drag a divider", what: "Resize the groups beside it" },
-      { keys: "⌘B", what: "Show / hide the sidebar column" },
+      { keys: "⌘P", what: "scOpenAFileByName" },
+      { keys: "⌘O", what: "scOpenAFileWithThe" },
+      { keys: "⇧⌘F", what: "scSearchTheProjectTheSidebar" },
+      { keys: "⌘N", what: "scNewNote" },
+      { keys: "⌘W", what: "scCloseTheFileTab" },
+      { keys: "⌘1 – ⌘9", what: "scGoToTab19" },
+      { keys: "⌃⇥ / ⌃⇧⇥", what: "scNextPreviousTabInThe" },
+      { keys: "⌘\\ / ⇧⌘\\", what: "scMoveTheTabIntoA" },
+      { keys: "Drag a tab", what: "scOntoAGroupJoinIt" },
+      { keys: "Drag a divider", what: "scResizeTheGroupsBesideIt" },
+      { keys: "⌘B", what: "scShowHideTheSidebarColumn" },
     ],
   },
   {
-    title: "Vi — moving",
+    title: "scgViMoving",
     vi: true,
     items: [
-      { keys: "h j k l", what: "Left, down, up, right" },
-      { keys: "<Left> <Right> <Up> <Down> <BS> <Space> <C-n> <C-p>", what: "The same, by other keys" },
-      { keys: "w W b B e E ge gE", what: "Words forward, back, to the end (W: separated by spaces only)" },
-      { keys: "0 ^ $ g_ |", what: "Line start, first character, end, last character, column" },
-      { keys: "<Home> <End>", what: "Line start / end" },
-      { keys: "gg G", what: "First / last line (with a count: that line)" },
-      { keys: "+ - _ <CR>", what: "First character of the next / previous / this line" },
-      { keys: "{ } ( )", what: "Paragraphs and sentences" },
-      { keys: "%", what: "The matching bracket" },
-      { keys: "H M L", what: "Top, middle, bottom of the screen" },
-      { keys: "gj gk", what: "Down / up by screen rows" },
-      { keys: "f{c} F{c} t{c} T{c} ; ,", what: "To / before a character, again, back" },
-      { keys: "/ ? n N * #", what: "Search forward / back, next, previous, the word under the cursor" },
-      { keys: "'{a-z} `{a-z}", what: "To a mark (its line / its exact place)" },
+      { keys: "h j k l", what: "scLeftDownUpRight" },
+      { keys: "<Left> <Right> <Up> <Down> <BS> <Space> <C-n> <C-p>", what: "scTheSameByOtherKeys" },
+      { keys: "w W b B e E ge gE", what: "scWordsForwardBackToThe" },
+      { keys: "0 ^ $ g_ |", what: "scLineStartFirstCharacterEnd" },
+      { keys: "<Home> <End>", what: "scLineStartEnd" },
+      { keys: "gg G", what: "scFirstLastLineWithA" },
+      { keys: "+ - _ <CR>", what: "scFirstCharacterOfTheNext" },
+      { keys: "{ } ( )", what: "scParagraphsAndSentences" },
+      { keys: "%", what: "scTheMatchingBracket" },
+      { keys: "H M L", what: "scTopMiddleBottomOfThe" },
+      { keys: "gj gk", what: "scDownUpByScreenRows" },
+      { keys: "f{c} F{c} t{c} T{c} ; ,", what: "scToBeforeACharacterAgain" },
+      { keys: "/ ? n N * #", what: "scSearchForwardBackNextPrevious" },
+      { keys: "'{a-z} `{a-z}", what: "scToAMarkItsLine" },
     ],
   },
   {
-    title: "Vi — changing",
+    title: "scgViChanging",
     vi: true,
     items: [
-      { keys: "d c y > < = g~ gu gU gc", what: "Delete, change, copy, indent, outdent, reindent, case, comment — then a motion or object" },
-      { keys: "dd cc yy >> << == g~~ guu gUU gcc", what: "The same for the whole line" },
-      { keys: "ys{motion}{c} yss{c} cs{a}{b} ds{c} S{c}", what: "Surround: add, change, delete" },
-      { keys: "i a I A o O gi gI", what: "Insert before, after, line start, line end, new line below, above, where last" },
-      { keys: "x X s S D C Y", what: "Delete character, before, substitute, line, to the end, change to the end, copy line" },
-      { keys: "r{c} R", what: "Replace a character / Replace mode" },
-      { keys: "p P gp gP", what: "Paste after / before (g: cursor after the text)" },
-      { keys: "J gJ", what: "Join lines (without spaces)" },
-      { keys: "~ U", what: "Toggle case (Visual U: upper case)" },
-      { keys: "<C-a> <C-x>", what: "Add / subtract the count" },
-      { keys: "u <C-r> .", what: "Undo, redo, repeat the last change" },
-      { keys: "& @@ q{a-z} @{a-z} m{a-z}", what: "Repeat :s, repeat macro, record / play a macro, set a mark" },
-      { keys: "gn gN", what: "Select the next / previous match (cgn: change it)" },
+      { keys: "d c y > < = g~ gu gU gc", what: "scDeleteChangeCopyIndentOutdent" },
+      { keys: "dd cc yy >> << == g~~ guu gUU gcc", what: "scTheSameForTheWhole" },
+      { keys: "ys{motion}{c} yss{c} cs{a}{b} ds{c} S{c}", what: "scSurroundAddChangeDelete" },
+      { keys: "i a I A o O gi gI", what: "scInsertBeforeAfterLineStart" },
+      { keys: "x X s S D C Y", what: "scDeleteCharacterBeforeSubstituteLine" },
+      { keys: "r{c} R", what: "scReplaceACharacterReplaceMode" },
+      { keys: "p P gp gP", what: "scPasteAfterBeforeGCursor" },
+      { keys: "J gJ", what: "scJoinLinesWithoutSpaces" },
+      { keys: "~ U", what: "scToggleCaseVisualUUpper" },
+      { keys: "<C-a> <C-x>", what: "scAddSubtractTheCount" },
+      { keys: "u <C-r> .", what: "scUndoRedoRepeatTheLast" },
+      { keys: "& @@ q{a-z} @{a-z} m{a-z}", what: "scRepeatSRepeatMacroRecord" },
+      { keys: "gn gN", what: "scSelectTheNextPreviousMatch" },
     ],
   },
   {
-    title: "Vi — text objects (after i / a)",
+    title: "scgViTextObjectsAfterI",
     vi: true,
     items: [
-      { keys: "w W s p", what: "Word, WORD, sentence, paragraph" },
-      { keys: "\" ' `", what: "Quoted string" },
-      { keys: "( ) b [ ] { } B < >", what: "Brackets" },
-      { keys: "t", what: "HTML/XML tag" },
-      { keys: "f c a", what: "Function, class, argument (tree-sitter)" },
+      { keys: "w W s p", what: "scWordWORDSentenceParagraph" },
+      { keys: "\" ' `", what: "scQuotedString" },
+      { keys: "( ) b [ ] { } B < >", what: "scBrackets" },
+      { keys: "t", what: "scHTMLXMLTag" },
+      { keys: "f c a", what: "scFunctionClassArgumentTreeSitter" },
     ],
   },
   {
-    title: "Vi — modes, views and the rest",
+    title: "scgViModesViewsAndThe",
     vi: true,
     items: [
-      { keys: "v V <C-v> gv o O", what: "Visual by character, line, block; again; other end" },
-      { keys: "<Esc> <C-[> <C-c>", what: "Back to Normal" },
-      { keys: "zt zz zb z<CR> z. z-", what: "Scroll the cursor line to the top, middle, bottom" },
-      { keys: "<C-e> <C-y> <C-d> <C-u> <C-f> <C-b> <PageDown> <PageUp>", what: "Scroll by lines, half pages, pages" },
-      { keys: "<C-o> <C-i> <Tab>", what: "Back / forward in the jump list (past its ends: across files)" },
-      { keys: "zc zo za zR zM", what: "Close, open, toggle a fold; open / close all" },
-      { keys: "]c [c", what: "Next / previous change in a diff" },
-      { keys: "]d [d", what: "Next / previous problem" },
-      { keys: "gd K gf", what: "Definition (on a note's wikilink: follow it), hover, open the path under the cursor" },
-      { keys: "gri grt grr", what: "Implementations, type definition, uses" },
-      { keys: "grn gra", what: "Rename, code actions (Visual: for the selection)" },
-      { keys: "ZZ ZQ", what: "Save and close / close without saving" },
-      { keys: ":", what: "Command line (Visual: for the selected lines)" },
+      { keys: "v V <C-v> gv o O", what: "scVisualByCharacterLineBlock" },
+      { keys: "<Esc> <C-[> <C-c>", what: "scBackToNormal" },
+      { keys: "zt zz zb z<CR> z. z-", what: "scScrollTheCursorLineTo" },
+      { keys: "<C-e> <C-y> <C-d> <C-u> <C-f> <C-b> <PageDown> <PageUp>", what: "scScrollByLinesHalfPages" },
+      { keys: "<C-o> <C-i> <Tab>", what: "scBackForwardInTheJump" },
+      { keys: "zc zo za zR zM", what: "scCloseOpenToggleAFold" },
+      { keys: "]c [c", what: "scNextPreviousChangeInA" },
+      { keys: "]d [d", what: "scNextPreviousProblem" },
+      { keys: "gd K gf", what: "scDefinitionOnANoteS" },
+      { keys: "gri grt grr", what: "scImplementationsTypeDefinitionUses" },
+      { keys: "grn gra", what: "scRenameCodeActionsVisualFor" },
+      { keys: "ZZ ZQ", what: "scSaveAndCloseCloseWithout" },
+      { keys: ":", what: "scCommandLineVisualForThe" },
     ],
   },
   {
-    title: "Vi — commands",
+    title: "scgViCommands",
     vi: true,
     items: [
-      { keys: ":w[rite] :wq :x[it] :q[uit] :q!", what: "Save, save and close, close" },
-      { keys: ":e[dit]!", what: "Back to the file on disk" },
-      { keys: ":s[ubstitute]/a/b/gc :&", what: "Replace (c: ask each time); repeat" },
-      { keys: ":g/a/cmd :v/a/cmd", what: "Run a command on the lines that match / do not match" },
-      { keys: ":d[elete] :norm[al] {keys}", what: "Delete lines; type keys on every line" },
-      { keys: ":se[t] wrap nu rnu list", what: "Wrapping, numbers, relative numbers, whitespace" },
-      { keys: ":noh[lsearch]", what: "Hide the search highlight" },
-      { keys: ":for[mat] :ren[ame] {name} :act[ion]", what: "Format, rename, code actions" },
-      { keys: ":{n}", what: "Go to line n" },
+      { keys: ":w[rite] :wq :x[it] :q[uit] :q!", what: "scSaveSaveAndCloseClose" },
+      { keys: ":e[dit]!", what: "scBackToTheFileOn" },
+      { keys: ":s[ubstitute]/a/b/gc :&", what: "scReplaceCAskEachTime" },
+      { keys: ":g/a/cmd :v/a/cmd", what: "scRunACommandOnThe" },
+      { keys: ":d[elete] :norm[al] {keys}", what: "scDeleteLinesTypeKeysOn" },
+      { keys: ":se[t] wrap nu rnu list", what: "scWrappingNumbersRelativeNumbersWhitespace" },
+      { keys: ":noh[lsearch]", what: "scHideTheSearchHighlight" },
+      { keys: ":for[mat] :ren[ame] {name} :act[ion]", what: "scFormatRenameCodeActions" },
+      { keys: ":{n}", what: "scGoToLineN" },
     ],
   },
 ];
 
+/** A shortcut as the panel shows it: keys for the platform, the description in the current language. */
+export interface VisibleShortcut {
+  keys: string;
+  what: string;
+}
+
+/** A group as the panel shows it. */
+export interface VisibleGroup {
+  title: string;
+  items: VisibleShortcut[];
+  checked?: boolean;
+  vi?: boolean;
+}
+
 /** What `item` shows on `on`, or `null` when it is not there (a Mac-only key, or one Vi takes over). */
-function shown(item: Shortcut, on: Platform, vi: boolean): Shortcut | null {
-  if (on === "mac") return item.onlyOther ? null : item;
+function shown(item: Shortcut, on: Platform, vi: boolean): VisibleShortcut | null {
+  if (on === "mac") return item.onlyOther ? null : { keys: item.keys, what: tEditor(item.what) };
   const keys = vi && item.otherVi !== undefined ? item.otherVi : item.other;
   if (keys === null) return null;
   const text = keys ?? (item.onlyOther ? item.keys : keyHints(item.keys, on, { vi, viLetters: VI_CTRL_KEYS }));
-  return { ...item, keys: text, what: item.otherWhat ?? item.what };
+  return { keys: text, what: tEditor(item.otherWhat ?? item.what) };
 }
 
 /**
  * The groups to show on `on`: the Vi ones only with Vi on — and then first, since they are the keys in use; narrowed by
- * `query` (keys or description, as shown).
+ * `query` (keys or description, as shown — in the current language).
  */
-export function visibleShortcuts(vi: boolean, query: string, on: Platform = "mac"): ShortcutGroup[] {
+export function visibleShortcuts(vi: boolean, query: string, on: Platform = "mac"): VisibleGroup[] {
   const q = query.trim().toLowerCase();
-  const out: ShortcutGroup[] = [];
+  const out: VisibleGroup[] = [];
   for (const group of SHORTCUTS) {
     if (group.vi && !vi) continue;
+    const title = tEditor(group.title);
     const present = group.items.flatMap((item) => shown(item, on, vi) ?? []);
     const items = q
       ? present.filter(
-          (s) => s.keys.toLowerCase().includes(q) || s.what.toLowerCase().includes(q) || group.title.toLowerCase().includes(q),
+          (s) =>
+            s.keys.toLowerCase().includes(q) || s.what.toLowerCase().includes(q) || title.toLowerCase().includes(q),
         )
       : present;
-    if (items.length > 0) out.push({ ...group, items });
+    if (items.length > 0) out.push({ title, items, checked: group.checked, vi: group.vi });
   }
   // Stable: the Vi groups move up, everything keeps its order within its kind.
   return vi ? [...out.filter((g) => g.vi), ...out.filter((g) => !g.vi)] : out;

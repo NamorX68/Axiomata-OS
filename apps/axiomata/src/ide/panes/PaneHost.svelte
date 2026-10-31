@@ -39,11 +39,13 @@
     ROSTER_PANE,
     TEAM_PANE,
     GRAPH_PANE,
+    paneTitle,
     projectRoot,
     SEARCH_PANE,
     showsFile,
   } from "../paneKinds";
   import { toast } from "../../core/toast";
+  import { tStudio } from "../../i18n/studio";
   import type { OutputRef } from "../../core/outputLinks";
   import { relativeInside } from "../outputPath";
   import AgentPane from "./AgentPane.svelte";
@@ -101,7 +103,7 @@
     const project = $session.current;
     const rel = project ? relativeInside(ref.path, project.repo_root) : null;
     if (!project || !rel) {
-      toast(`“${ref.path}” is not inside this project.`, "warning");
+      toast(tStudio("notInProject", { path: ref.path }), "warning");
       return;
     }
     const root = projectRoot(project.id);
@@ -120,13 +122,13 @@
       <!-- The profile was deleted, or belongs to a project that is not open.
            The pane stays rather than closing itself: something may still be
            running in it, and closing would take that with it. -->
-      <p class="unknown">This agent profile is no longer in the open project.</p>
+      <p class="unknown">{tStudio("agentGone")}</p>
     {/if}
   {:else if tab.kind === TASK_PANE}
     {#if $session.current}
       <TaskPane
         tabId={tab.id}
-        label={tab.title}
+        label={paneTitle(tab)}
         cwd={$session.current.repo_root}
         onRestart={() => dock.restartTask(tab.id)}
         onLink={(ref) => openOutputLink(ref)}
@@ -143,7 +145,7 @@
         onOpenFile={(rel, line) => openFile(agent.id, rel, line)}
       />
     {:else}
-      <p class="unknown">This agent profile is no longer in the open project.</p>
+      <p class="unknown">{tStudio("agentGone")}</p>
     {/if}
   {:else if tab.kind === FILE_PANE}
     {#if fileConfig}
@@ -160,7 +162,7 @@
         onOutline={(info) => fileConfig && dock.reportOutline({ root: fileConfig.root, rel: fileConfig.rel }, info)}
       />
     {:else}
-      <p class="unknown">This file pane lost its file.</p>
+      <p class="unknown">{tStudio("fileLost")}</p>
     {/if}
   {:else if tab.kind === FILES_PANE}
     {#if $session.current}
@@ -172,25 +174,25 @@
         onConfig={(c) => onConfig({ expanded: c.expanded, showHidden: c.showHidden })}
       />
     {:else}
-      <p class="unknown">No project is open for this file tree.</p>
+      <p class="unknown">{tStudio("noProjectTree")}</p>
     {/if}
   {:else if tab.kind === GIT_PANE}
     {#if $session.current}
       <GitPane project={$session.current} tabId={tab.id} {visible} />
     {:else}
-      <p class="unknown">No project is open for git.</p>
+      <p class="unknown">{tStudio("noProjectGit")}</p>
     {/if}
   {:else if tab.kind === PLAN_PANE}
     {#if $session.current}
       <PlanPane project={$session.current} tabId={tab.id} {visible} />
     {:else}
-      <p class="unknown">No project is open to plan for.</p>
+      <p class="unknown">{tStudio("noProjectPlan")}</p>
     {/if}
   {:else if tab.kind === GRAPH_PANE}
     {#if $session.current}
       <GraphPane project={$session.current} tabId={tab.id} {visible} />
     {:else}
-      <p class="unknown">No project is open to show a graph for.</p>
+      <p class="unknown">{tStudio("noProjectGraph")}</p>
     {/if}
   {:else if tab.kind === ROSTER_PANE}
     <RosterPane />
@@ -198,18 +200,18 @@
     {#if $session.current}
       <TeamPane project={$session.current} tabId={tab.id} {visible} />
     {:else}
-      <p class="unknown">No project is open to show a team for.</p>
+      <p class="unknown">{tStudio("noProjectTeam")}</p>
     {/if}
   {:else if tab.kind === SEARCH_PANE}
     {#if $session.current}
       <SearchPane project={$session.current} tabId={tab.id} focusAt={Number(tab.config?.focus ?? 0)} />
     {:else}
-      <p class="unknown">No project is open to search.</p>
+      <p class="unknown">{tStudio("noProjectSearch")}</p>
     {/if}
   {:else if def}
     <def.component {ctx} />
   {:else}
-    <p class="unknown">No module of kind “{tab.kind}” in this build.</p>
+    <p class="unknown">{tStudio("noModule", { kind: tab.kind })}</p>
   {/if}
 </div>
 

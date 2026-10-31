@@ -3,6 +3,7 @@
  * the two groups, one row per path and group, and the letter that tells the change.
  */
 
+import { tEditor } from "../i18n/editor";
 import type { ChangeKind, GitEntry, RepoStatus, Side } from "./gitBackend";
 
 export interface GitRow {
@@ -65,15 +66,18 @@ export interface PushState {
  * follows nothing yet, and off when there is nothing to push or no branch to push.
  */
 export function pushState(status: RepoStatus): PushState {
-  if (status.head === null) return { enabled: false, label: "Push", title: "Nothing is committed yet" };
-  if (status.branch === null) return { enabled: false, label: "Push", title: "HEAD is detached; switch to a branch to push" };
+  const push = tEditor("push");
+  if (status.head === null) return { enabled: false, label: push, title: tEditor("pushNothingCommitted") };
+  if (status.branch === null) return { enabled: false, label: push, title: tEditor("pushDetached") };
+  const branch = status.branch;
   if (status.upstream === null) {
-    return { enabled: true, label: "Publish branch", title: `Push ${status.branch} to origin and follow it there` };
+    return { enabled: true, label: tEditor("publishBranch"), title: tEditor("publishBranchTitle", { branch }) };
   }
-  if (status.ahead === 0) return { enabled: false, label: "Push", title: `${status.branch} is up to date with ${status.upstream}` };
+  const upstream = status.upstream;
+  if (status.ahead === 0) return { enabled: false, label: push, title: tEditor("pushUpToDate", { branch, upstream }) };
   return {
     enabled: true,
-    label: `Push ↑${status.ahead}`,
-    title: `Push ${status.ahead} commit${status.ahead === 1 ? "" : "s"} to ${status.upstream} (never forced)`,
+    label: tEditor("pushAhead", { n: status.ahead }),
+    title: tEditor("pushTitle", { n: status.ahead, upstream }),
   };
 }

@@ -5,9 +5,10 @@
 -->
 <script lang="ts">
   import { createInstance, isPlacedSingleton } from "../core/lifecycle";
-  import { listModules } from "../core/registry";
+  import { listModules, moduleTitle } from "../core/registry";
   import { instances } from "../core/stores";
   import { toast } from "../core/toast";
+  import { tShell } from "../i18n/shell";
   import Window from "./Window.svelte";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -32,12 +33,12 @@
 
 {#if open}
   <Window
-    title="Add module"
+    title={tShell("addModule")}
     onClose={() => (open = false)}
     style="width: min(calc(520px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); max-height: calc(100vh - 2 * var(--ax-space-5));"
   >
     {#if modules.length === 0}
-      <p class="empty">No modules registered.</p>
+      <p class="empty">{tShell("noModules")}</p>
     {:else}
       <ul>
         {#each modules as m (m.type)}
@@ -50,10 +51,10 @@
             >
               <span class="icon" aria-hidden="true">{@html m.icon}</span>
               <span class="text">
-                <span class="title">{m.title}</span>
+                <span class="title">{moduleTitle(m)}</span>
                 <span class="meta">
-                  {m.background ? "background" : (m.sizeLabel ?? `${m.defaultSize.w}×${m.defaultSize.h}`)}
-                  {#if m.singleton}· single{placed.has(m.type) ? " · placed" : ""}{/if}
+                  {m.background ? tShell("background") : (m.sizeLabel ?? `${m.defaultSize.w}×${m.defaultSize.h}`)}
+                  {#if m.singleton}· {tShell("single")}{#if placed.has(m.type)} · {tShell("placed")}{/if}{/if}
                 </span>
               </span>
             </button>

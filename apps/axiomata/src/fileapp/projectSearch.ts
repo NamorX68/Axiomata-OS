@@ -9,7 +9,10 @@
  * * **The backend is injected**, so the rules are tested without Tauri.
  */
 
+import { messageOf } from "../core/errors";
 import type { FileMatches, SearchQuery, SearchSummary } from "./backend";
+import { formatNumber } from "../core/format";
+import { tEditor } from "../i18n/editor";
 
 /** The options beside the query field. Globs are typed comma-separated. */
 export interface SearchOptions {
@@ -72,12 +75,12 @@ export function toQuery(pattern: string, options: SearchOptions): SearchQuery {
   };
 }
 
-/** A failed search as a sentence: a bad pattern (or glob) says what is wrong with it. */
+/** A failed search as a sentence, in the language of the moment it failed: a bad pattern (or glob) says what. */
 function errorText(err: unknown): string {
   const e = err as { kind?: string; message?: string } | null;
-  if (e?.kind !== "BadPattern") return e?.message ?? String(err);
+  if (e?.kind !== "BadPattern") return messageOf(err);
   const detail = (e.message ?? "").replace(/^bad search pattern: /, "");
-  return detail.startsWith("include/exclude") ? `Invalid ${detail}` : `Invalid pattern: ${detail}`;
+  return tEditor(detail.startsWith("include/exclude") ? "invalidGlob" : "invalidPattern", { detail });
 }
 
 export class ProjectSearchModel {
@@ -126,14 +129,17 @@ export class ProjectSearchModel {
 
 /** What the status line says. */
 export function statusText(view: SearchView): string {
-  if (view.status === "error") return view.error ?? "The search failed.";
+  if (view.status === "error") return view.error ?? tEditor("searchFailed");
   if (view.status === "idle") return "";
   const n = view.matches;
   const files = view.files.length;
   const found =
     n === 0
-      ? "No results"
-      : `${n.toLocaleString()} ${n === 1 ? "result" : "results"} in ${files} ${files === 1 ? "file" : "files"}`;
-  if (view.status === "running") return n === 0 ? "Searching…" : `${found} — searching…`;
-  return view.truncated ? `${found} — stopped at 10,000 results; narrow the search` : found;
+      ? tEditor("noResults")
+      : tEditor("resultsInFiles", {
+          results: tEditor("resultCount", { n, count: formatNumber(n) }),
+          files: tEditor("fileCount", { n: files, count: formatNumber(files) }),
+        });
+  if (view.status === "running") return n === 0 ? tEditor("searchingDots") : tEditor("foundSearching", { found });
+  return view.truncated ? tEditor("foundStopped", { found, limit: formatNumber(10_000) }) : found;
 }

@@ -12,6 +12,8 @@
  * can reach, so every refresh is a real `mail-digest` run, never a timer.
  */
 
+import { messageOf } from "./errors";
+import { tModules } from "../i18n/modules";
 import type { RunSummary } from "./backend";
 import { cut } from "./markdown";
 import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke, type SkippedRun } from "./skillRun";
@@ -72,7 +74,7 @@ export function mailMix(digest: MailDigest): MailMixSegment[] {
     .sort((a, b) => b[1] - a[1])
     .map(([topic, count]) => ({ label: topic, count, color: topicColor(topic) }));
   return importantCount > 0
-    ? [{ label: "Important", count: importantCount, color: "var(--ax-accent)" }, ...topicSegments]
+    ? [{ label: tModules("important"), count: importantCount, color: "var(--ax-accent)" }, ...topicSegments]
     : topicSegments;
 }
 
@@ -127,10 +129,10 @@ export function parseMailDigest(stdout: string): MailDigest {
   try {
     raw = JSON.parse(object);
   } catch (err) {
-    throw new Error(`mail-digest output was not valid JSON: ${(err as Error).message}`);
+    throw new Error(tModules("outputNotJson", { skill: "mail-digest", reason: (err as Error).message }));
   }
   if (!raw || typeof raw !== "object") {
-    throw new Error("mail-digest output was not a JSON object");
+    throw new Error(tModules("outputNotObject", { skill: "mail-digest" }));
   }
   const obj = raw as Record<string, unknown>;
   const emails = Array.isArray(obj.emails) ? obj.emails.filter(isMailItem) : [];
@@ -185,7 +187,7 @@ export async function loadLatestMailDigest(invoke: Invoke, skillName: string = M
   try {
     return { run, digest: parseMailDigest(stdout), error: null, skipped };
   } catch (err) {
-    return { run, digest: EMPTY_MAIL_DIGEST, error: err instanceof Error ? err.message : String(err), skipped };
+    return { run, digest: EMPTY_MAIL_DIGEST, error: messageOf(err), skipped };
   }
 }
 

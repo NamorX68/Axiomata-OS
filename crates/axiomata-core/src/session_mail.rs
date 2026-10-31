@@ -14,6 +14,7 @@ use serde::Serialize;
 
 use crate::AxiomataCore;
 use crate::AxiomataError;
+use crate::error::coded;
 use crate::ide::agent_store;
 use crate::paths;
 use crate::roster::refusal;
@@ -152,14 +153,19 @@ pub fn send_as_owner(
     message: &str,
 ) -> Result<OwnerSend, AxiomataError> {
     if message.trim().is_empty() {
-        return Err(refusal("message", "the message is empty".to_owned()));
+        return Err(coded("message.empty", &[], "the message is empty"));
     }
     let roots = paths::ide_locations().channels;
     // Looking for a running server is file work: done before the database is locked, not under it.
     let live = presence::live_sessions(&roots, &[agent_id]);
     let mut db = core.db_lock();
-    let agent: Agent = agent_store::get_agent(&db, agent_id)?
-        .ok_or_else(|| refusal("session", format!("no session {agent_id}")))?;
+    let agent: Agent = agent_store::get_agent(&db, agent_id)?.ok_or_else(|| {
+        coded(
+            "session.missing",
+            &[("id", &agent_id.to_string())],
+            format!("no session {agent_id}"),
+        )
+    })?;
     let mut new = NewMessage::text(Recipient::Session(agent.id), message.trim());
     new.card_id = agent.card_id;
     match mailbox::send(

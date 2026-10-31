@@ -19,6 +19,7 @@
   import { TIERS, listEngines, type EngineEntry, type Tier } from "../core/roster";
   import { toast } from "../core/toast";
   import { uiScale } from "../core/uiScale";
+  import { tAgents as t } from "../i18n/agents";
   import Notice from "../ui/Notice.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
@@ -60,6 +61,8 @@
   const CATALOG_UPDATED = "models:catalog-updated";
   /** Below this width (unscaled px) a model's tier goes under its name; times the UI scale, like every size. */
   const NARROW_PX = 640;
+  /** The skill that researches the tiers: a name, the same in every language. */
+  const TIERING_SKILL = "model-tiering";
 
   let overview = $state<ModelsOverview | null>(null);
   let engines = $state<EngineEntry[]>([]);
@@ -96,7 +99,7 @@
       running = researching;
       ({ lightBelow, heavyAbove } = limitsAfterReload({ lightBelow, heavyAbove }, models.tier_limits, editingLimits));
     } catch (err) {
-      if (latest.current(ticket)) toast(`Could not load the models: ${messageOf(err)}`, "warning");
+      if (latest.current(ticket)) toast(t("modelsUnreadable", { error: messageOf(err) }), "warning");
     } finally {
       if (latest.current(ticket)) loading = false;
     }
@@ -166,7 +169,7 @@
         ? `${engine.harness === "claude_code" ? "Claude" : "Glut"} · ${engine.model_name}`
         : engine.label;
 
-  const tierLabel = (tier: Tier | null) => TIERS.find((t) => t.id === tier)?.label ?? "—";
+  const tierLabel = (tier: Tier | null) => TIERS.find((level) => level.id === tier)?.label ?? "—";
 
   onMount(() => {
     let destroyed = false;
@@ -188,44 +191,42 @@
   <div class="column">
     {#if running}
       <div class="slot">
-        <Notice tone="live" title="Researching model tiers…">
+        <Notice tone="live" title={t("researching")}>
           {#snippet details()}
-            <p>
-              The <code>model-tiering</code> skill looks the models up on rating sites and proposes a tier for each. Its
-              proposals appear here as “not reviewed”; your own tier always wins.
-            </p>
+            <p>{t("researchingBefore")} <code>{TIERING_SKILL}</code> {t("researchingAfter")}</p>
           {/snippet}
         </Notice>
       </div>
     {/if}
 
     {#if loading}
-      <p class="hint">Loading…</p>
+      <p class="hint">{t("loading")}</p>
     {:else if overview}
       <section class="block">
-        <SectionHead label="Default engine per tier" />
-        <p class="hint">
-          What a session of a tier starts on. Without a choice the cheapest engine of the tier runs; when one cannot
-          run, the next of the same tier takes over.
-        </p>
+        <SectionHead label={t("defaultEnginePerTier")} />
+        <p class="hint">{t("defaultEngineHint")}</p>
         <div class="defaults">
-          {#each TIERS as t (t.id)}
-            {@const chosen = overview.default_engines[t.id] ?? ""}
-            {@const options = engineOptionsFor(engines, t.id)}
+          {#each TIERS as level (level.id)}
+            {@const chosen = overview.default_engines[level.id] ?? ""}
+            {@const options = engineOptionsFor(engines, level.id)}
             <label class="default">
-              <span class="tier-name">{t.label}</span>
+              <span class="tier-name">{level.label}</span>
               <select
                 value={chosen}
-                disabled={busy.has(`default:${t.id}`)}
+                disabled={busy.has(`default:${level.id}`)}
                 onchange={(e) => {
                   const picked = e.currentTarget.value;
                   e.currentTarget.value = chosen;
-                  void setDefault(t.id, picked);
+                  void setDefault(level.id, picked);
                 }}
               >
-                <option value="">Cheapest{options[0] ? `: ${engineName(options[0])}` : " of the tier"}</option>
+                <option value="">
+                  {options[0] ? t("cheapestNamed", { engine: engineName(options[0]) }) : t("cheapestOfTier")}
+                </option>
                 {#if chosen && !options.some((o) => o.id === chosen)}
-                  <option value={chosen}>{engineName(engines.find((e) => e.id === chosen)) || chosen} — not of this tier</option>
+                  <option value={chosen}>
+                    {t("notOfThisTier", { engine: engineName(engines.find((e) => e.id === chosen)) || chosen })}
+                  </option>
                 {/if}
                 {#each options as o (o.id)}
                   <option value={o.id}>{engineName(o)}</option>
@@ -237,39 +238,36 @@
       </section>
 
       <section class="block">
-        <SectionHead label="Price limits" />
-        <p class="hint">The tier a model's output price proposes until research or you say otherwise (USD per million output tokens).</p>
+        <SectionHead label={t("priceLimits")} />
+        <p class="hint">{t("priceLimitsHint")}</p>
         <div class="limits">
           <label class="limit">
-            <span>Light below</span>
+            <span>{t("lightBelow")}</span>
             <input type="number" min="0" step="0.1" bind:value={lightBelow} oninput={() => (editingLimits = true)} />
           </label>
           <label class="limit">
-            <span>Heavy above</span>
+            <span>{t("heavyAbove")}</span>
             <input type="number" min="0" step="0.5" bind:value={heavyAbove} oninput={() => (editingLimits = true)} />
           </label>
           <button
             type="button"
             class="ax-btn"
             disabled={!limitsChanged || limitsError !== null || busy.has("limits")}
-            onclick={() => void saveLimits()}>Save limits</button
+            onclick={() => void saveLimits()}>{t("saveLimits")}</button
           >
         </div>
         {#if limitsChanged && limitsError}<p class="problem">{limitsError}</p>{/if}
       </section>
 
       <section class="block">
-        <SectionHead label="Models">
+        <SectionHead label={t("models")}>
           {#snippet actions()}
             <button type="button" class="ax-btn" disabled={running} onclick={() => void research(null)}>
-              Propose all again
+              {t("proposeAllAgain")}
             </button>
           {/snippet}
         </SectionHead>
-        <p class="hint">
-          Each model that is on is an engine of its harness. Its tier comes from you, else from research, else from its
-          price; a model without any is no agent yet.
-        </p>
+        <p class="hint">{t("modelsHint")}</p>
       </section>
 
       {#each groups as group (group.provider)}
@@ -277,12 +275,16 @@
         {@const shown = filterModels(group.models, query)}
         {@const on = group.models.filter((m) => m.enabled).length}
         <section class="block">
-          <SectionHead label={providerHeading(group.provider)} count={`${on} of ${group.models.length} on`} level={4} />
+          <SectionHead
+            label={providerHeading(group.provider)}
+            count={t("modelsOn", { on, total: group.models.length })}
+            level={4}
+          />
           {#if group.models.length > SMALL_LIST_MAX}
             <input
               class="filter"
               type="search"
-              placeholder="Filter {group.models.length} models…"
+              placeholder={t("filterModels", { n: group.models.length })}
               value={query}
               oninput={(e) => (queries = { ...queries, [group.provider]: e.currentTarget.value })}
             />
@@ -290,13 +292,13 @@
           <ul class="list">
             {#each shown as m (m.key)}
               <li class="model" class:off={!m.enabled}>
-                <label class="switch" title={m.enabled ? "Switch off" : "Switch on"}>
+                <label class="switch" title={m.enabled ? t("switchOff") : t("switchOn")}>
                   <input
                     type="checkbox"
                     role="switch"
                     checked={m.enabled}
                     disabled={busy.has(m.key)}
-                    aria-label="{m.short_name} on"
+                    aria-label={t("modelOn", { name: m.short_name })}
                     onchange={(e) => {
                       e.currentTarget.checked = m.enabled;
                       void toggle(m);
@@ -313,10 +315,10 @@
                   </span>
                 </div>
                 <div class="rating">
-                  <div class="segments" role="radiogroup" aria-label="Tier of {m.short_name}">
-                    {#each TIERS as t (t.id)}
-                      {@const mine = m.owner_tier === t.id}
-                      {@const applies = m.tier === t.id}
+                  <div class="segments" role="radiogroup" aria-label={t("tierOf", { name: m.short_name })}>
+                    {#each TIERS as level (level.id)}
+                      {@const mine = m.owner_tier === level.id}
+                      {@const applies = m.tier === level.id}
                       <button
                         type="button"
                         role="radio"
@@ -324,13 +326,13 @@
                         class:mine
                         class:applies={applies && !mine}
                         disabled={busy.has(m.key)}
-                        title={mine ? "Your tier — click to drop it" : `Set ${t.label.toLowerCase()} as your tier`}
-                        onclick={() => void rate(m, mine ? null : t.id)}>{t.label}</button
+                        title={mine ? t("yourTierDrop") : t("setYourTier", { tier: level.label })}
+                        onclick={() => void rate(m, mine ? null : level.id)}>{level.label}</button
                       >
                     {/each}
                   </div>
                   <span class="origin" class:unrated={m.tier_source === "unrated"}>
-                    {#if proposalWaits(m)}<StatusMark tone="warn" label="Waits for your review" />{/if}
+                    {#if proposalWaits(m)}<StatusMark tone="warn" label={t("waitsForReview")} />{/if}
                     {tierOrigin(m)}{#if m.tier && m.tier_source !== "owner"}: {tierLabel(m.tier)}{/if}
                   </span>
                 </div>
@@ -338,7 +340,7 @@
                   <IconButton
                     icon="refresh-cw"
                     size="sm"
-                    label="Propose again for {m.short_name}"
+                    label={t("proposeAgainFor", { name: m.short_name })}
                     disabled={running || !m.enabled}
                     onclick={() => void research([m.key])}
                   />
@@ -355,25 +357,22 @@
                     {/if}
                     {#if proposalWaits(m)}
                       <button type="button" class="ax-btn small" disabled={busy.has(m.key)} onclick={() => void accept(m)}>
-                        Accept {tierLabel(m.proposal.tier)}
+                        {t("acceptTier", { tier: tierLabel(m.proposal.tier) })}
                       </button>
                     {/if}
                   </div>
                 {/if}
               </li>
             {:else}
-              <li class="empty">No model matches “{query}”.</li>
+              <li class="empty">{t("noModelMatches", { query })}</li>
             {/each}
           </ul>
         </section>
       {/each}
 
       <section class="block own">
-        <SectionHead label="Own engines" />
-        <p class="hint">
-          An engine of your own: a command or an environment the automatic ones do not have. Automatic engines are not
-          edited here — switch their model on or off above.
-        </p>
+        <SectionHead label={t("ownEngines")} />
+        <p class="hint">{t("ownEnginesHint")}</p>
         <div class="own-editor">
           <EnginesSection onChange={() => void reload()} />
         </div>

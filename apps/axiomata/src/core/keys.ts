@@ -13,6 +13,7 @@
 
 import { derived, get, writable, type Readable, type Writable } from "svelte/store";
 
+import { tSettings } from "../i18n/settings";
 /** The two key conventions the app knows. Windows and Linux share one. */
 export type Platform = "mac" | "other";
 
@@ -20,10 +21,10 @@ export type Platform = "mac" | "other";
 export type KeyboardSetting = "auto" | Platform;
 
 /** What the setting offers, in the order of the select. */
-export const KEYBOARD_SETTINGS: readonly { value: KeyboardSetting; label: string }[] = [
-  { value: "auto", label: "Auto" },
-  { value: "mac", label: "Mac" },
-  { value: "other", label: "Windows & Linux" },
+export const KEYBOARD_SETTINGS: readonly { value: KeyboardSetting; label: () => string }[] = [
+  { value: "auto", label: () => tSettings("keyboardAuto") },
+  { value: "mac", label: () => tSettings("keyboardMac") },
+  { value: "other", label: () => tSettings("keyboardOther") },
 ];
 
 /** The part of a `KeyboardEvent` the layer reads; `getModifierState` is optional so tests can hand a plain object. */
@@ -46,7 +47,7 @@ export interface Chord {
 
 /** The words for a platform in the settings: the one place they are spelled. */
 export function platformLabel(on: Platform): string {
-  return KEYBOARD_SETTINGS.find((option) => option.value === on)?.label ?? on;
+  return KEYBOARD_SETTINGS.find((option) => option.value === on)?.label() ?? on;
 }
 
 /** The "Keyboard" setting, persisted in `dashboard.json` by `persist.ts`. */

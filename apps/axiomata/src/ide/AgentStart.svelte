@@ -11,8 +11,10 @@
 
   import type { IdeAgent } from "../core/backend";
   import { messageOf } from "../core/errors";
+  import { formatUsd } from "../core/format";
   import { TIERS, type Role, type Tier } from "../core/roster";
   import { toast } from "../core/toast";
+  import { tAgents as t } from "../i18n/agents";
   import HexAvatar from "../ui/HexAvatar.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
@@ -27,7 +29,7 @@
     type Favorite,
     type TierEngines,
   } from "./agentStart";
-  import { roleBadge, roleTitle, roleTone } from "./rosterLook";
+  import { roleBadge, roleTitle, roleTone, tierHint } from "./rosterLook";
   import { rosterVersion } from "./rosterStore";
 
   interface Props {
@@ -64,7 +66,7 @@
       const answer = await listTierEngines();
       if (mine === enginesRead) byTier = answer;
     } catch (err) {
-      if (mine === enginesRead) toast(`Could not load the engines: ${messageOf(err)}`, "warning");
+      if (mine === enginesRead) toast(t("enginesUnreadable", { error: messageOf(err) }), "warning");
     }
   }
 
@@ -121,9 +123,9 @@
   });
 </script>
 
-<section class="start" aria-label="Start an agent">
-  <SectionHead label="Start an agent" />
-  <div class="roles" role="radiogroup" aria-label="Role">
+<section class="start" aria-label={t("startAgent")}>
+  <SectionHead label={t("startAgent")} />
+  <div class="roles" role="radiogroup" aria-label={t("role")}>
     {#each offered as r (r.name)}
       <button
         type="button"
@@ -142,20 +144,20 @@
 
   {#if role}
     {#if role.description}<p class="hint">{role.description}</p>{/if}
-    <div class="segments" role="radiogroup" aria-label="Tier">
-      {#each TIERS as t (t.id)}
+    <div class="segments" role="radiogroup" aria-label={t("tier")}>
+      {#each TIERS as level (level.id)}
         <button
           type="button"
           role="radio"
-          aria-checked={tier === t.id}
-          class:picked={tier === t.id}
-          title={t.hint}
-          onclick={() => pickTier(t.id)}>{t.label}</button
+          aria-checked={tier === level.id}
+          class:picked={tier === level.id}
+          title={tierHint(level.id)}
+          onclick={() => pickTier(level.id)}>{level.label}</button
         >
       {/each}
     </div>
 
-    <ul class="engines" role="radiogroup" aria-label="Engine">
+    <ul class="engines" role="radiogroup" aria-label={t("engine")}>
       <li>
         <button
           type="button"
@@ -165,9 +167,9 @@
           disabled={engines.length === 0}
           onclick={() => (engineId = null)}
         >
-          <span class="engine-name">Default of the tier</span>
+          <span class="engine-name">{t("tierDefaultEngine")}</span>
           <span class="engine-meta">
-            {engines[0] ? engineChoiceLabel(engines[0]) : "no engine of this tier can run"}
+            {engines[0] ? engineChoiceLabel(engines[0]) : t("noEngineOfTier")}
           </span>
         </button>
       </li>
@@ -182,9 +184,13 @@
           >
             <span class="engine-name">{engineChoiceLabel(e)}</span>
             <span class="engine-meta">
-              {#if at === 0}<span class="standard">standard</span>{/if}
-              {e.output_per_m === null ? "" : e.output_per_m === 0 ? "local" : `$${e.output_per_m} / M out`}
-              {e.billing === "subscription" ? "· subscription" : ""}
+              {#if at === 0}<span class="standard">{t("standard")}</span>{/if}
+              {e.output_per_m === null
+                ? ""
+                : e.output_per_m === 0
+                  ? t("local")
+                  : t("pricePerMOut", { price: formatUsd(e.output_per_m, 2, 0) })}
+              {e.billing === "subscription" ? `· ${t("subscription")}` : ""}
             </span>
           </button>
         </li>
@@ -198,18 +204,18 @@
         disabled={starting || engines.length === 0}
         onclick={() => void start()}
       >
-        {starting ? "Starting…" : "Start"}
+        {starting ? t("starting") : t("start")}
       </button>
       <IconButton
         icon="star"
         size="sm"
         pressed={favorite}
-        label={favorite ? "Remove this choice from the favorites" : "Keep this choice as a favorite"}
+        label={favorite ? t("removeChoiceFavorite") : t("keepChoiceFavorite")}
         onclick={() => void star()}
       />
     </div>
   {:else}
-    <p class="hint">Pick a role, then its tier and model below.</p>
+    <p class="hint">{t("pickRoleHint")}</p>
   {/if}
 </section>
 

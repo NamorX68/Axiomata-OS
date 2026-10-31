@@ -19,6 +19,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import { insideTauri, invokeBackend } from "../core/backend";
 import { toast } from "../core/toast";
+import { tEditor } from "../i18n/editor";
 import type { EditorDocument } from "../editor/document";
 import { documentUri, LspClient, uriPath, type Location } from "../editor/lsp/client";
 import { FOREIGN_ROOT } from "./session";
@@ -87,7 +88,7 @@ async function connect(root: string, language: string): Promise<LspConnection | 
   if (started.kind === "missing") {
     if (!hinted.has(started.server)) {
       hinted.add(started.server);
-      toast(`No ${started.server} language server found — install it with: ${started.install}`, "info");
+      toast(tEditor("serverMissing", { server: started.server, install: started.install }), "info");
     }
     return null;
   }

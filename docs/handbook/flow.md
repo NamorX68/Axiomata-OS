@@ -22,42 +22,42 @@ Karte schon Heavy oder läuft keine Engine der nächsten Stufe, gibt das Studio 
 
 ## Wo die Knöpfe sind
 
-- **Flow-Bereiche:** „Planning“ (der Plan), „Agents“ (Live-Kacheln des Teams), „Flow view“ (der Graph); „Reset
-  layout“ legt sie zurück.
-- **Plan anlegen:** „New plan …“ → Name und Ziel → „Anlegen“. Dann „Role of the planner“, „Danach grillen“ (das Ziel
+- **Flow-Bereiche:** „Planung“ (der Plan), „Agenten“ (Live-Kacheln des Teams), „Flow-Ansicht“ (der Graph); „Layout
+  zurücksetzen“ legt sie zurück.
+- **Plan anlegen:** „Neuer Plan…“ → Name und Ziel → „Anlegen“. Dann „Rolle des Planers“, „Danach grillen“ (das Ziel
   erst hinterfragen lassen) und „Planer starten“.
-- **Vorschläge:** „Proposals (…)“ mit „Accept“, „Edit“, „Discard“; „Add card“ für eigene.
-- **Freigeben:** „Release plan“ mit „Automatisch abarbeiten“ und „Auto mode“ (Arbeiter dürfen ohne Rückfrage
+- **Vorschläge:** „Vorschläge (…)“ mit „Annehmen“, „Bearbeiten“, „Verwerfen“; „Karte hinzufügen“ für eigene.
+- **Freigeben:** „Plan freigeben“ mit „Automatisch abarbeiten“ und „Automodus“ (Arbeiter dürfen ohne Rückfrage
   Befehle ausführen und ändern — nur für Karten, die du gelesen hast).
-- **Grenzen:** „Cost limit (USD)“ über dem Ziel; die Zeile „Verbrauch: …“; bei Pause „Continue“.
-- **Ende:** „Take over plan“ (alles in den Hauptbranch, nichts wird gepusht, ein Konflikt wird zurückgerollt);
-  „Close“, „Delete“.
-- **Live-Kacheln:** ✉ für ungelesene Post, „Terminal“, bei Glut „Watch“ (folgt der Sitzung nur lesend).
-- **Fragen der Agenten:** das Abzeichen „… is waiting for you“ im Dock, im Orbit und auf Karten; Antwort mit
-  „Allow“ / „Deny“ / „In terminal“, auch als Streifen oben im Agenten-Pane.
+- **Grenzen:** „Kostengrenze (USD)“ über dem Ziel; die Zeile „Ausgaben: …“; bei Pause „Weiter“.
+- **Ende:** „Plan übernehmen“ (alles in den Hauptbranch, nichts wird gepusht, ein Konflikt wird zurückgerollt);
+  „Schließen“, „Löschen“.
+- **Live-Kacheln:** ✉ für ungelesene Post, „Terminal“, bei Glut „Zusehen“ (folgt der Sitzung nur lesend).
+- **Fragen der Agenten:** das Abzeichen „… wartet auf dich“ im Dock, im Orbit und auf Karten; Antwort mit
+  „Erlauben“ / „Ablehnen“ / „Im Terminal“, auch als Streifen oben im Agenten-Pane.
 
 ## Häufige Handgriffe
 
-1. **Plan aus einem Ziel:** „New plan …“ → Ziel → „Anlegen“ → „Planer starten“ → Vorschläge annehmen → „Release
-   plan“ mit „Automatisch abarbeiten“.
-2. **Karte als Plan:** im Kanban auf der Karte „Start …“ → Projekt → „Start as plan“. Die Karte wird das Ziel; der
+1. **Plan aus einem Ziel:** „Neuer Plan…“ → Ziel → „Anlegen“ → „Planer starten“ → Vorschläge annehmen → „Plan freigeben“
+   mit „Automatisch abarbeiten“.
+2. **Karte als Plan:** im Kanban auf der Karte „Starten…“ → Projekt → „Als Plan starten“. Die Karte wird das Ziel; der
    Flow öffnet sich mit vorbelegtem „Danach grillen“, der Planer startet erst auf deinen Klick.
-3. **Fertigen Plan übernehmen:** steht alles auf der Linie des Plans → „Take over plan“.
+3. **Fertigen Plan übernehmen:** steht alles auf der Linie des Plans → „Plan übernehmen“.
 
 ## Fallen
 
-- Ein Plan pausiert an seiner Grenze (Vorgabe 15 $ und 6 Mio. Tokens, ein Karten-Plan 5 $); „Continue“ gibt neuen
+- Ein Plan pausiert an seiner Grenze (Vorgabe 15 $ und 6 Mio. Tokens, ein Karten-Plan 5 $); „Weiter“ gibt neuen
   Spielraum. Die Tagesgrenze aller Studio-Sitzungen (20 $) stoppt bis morgen alles Neue ([Kosten](kosten.md)).
 - Eine Sitzung, die ihre eigene Grenze erreicht, stoppt nach dem laufenden Schritt; die Karte bleibt bei ihr.
-- Gibt das Studio eine Karte auf („the Studio gave up“), entscheidest du: „Erneut integrieren“ oder „Neu machen“.
-- „Auto mode“ ist kein Sandkasten: Push, die CLI, Datenbank und Config-Dateien bleiben in ihren einfachen Formen
+- Gibt das Studio eine Karte auf („das Studio hat aufgegeben“), entscheidest du: „Erneut integrieren“ oder „Neu machen“.
+- „Automodus“ ist kein Sandkasten: Push, die CLI, Datenbank und Config-Dateien bleiben in ihren einfachen Formen
   gesperrt, mehr nicht.
 - Selbstlaufende Pläne starten zusammen höchstens vier Kartensitzungen gleichzeitig; der Rest wartet.
 - Wartet ein Agent auf dich, steht er still, bis du antwortest.
 - Hat eine Stufe nur **eine** laufbare Engine, findet der Reviewer auf dieser Stufe keine andere und weicht nach oben
-  aus; gibt es auch dort keine, bleibt die Karte ohne Review. Abhilfe: unter „Models“ ein zweites Modell der Stufe
+  aus; gibt es auch dort keine, bleibt die Karte ohne Review. Abhilfe: unter „Modelle“ ein zweites Modell der Stufe
   einschalten.
-- Eine Karte ohne passende Engine ihrer Stufe startet nicht („no engine of the tier … can run“); dann ein Modell dieser
+- Eine Karte ohne passende Engine ihrer Stufe startet nicht („Keine Engine der Stufe … kann …“); dann ein Modell dieser
   Stufe einschalten oder eine Standard-Engine setzen.
 
 ## Siehe auch

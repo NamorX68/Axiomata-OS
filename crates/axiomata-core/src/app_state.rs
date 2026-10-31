@@ -394,8 +394,9 @@ fn provider(settings: &ProviderSettings) -> Value {
 /// The display settings of `dashboard.json` the chat may know — the scalar ones the Settings dialog and the CH5
 /// display actions set. The file is the frontend's and holds no secret, but it is read by allow-list all the same, so a
 /// field added there later is not shown before somebody named it here.
-const DISPLAY_FIELDS: [&str; 9] = [
+const DISPLAY_FIELDS: [&str; 10] = [
     "theme",
+    "language",
     "uiSize",
     "uiFont",
     "motion",

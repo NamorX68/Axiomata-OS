@@ -20,8 +20,9 @@
     type EngineEntry,
   } from "../core/roster";
   import { toast } from "../core/toast";
+  import { tAgents as t } from "../i18n/agents";
   import { HARNESSES } from "./agents";
-  import { engineIdFor, harnessBadge } from "./rosterLook";
+  import { billingText, engineIdFor, harnessBadge, tierHint } from "./rosterLook";
   import { engineLine, refreshEngines } from "./rosterStore";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -50,7 +51,7 @@
       // The Agents panel picks from the same catalog.
       void refreshEngines();
     } catch (err) {
-      toast(`Could not load the engines: ${messageOf(err)}`, "warning");
+      toast(t("enginesUnreadable", { error: messageOf(err) }), "warning");
     } finally {
       loading = false;
     }
@@ -69,7 +70,7 @@
     problem = null;
   }
 
-  const agentCount = (n: number) => `${n} agent${n === 1 ? "" : "s"}`;
+  const agentCount = (n: number) => t("agentCount", { n });
 
   /** The id a new engine gets: the one typed under "Advanced", else derived from the label, clear of taken ones. */
   const derivedId = $derived(
@@ -89,7 +90,7 @@
       return;
     }
     if (isNew && takenIds.includes(checked.value.id)) {
-      problem = { field: "id", message: `There is already an engine “${checked.value.id}”.` };
+      problem = { field: "id", message: t("engineExists", { id: checked.value.id }) };
       return;
     }
     saving = true;
@@ -106,7 +107,7 @@
   }
 
   async function remove(entry: EngineEntry) {
-    if (!window.confirm(`Remove the engine “${entry.label}”?`)) return;
+    if (!window.confirm(t("removeEngineAsk", { label: entry.label }))) return;
     try {
       await deleteEngine(entry.id);
       if (form?.id === entry.id) form = null;
@@ -127,13 +128,13 @@
 <section class="split" class:has-form={form !== null}>
   <div class="list">
     <div class="list-head">
-      <h3>Engines</h3>
-      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add engine…</button>
+      <h3>{t("engines")}</h3>
+      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> {t("addEngine")}</button>
     </div>
     {#if loading}
-      <p class="hint">Loading…</p>
+      <p class="hint">{t("loading")}</p>
     {:else if engines.length === 0}
-      <p class="hint">No own engines. The models that are on already make one engine each.</p>
+      <p class="hint">{t("noOwnEngines")}</p>
     {:else}
       <ul class="cards">
         {#each engines as e (e.id)}
@@ -147,12 +148,18 @@
                 </span>
               </span>
               <span class="since">
-                <code>{e.id}</code> · {e.tier ? e.tier : e.rated_tier ? `${e.rated_tier} (its model's)` : "unrated"} ·
-                {e.billing === "subscription" ? "subscription" : "metered"} · {agentCount(e.sessions)}
+                <code>{e.id}</code> ·
+                {e.tier ? e.tier : e.rated_tier ? t("itsModelsTier", { tier: e.rated_tier }) : t("unrated")} ·
+                {e.billing === "subscription" ? t("subscription") : t("metered")} · {agentCount(e.sessions)}
               </span>
             </button>
             <div class="row-actions">
-              <IconButton icon="trash-2" label="Remove {e.label}" size="sm" onclick={() => remove(e)} />
+              <IconButton
+                icon="trash-2"
+                label={t("removeNamed", { name: e.label })}
+                size="sm"
+                onclick={() => remove(e)}
+              />
             </div>
           </li>
         {/each}
@@ -162,54 +169,54 @@
 
   <div class="detail">
     {#if form}
-      <button type="button" class="back" onclick={() => (form = null)}>← All engines</button>
-      <h3>{isNew ? "New engine" : form.label || "Engine"}</h3>
+      <button type="button" class="back" onclick={() => (form = null)}>{t("allEngines")}</button>
+      <h3>{isNew ? t("newEngine") : form.label || t("engine")}</h3>
       <label class="field">
-        <span>Label</span>
-        <input type="text" bind:value={form.label} placeholder="e.g. Claude Code · Opus" />
+        <span>{t("label")}</span>
+        <input type="text" bind:value={form.label} placeholder={t("labelPlaceholder")} />
         {#if problem?.field === "label"}<em class="problem">{problem.message}</em>{/if}
       </label>
       <div class="pair">
         <label class="field">
-          <span>Harness</span>
+          <span>{t("harness")}</span>
           <select bind:value={form.harness}>
             {#each HARNESSES as h (h.id)}
-              <option value={h.id}>{h.label} — {h.hint}</option>
+              <option value={h.id}>{h.label} — {h.hint()}</option>
             {/each}
           </select>
         </label>
         <label class="field">
-          <span>Billing</span>
+          <span>{t("billing")}</span>
           <select bind:value={form.billing}>
             {#each BILLINGS as b (b.id)}
-              <option value={b.id}>{b.label} — {b.hint}</option>
+              <option value={b.id}>{billingText(b.id).label} — {billingText(b.id).hint}</option>
             {/each}
           </select>
         </label>
       </div>
       <label class="field">
-        <span>Tier</span>
+        <span>{t("tier")}</span>
         <select value={form.tier ?? ""} onchange={(e) => form && (form.tier = (e.currentTarget.value || null) as Engine["tier"])}>
-          <option value="">The tier of its model</option>
-          {#each TIERS as t (t.id)}
-            <option value={t.id}>{t.label} — {t.hint}</option>
+          <option value="">{t("tierOfModel")}</option>
+          {#each TIERS as level (level.id)}
+            <option value={level.id}>{level.label} — {tierHint(level.id)}</option>
           {/each}
         </select>
       </label>
       <div class="field">
-        <span>Model</span>
+        <span>{t("model")}</span>
         <ModelPicker
-          label="Model"
+          label={t("model")}
           value={form.model ?? ""}
           options={engineOptions($modelCatalog, form.harness)}
           onchange={(value) => form && (form.model = value)}
-          placeholder="empty = the harness picks; Glut: openrouter/… or ollama/… picks the provider"
+          placeholder={t("modelPlaceholder")}
         />
       </div>
       <details class="advanced" open={advancedProblem}>
-        <summary>Advanced</summary>
+        <summary>{t("advanced")}</summary>
         <label class="field">
-          <span>ID {isNew ? "" : "(fixed)"}</span>
+          <span>{isNew ? t("id") : t("idFixed")}</span>
           <input
             type="text"
             spellcheck="false"
@@ -220,26 +227,25 @@
           {#if problem?.field === "id"}<em class="problem">{problem.message}</em>{/if}
         </label>
         <label class="field">
-          <span>Command (empty = the harness default)</span>
+          <span>{t("command")}</span>
           <input type="text" spellcheck="false" bind:value={form.command} />
         </label>
         <label class="field">
-          <span>Environment (<code>KEY=value</code> per line)</span>
+          <span>{t("environment")} (<code>{"KEY=value"}</code> {t("perLine")})</span>
           <textarea rows="3" spellcheck="false" bind:value={form.env}></textarea>
           {#if problem?.field === "env"}<em class="problem">{problem.message}</em>{/if}
         </label>
       </details>
-      {#if isNew}<p class="idline">ID: <code>{derivedId || "—"}</code></p>{/if}
+      {#if isNew}<p class="idline">{t("id")}: <code>{derivedId || "—"}</code></p>{/if}
       {#if problem && !problem.field}<p class="problem">{problem.message}</p>{/if}
       <div class="actions">
-        <button type="button" class="ax-btn primary" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save engine"}</button>
-        <button type="button" class="ax-btn" onclick={() => (form = null)}>Cancel</button>
+        <button type="button" class="ax-btn primary" disabled={saving} onclick={save}>
+          {saving ? t("saving") : t("saveEngine")}
+        </button>
+        <button type="button" class="ax-btn" onclick={() => (form = null)}>{t("cancel")}</button>
       </div>
     {:else}
-      <p class="hint">
-        An own engine is harness + model + environment of your choosing — the part that costs money and can be
-        unreachable — with a tier of its own if you give it one. Pick one on the left to change it, or add a new one.
-      </p>
+      <p class="hint">{t("enginesHint")}</p>
     {/if}
   </div>
 </section>

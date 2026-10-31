@@ -36,6 +36,7 @@
   import { handToFileApp } from "./handoff";
   import { panelTarget } from "./panelSync";
   import UnsavedQuestion from "./UnsavedQuestion.svelte";
+  import { tEditor } from "../i18n/editor";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per panel and never swapped.
@@ -44,7 +45,8 @@
 
   let editor = $state<FileEditor | null>(null);
   let current = $state<OpenFileState | null>(null);
-  let failure = $state<string | null>(null);
+  /** A file that would not open — kept as its parts, so the sentence follows the language. */
+  let failure = $state<{ rel: string; message: string } | null>(null);
   /** The close question being asked; answering resolves the guard. */
   let asking = $state<((close: boolean) => void) | null>(null);
 
@@ -74,7 +76,7 @@
     }
     if (!target.rel) return;
     const result = await e.open(target, null, opening.intent);
-    if (!result.ok) failure = `Could not open ${target.rel}: ${result.message}`;
+    if (!result.ok) failure = { rel: target.rel, message: result.message };
   }
 
   /** The editor moved to another file (a filed note, a followed link): the config follows. */
@@ -173,28 +175,28 @@
   <div class="title">
     <span class="name">
       {#if current?.untitled}
-        New note
+        {tEditor("newNote")}
       {:else if current}
         {current.rel}
       {:else}
         {path}
       {/if}
     </span>
-    {#if current?.dirty}<span class="dot" title="Unsaved changes"></span>{/if}
+    {#if current?.dirty}<span class="dot" title={tEditor("unsavedChanges")}></span>{/if}
     <span class="spacer"></span>
-    <div class="zoom" role="group" aria-label="Text size">
+    <div class="zoom" role="group" aria-label={tEditor("textSize")}>
       <button
         type="button"
         class="zoom-step"
-        aria-label="Smaller text"
-        title={keyHints("Smaller text (⌘-)", $platform)}
+        aria-label={tEditor("smallerText")}
+        title={keyHints(`${tEditor("smallerText")} (⌘-)`, $platform)}
         disabled={$editorSettings.panelFontSize <= PANEL_FONT_SIZE_MIN}
-        onclick={() => zoom("down")}>A−</button
+        onclick={() => zoom("down")}>{tEditor("glyphSmaller")}</button
       >
       <input
         type="range"
         class="zoom-range"
-        aria-label="Text size"
+        aria-label={tEditor("textSize")}
         min={PANEL_FONT_SIZE_MIN}
         max={PANEL_FONT_SIZE_MAX}
         step={PANEL_FONT_SIZE_STEP}
@@ -204,27 +206,27 @@
       <button
         type="button"
         class="zoom-step"
-        aria-label="Larger text"
-        title={keyHints("Larger text (⌘+)", $platform)}
+        aria-label={tEditor("largerText")}
+        title={keyHints(`${tEditor("largerText")} (⌘+)`, $platform)}
         disabled={$editorSettings.panelFontSize >= PANEL_FONT_SIZE_MAX}
-        onclick={() => zoom("up")}>A+</button
+        onclick={() => zoom("up")}>{tEditor("glyphLarger")}</button
       >
       <span class="zoom-size" aria-live="polite">{$editorSettings.panelFontSize}</span>
       <button
         type="button"
         class="zoom-step"
-        aria-label="Reset text size"
-        title={keyHints("Reset text size (⌘0)", $platform)}
+        aria-label={tEditor("resetTextSize")}
+        title={keyHints(`${tEditor("resetTextSize")} (⌘0)`, $platform)}
         disabled={$editorSettings.panelFontSize === DEFAULT_EDITOR_SETTINGS.panelFontSize}
-        onclick={() => zoom("reset")}>Reset</button
+        onclick={() => zoom("reset")}>{tEditor("reset")}</button
       >
     </div>
-    <button type="button" class="hand-over" disabled={!current} onclick={handOver}>Open in the file app</button>
+    <button type="button" class="hand-over" disabled={!current} onclick={handOver}>{tEditor("openInFileApp")}</button>
   </div>
 
   {#if asking}
     <UnsavedQuestion
-      name={current?.rel ?? "This file"}
+      name={current?.rel ?? tEditor("thisFile")}
       untitled={current?.untitled ?? false}
       onSave={() => void saveAndClose()}
       onDiscard={() => void discardAndClose()}
@@ -233,7 +235,7 @@
   {/if}
 
   {#if failure}
-    <p class="failure" role="alert">{failure}</p>
+    <p class="failure" role="alert">{tEditor("couldNotOpen", failure)}</p>
   {/if}
 
   <FileEditor bind:this={editor} compact {onState} onQuit={() => void requestClose(ctx.instanceId)} />

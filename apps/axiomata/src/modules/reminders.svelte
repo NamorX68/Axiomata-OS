@@ -27,6 +27,7 @@
   app (or by another device) won't show until the next ↻.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
@@ -47,6 +48,7 @@
   } from "../core/reminders";
   import { resolveSkillName, staleDigestNote, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -65,6 +67,14 @@
   let selectedList = $state(typeof $config.list === "string" ? $config.list : "");
 
   const tasks = $derived(selectedList ? tasksForList(digest.tasks, selectedList) : []);
+
+  /** A priority as the owner reads it; the skill's own value is the key. */
+  function priorityLabel(priority: ReminderTask["priority"]): string {
+    if (priority === "low") return tModules("priorityLow");
+    if (priority === "medium") return tModules("priorityMedium");
+    if (priority === "high") return tModules("priorityHigh");
+    return priority;
+  }
 
   function selectList(e: Event) {
     selectedList = (e.currentTarget as HTMLSelectElement).value;
@@ -104,7 +114,7 @@
       digest = { ...digest, tasks: [...digest.tasks, task] };
       showCreate = false;
     } catch (err) {
-      createError = String(err instanceof Error ? err.message : err);
+      createError = messageOf(err);
     } finally {
       creating = false;
     }
@@ -120,7 +130,7 @@
       await completeReminderTask(ctx.invoke, t.id);
       digest = { ...digest, tasks: digest.tasks.filter((x) => x.id !== t.id) };
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       busyId = null;
     }
@@ -133,7 +143,7 @@
       await deleteReminderTask(ctx.invoke, t.id);
       digest = { ...digest, tasks: digest.tasks.filter((x) => x.id !== t.id) };
     } catch (err) {
-      error = String(err instanceof Error ? err.message : err);
+      error = messageOf(err);
     } finally {
       busyId = null;
     }
@@ -162,7 +172,7 @@
    *  re-resolved digest actually came from. */
   async function applyFreshRun(run: RunRecord) {
     if (runFailed(run.status)) {
-      error = run.error ?? "Last run failed.";
+      error = run.error ?? tModules("lastRunFailed");
       await loadLatest();
       return;
     }
@@ -188,7 +198,7 @@
       staleNote = staleDigestNote(result);
       settleSelection();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
       staleNote = "";
     } finally {
       loading = false;
@@ -202,7 +212,7 @@
       const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       await applyFreshRun(full);
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       running = false;
     }
@@ -226,41 +236,62 @@
 
 <div class="reminders">
   <div class="head">
-    <select value={selectedList} onchange={selectList} disabled={digest.lists.length === 0} aria-label="Reminder list">
+    <select
+      value={selectedList}
+      onchange={selectList}
+      disabled={digest.lists.length === 0}
+      aria-label={tModules("reminderList")}
+    >
       {#if digest.lists.length === 0}
-        <option value="">No lists</option>
+        <option value="">{tModules("noLists")}</option>
       {/if}
       {#each digest.lists as name (name)}
         <option value={name}>{name}</option>
       {/each}
     </select>
     <span class="spacer"></span>
-    <span class="muted last-run" title={lastRun ? `Last run: ${lastRun.started_at}` : "No run yet"}>
-      {lastRun ? relativeTime(lastRun.started_at) : "never run"}
+    <span
+      class="muted last-run"
+      title={lastRun ? tModules("lastRunTitle", { when: lastRun.started_at }) : tModules("noRunYet")}
+    >
+      {lastRun ? relativeTime(lastRun.started_at) : tModules("neverRun")}
     </span>
-    <button type="button" class="add" title="New reminder" aria-label="New reminder" onclick={openCreate}>+</button>
-    <button type="button" class="refresh" title="Run reminders-digest now" aria-label="Refresh" disabled={running} onclick={() => void refreshNow()}>
+    <button
+      type="button"
+      class="add"
+      title={tModules("newReminder")}
+      aria-label={tModules("newReminder")}
+      onclick={openCreate}
+    >+</button>
+    <button
+      type="button"
+      class="refresh"
+      title={tModules("runNow", { skill: skillName })}
+      aria-label={tModules("refresh")}
+      disabled={running}
+      onclick={() => void refreshNow()}
+    >
       {running ? "…" : "↻"}
     </button>
   </div>
 
   {#if showCreate}
     <form class="create" onsubmit={(e) => (e.preventDefault(), submitCreate())}>
-      <input type="text" placeholder="Title…" bind:value={newTitle} disabled={creating} />
+      <input type="text" placeholder={tModules("titlePlaceholder")} bind:value={newTitle} disabled={creating} />
       <div class="row">
-        <select bind:value={newList} disabled={creating} aria-label="List">
+        <select bind:value={newList} disabled={creating} aria-label={tModules("list")}>
           {#each digest.lists as name (name)}
             <option value={name}>{name}</option>
           {/each}
         </select>
-        <input type="date" bind:value={newDueDate} disabled={creating} aria-label="Due date (optional)" />
+        <input type="date" bind:value={newDueDate} disabled={creating} aria-label={tModules("dueOptional")} />
       </div>
-      <input type="text" placeholder="Notes (optional)…" bind:value={newNotes} disabled={creating} />
+      <input type="text" placeholder={tModules("notesPlaceholder")} bind:value={newNotes} disabled={creating} />
       {#if createError}<p class="error">{createError}</p>{/if}
       <div class="row">
-        <button type="button" onclick={() => (showCreate = false)} disabled={creating}>Cancel</button>
+        <button type="button" onclick={() => (showCreate = false)} disabled={creating}>{tModules("cancel")}</button>
         <button type="submit" class="primary" disabled={creating || !newTitle.trim() || !newList}>
-          {creating ? "Creating…" : "Create"}
+          {creating ? tModules("creating") : tModules("create")}
         </button>
       </div>
     </form>
@@ -270,18 +301,17 @@
   {#if staleNote}<p class="muted">{staleNote}</p>{/if}
 
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{tModules("loading")}</p>
   {:else if !lastRun && running}
-    <p class="muted empty">Running <code>{skillName}</code> for the first time — this can take a while…</p>
+    <p class="muted empty">{tModules("firstRunBefore")}<code>{skillName}</code>{tModules("firstRunSlowAfter")}</p>
   {:else if !lastRun}
     <p class="muted empty">
-      No data yet — run <code>{skillName}</code> from the Skills Deck, schedule it as a
-      Routine, or hit ↻ above.
+      {tModules("noDataBefore")}<code>{skillName}</code>{tModules("noDataAfter")}
     </p>
   {:else if digest.lists.length === 0}
-    <p class="muted empty">No reminder lists found.</p>
+    <p class="muted empty">{tModules("noReminderLists")}</p>
   {:else if tasks.length === 0}
-    <p class="muted empty">Nothing open in &quot;{selectedList}&quot;.</p>
+    <p class="muted empty">{tModules("nothingOpenIn", { list: selectedList })}</p>
   {:else}
     <ul class="tasks">
       {#each tasks as t (t.id)}
@@ -289,16 +319,26 @@
           <input
             type="checkbox"
             checked={false}
-            aria-label={`Mark "${t.title}" done`}
+            aria-label={tModules("markDone", { name: t.title })}
             disabled={busyId === t.id}
             onchange={() => void completeTask(t)}
           />
           {#if t.priority !== "none"}
-            <span class="prio prio-{t.priority}" title={`Priority: ${t.priority}`} aria-hidden="true"></span>
+            <span
+              class="prio prio-{t.priority}"
+              title={tModules("priority", { level: priorityLabel(t.priority) })}
+              aria-hidden="true"
+            ></span>
           {/if}
           <span class="title">{t.title}</span>
           {#if t.dueDate}<span class="due muted">{t.dueDate.slice(0, 10)}</span>{/if}
-          <button type="button" class="del" aria-label={`Delete "${t.title}"`} disabled={busyId === t.id} onclick={() => void removeTask(t)}>
+          <button
+            type="button"
+            class="del"
+            aria-label={tModules("deleteItem", { name: t.title })}
+            disabled={busyId === t.id}
+            onclick={() => void removeTask(t)}
+          >
             {busyId === t.id ? "…" : "✕"}
           </button>
         </li>

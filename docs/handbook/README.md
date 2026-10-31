@@ -1,8 +1,8 @@
 # Das Handbuch von Axiomata-OS
 
-Dieser Ordner ist die **Quelle** des Handbuchs: eine Seite je Bereich der App, auf Deutsch, mit den echten (englischen)
-Namen der Knöpfe. Der Chat in der Leiste antwortet nur aus diesen Seiten und aus den Live-Daten der App; was hier
-nicht steht, weiß er nicht.
+Dieser Ordner ist die **Quelle** des Handbuchs: eine Seite je Bereich der App, auf Deutsch, mit den echten (deutschen)
+Namen der Knöpfe, wie die App sie zeigt; die englischen Seiten in `en/` nennen die englischen. Der Chat in der Leiste
+antwortet nur aus diesen Seiten und aus den Live-Daten der App; was hier nicht steht, weiß er nicht.
 
 - **Hier bearbeiten, nirgends sonst.** Die App liefert das Handbuch mit jedem Build aus und legt es beim Start nach
   `~/.axiomata/handbook/`. Passt die Kopie dort nicht zum installierten Build, ersetzt die App sie — eine Änderung in

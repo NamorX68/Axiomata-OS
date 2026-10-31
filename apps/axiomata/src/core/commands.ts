@@ -11,19 +11,32 @@
  * is refused with the nearest names (S3) — a typo never costs a turn.
  */
 
+import { messageOf } from "./errors";
 import { get, writable } from "svelte/store";
+
+import { tChat } from "../i18n/chat";
 
 import { emit } from "./bus";
 import { listHandbook, openHandbook, pageForTopic, type HandbookEntry } from "./handbook";
 import { busy, newSession, planMode, send, sessionId, turnEffort, turnModel, turns } from "./chat";
 import { createInstance, destroyInstance } from "./lifecycle";
 import { loadModelCatalog, modelCatalog, providerOptions } from "./modelCatalog";
-import { getModule, invokeAction, listModules } from "./registry";
+import { getModule, invokeAction, listModules, moduleTitle } from "./registry";
 import { openFilePanel } from "./staging";
 import { instances } from "./stores";
 import { THEMES, applyTheme, isTheme } from "./themes";
 import { type ConfigView, type HarnessId, type Skill, invokeBackend, isEffortLevel } from "./backend";
 import { defaultLabel, effortState, levelsFor, reasoningOf, unlistedNote } from "./effortLevels";
+import {
+  conversationsPanel,
+  costPanel,
+  effortPanel,
+  helpPanel,
+  modelPanel,
+  skillsPanel,
+  textPanel,
+  type Panel,
+} from "./slashLists";
 
 /** Where a command comes from: the app itself, or the chat's harness. */
 export type CommandSource = "app" | "glut" | "oc" | "cc";
@@ -56,10 +69,10 @@ export type Routed =
 
 export interface CommandResult {
   ok: boolean;
-  /** Short, toast-sized. */
+  /** Short, toast-sized; empty when the panel says it all. */
   message: string;
-  /** Optional Markdown for the chat panel (e.g. /help, action output). */
-  detail?: string;
+  /** What opens above the bar — a list to pick from or an answer (#109); never written into the conversation. */
+  panel?: Panel;
 }
 
 /** What the chat's harness offers, refreshed by the bar (`refreshEngineCommands`). */
@@ -111,39 +124,30 @@ interface ChatSessionWire {
   turns: number;
 }
 
-type AppCommand = Omit<CommandEntry, "source">;
+type AppCommand = Omit<CommandEntry, "source" | "description"> & { describe: () => string };
 
+/** The app's commands; a description is read when shown, so it follows the language (`i18n/chat.ts`). */
 const CONVERSATION: AppCommand[] = [
-  { name: "help", level: 1, hint: "[topic]", description: "List every command, or open a handbook page" },
-  { name: "clear", level: 1, description: "Start a new conversation" },
-  { name: "compact", level: 1, description: "Summarise the conversation so far to free context" },
-  { name: "model", level: 1, hint: "[model]", description: "Show or change this conversation's model" },
-  {
-    name: "effort",
-    level: 1,
-    hint: "[level]",
-    description: "Show or change how hard Glut's model reasons in this conversation",
-  },
-  { name: "plan", level: 1, description: "Plan mode: the agent reads and plans, changes nothing" },
-  { name: "build", level: 1, description: "Build mode: the agent may carry the plan out" },
-  { name: "skills", level: 1, hint: "[run <name>]", description: "List the skills, or run one" },
-  { name: "cost", level: 1, description: "Turns and money of this conversation" },
-  { name: "resume", level: 1, hint: "[session]", description: "List earlier conversations, or continue one" },
-  { name: "undo", level: 1, description: "Undo the file changes of the last turn" },
-  { name: "do", level: 1, hint: "<text>", description: "A one-shot instruction to the agent, outside the chat" },
+  { name: "help", level: 1, hint: "[topic]", describe: () => tChat("cmdHelp") },
+  { name: "clear", level: 1, describe: () => tChat("cmdClear") },
+  { name: "compact", level: 1, describe: () => tChat("cmdCompact") },
+  { name: "model", level: 1, hint: "[model]", describe: () => tChat("cmdModel") },
+  { name: "effort", level: 1, hint: "[level]", describe: () => tChat("cmdEffort") },
+  { name: "plan", level: 1, describe: () => tChat("cmdPlan") },
+  { name: "build", level: 1, describe: () => tChat("cmdBuild") },
+  { name: "skills", level: 1, hint: "[run <name>]", describe: () => tChat("cmdSkills") },
+  { name: "cost", level: 1, describe: () => tChat("cmdCost") },
+  { name: "resume", level: 1, hint: "[session]", describe: () => tChat("cmdResume") },
+  { name: "undo", level: 1, describe: () => tChat("cmdUndo") },
+  { name: "do", level: 1, hint: "<text>", describe: () => tChat("cmdDo") },
 ];
 
 const CONTROL: AppCommand[] = [
-  {
-    name: "tile",
-    level: 2,
-    hint: "add|remove <type> · <type> <action> [json]",
-    description: "Tiles and their actions",
-  },
-  { name: "theme", level: 2, hint: "<id>", description: "Switch the theme" },
-  { name: "open", level: 2, hint: "<path>", description: "Open a workspace file (.md or .html)" },
-  { name: "newfile", level: 2, hint: "<path>", description: "Create an empty workspace file and open it" },
-  { name: "brain", level: 2, hint: "[path | ? query]", description: "Open the Second Brain (on a file, or searching)" },
+  { name: "tile", level: 2, hint: "add|remove <type> · <type> <action> [json]", describe: () => tChat("cmdTile") },
+  { name: "theme", level: 2, hint: "<id>", describe: () => tChat("cmdTheme") },
+  { name: "open", level: 2, hint: "<path>", describe: () => tChat("cmdOpen") },
+  { name: "newfile", level: 2, hint: "<path>", describe: () => tChat("cmdNewfile") },
+  { name: "brain", level: 2, hint: "[path | ? query]", describe: () => tChat("cmdBrain") },
 ];
 
 const APP_NAMES = new Set([...CONVERSATION, ...CONTROL].map((c) => c.name));
@@ -159,7 +163,9 @@ export function commandEntries(
   harness: HarnessId | null = get(chatHarness),
 ): CommandEntry[] {
   const offered = (c: AppCommand): boolean => !harness || (HARNESS_ONLY[c.name] ?? harness) === harness;
-  const app: CommandEntry[] = [...CONVERSATION, ...CONTROL].filter(offered).map((c) => ({ ...c, source: "app" }));
+  const app: CommandEntry[] = [...CONVERSATION, ...CONTROL]
+    .filter(offered)
+    .map(({ describe, ...c }) => ({ ...c, description: describe(), source: "app" }));
   const own: CommandEntry[] = engine.map((c) => ({
     ...c,
     level: 3,
@@ -178,7 +184,9 @@ export function route(input: string, engine: readonly EngineCommand[] = get(engi
   const rest = body.slice(head.length).trim();
   const name = head.toLowerCase();
   if (name === "do") {
-    return rest ? { kind: "instruct", message: rest } : { kind: "unknown", name, message: "usage: /do <text>" };
+    return rest
+      ? { kind: "instruct", message: rest }
+      : { kind: "unknown", name, message: tChat("usage", { usage: "/do <text>" }) };
   }
   if (APP_NAMES.has(name)) return { kind: "command", name, args: rest ? rest.split(/\s+/) : [] };
   const own = engineCommand(name, engine);
@@ -209,18 +217,18 @@ function plain(text: string): string {
 }
 
 /** The answer for a command that must wait while the agent works: it would change what the turn works on. */
-const WHILE_BUSY: CommandResult = { ok: false, message: "The agent is working — try again when it is done." };
+const whileBusy = (): CommandResult => ({ ok: false, message: tChat("whileBusy") });
 
 function unknownMessage(name: string, engine: readonly EngineCommand[]): string {
   const moved = MOVED[name] ?? (getModule(name) ? `/tile ${name}` : undefined);
-  if (moved) return `/${name} is now ${moved}`;
+  if (moved) return tChat("movedTo", { name, now: moved });
   const near = nearest(
     name,
     commandEntries(engine).map((c) => c.name),
   );
   return near.length > 0
-    ? `unknown command /${name} — did you mean ${near.map((n) => `/${n}`).join(", ")}?`
-    : `unknown command /${name} — /help lists them; /do <text> sends an instruction`;
+    ? tChat("didYouMean", { name, near: near.map((n) => `/${n}`).join(", ") })
+    : tChat("unknownHint", { name });
 }
 
 /** Up to three names that start with `typed` or are a small edit away from it. */
@@ -260,30 +268,24 @@ export function suggestions(input: string, engine: readonly EngineCommand[] = ge
 }
 
 /**
- * The `/help` text. A function, not a constant: the `/tile` line lists the registered module types, which register
- * after this module is imported (`main.ts`), and the engine's commands arrive with the chat.
+ * The `/help` list: the commands by level, then the handbook's pages. The `/tile` and `/theme` lines say their types
+ * and themes in their hints; the engine's commands arrive with the chat.
  */
-export function helpText(engine: readonly EngineCommand[] = get(engineCommands)): string {
-  const line = (c: CommandEntry): string =>
-    `- \`/${c.name}${c.hint ? ` ${c.hint}` : ""}\` — ${c.description}${c.level === 3 ? ` *(${c.source})*` : ""}`;
-  const entries = commandEntries(engine);
-  const own = entries.filter((c) => c.level === 3);
-  return [
-    "**Conversation**",
-    "",
-    ...entries.filter((c) => c.level === 1).map(line),
-    "",
-    `**App** — tile types: ${listTypes()}; themes: ${THEMES.map((t) => t.id).join(" · ")}`,
-    "",
-    ...entries.filter((c) => c.level === 2).map(line),
-    "",
-    own.length > 0
-      ? "**The chat's harness**"
-      : "**The chat's harness** — its commands appear once the chat knows them",
-    ...(own.length > 0 ? ["", ...own.map(line)] : []),
-    "",
-    "No slash — chat with the agent.",
-  ].join("\n");
+async function helpList(): Promise<Panel> {
+  let pages: HandbookEntry[] = [];
+  try {
+    pages = await listHandbook();
+  } catch {
+    // Without the handbook the commands are still listed.
+  }
+  const entries = commandEntries().map((c) =>
+    c.name === "tile"
+      ? { ...c, hint: `${c.hint ?? ""} — ${listTypes()}` }
+      : c.name === "theme"
+        ? { ...c, hint: `<${THEMES.map((t) => t.id).join("|")}>` }
+        : c,
+  );
+  return helpPanel(entries, pages);
 }
 
 /**
@@ -295,25 +297,27 @@ async function helpTopic(topic: string): Promise<CommandResult> {
   try {
     entries = await listHandbook();
   } catch (err) {
-    return { ok: false, message: `The handbook could not be read: ${String(err)}` };
+    return { ok: false, message: tChat("handbookUnreadable", { error: messageOf(err) }) };
   }
   const page = pageForTopic(topic, entries);
   if (page) {
     openHandbook(page);
-    return { ok: true, message: `Handbook: ${entries.find((entry) => entry.name === page)?.title ?? page}.` };
+    const title = entries.find((e) => e.name === page)?.title ?? page;
+    return { ok: true, message: tChat("handbookOpened", { title }) };
   }
-  const list = entries.map((entry) => `- \`/help ${entry.name}\` — ${entry.title}: ${entry.summary}`);
-  return {
-    ok: false,
-    message: `No handbook page for “${topic}”; the chat panel lists them.`,
-    detail: ["**Handbook**", "", ...list].join("\n"),
-  };
+  return { ok: false, message: tChat("noHandbookPage", { topic }), panel: await helpList() };
+}
+
+/** A module type's name in the owner's language, the bare type when none is registered. */
+function titleOf(type: string): string {
+  const def = getModule(type);
+  return def ? moduleTitle(def) : type;
 }
 
 function listTypes(): string {
   return listModules()
     .filter((m) => !m.stageOnly)
-    .map((m) => `\`${m.type}\``)
+    .map((m) => m.type)
     .join(", ");
 }
 
@@ -321,20 +325,20 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
   switch (name) {
     case "help":
       if (args.length > 0) return helpTopic(args.join(" "));
-      return { ok: true, message: "See the chat panel.", detail: helpText() };
+      return { ok: true, message: "", panel: await helpList() };
 
     case "clear":
-      if (get(busy)) return WHILE_BUSY;
+      if (get(busy)) return whileBusy();
       newSession();
-      return { ok: true, message: "New conversation." };
+      return { ok: true, message: tChat("newConversation") };
 
     case "plan":
       planMode.set(true);
-      return { ok: true, message: "Plan mode: the agent reads and plans, changes nothing." };
+      return { ok: true, message: tChat("planOn") };
 
     case "build":
       planMode.set(false);
-      return { ok: true, message: "Build mode." };
+      return { ok: true, message: tChat("buildOn") };
 
     case "cost":
       return costOfConversation();
@@ -362,28 +366,30 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
 
     case "theme": {
       const id = args[0] ?? "";
-      if (!isTheme(id)) return { ok: false, message: `unknown theme "${id}" (${THEMES.map((t) => t.id).join(", ")})` };
+      if (!isTheme(id)) {
+        return { ok: false, message: tChat("unknownTheme", { id, themes: THEMES.map((t) => t.id).join(", ") }) };
+      }
       applyTheme(id);
-      return { ok: true, message: `Theme: ${id}.` };
+      return { ok: true, message: tChat("themeSet", { id }) };
     }
 
     case "open": {
       const path = args[0];
-      if (!path) return { ok: false, message: "usage: /open <path>" };
+      if (!path) return { ok: false, message: tChat("usage", { usage: "/open <path>" }) };
       openFilePanel(path, "read");
-      return { ok: true, message: `Opened ${path}.` };
+      return { ok: true, message: tChat("opened", { path }) };
     }
 
     case "newfile": {
       const path = args[0];
-      if (!path) return { ok: false, message: "usage: /newfile <path>" };
+      if (!path) return { ok: false, message: tChat("usage", { usage: "/newfile <path>" }) };
       try {
         await invokeBackend("write_workspace_file", { rel: path, content: "" });
       } catch (err) {
-        return { ok: false, message: String(err) };
+        return { ok: false, message: messageOf(err) };
       }
       openFilePanel(path, "edit");
-      return { ok: true, message: `Created ${path}.` };
+      return { ok: true, message: tChat("created", { path }) };
     }
 
     case "brain": {
@@ -393,26 +399,26 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
       } else {
         emit("open-second-brain", { focus: text ? `file:${text}` : null });
       }
-      return { ok: true, message: "Second Brain opened." };
+      return { ok: true, message: tChat("brainOpened") };
     }
 
     default:
-      return { ok: false, message: `unknown command /${name}` };
+      return { ok: false, message: tChat("unknownCommand", { name }) };
   }
 }
 
 /** The longest model id `/model` takes; the core checks the same alphabet (`agents::valid_chat_name`). */
 const MODEL_ID = /^[A-Za-z0-9._:/@+][A-Za-z0-9._:/@+-]{0,199}$/;
-/** How many models `/model` lists; the rest are found by typing one. */
-const MAX_LISTED_MODELS = 40;
-
-/** `/model` shows this conversation's model and the provider's; `/model <id>` switches, `/model default` goes back. */
+/**
+ * `/model` lists the provider's models in the panel, the one in use marked (typing filters them); `/model <id>`
+ * switches, `/model default` goes back.
+ */
 async function model(args: string[]): Promise<CommandResult> {
   let config: ConfigView;
   try {
     config = await invokeBackend<ConfigView>("get_config");
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
   const provider = config.agents.chat_provider;
   const configured = config.agents.providers[provider]?.chat_model ?? "";
@@ -427,43 +433,36 @@ async function model(args: string[]): Promise<CommandResult> {
   const wanted = args[0];
   if (!wanted) {
     const current = get(turnModel);
-    const lines = options
-      .slice(0, MAX_LISTED_MODELS)
-      .map((o) => `- \`${plain(o.value)}\`${o.hint ? ` — ${plain(o.hint)}` : ""}`);
-    const more = options.length > MAX_LISTED_MODELS ? `\n\n…and ${options.length - MAX_LISTED_MODELS} more.` : "";
-    const head = current
-      ? `**Model** — \`${current}\` for this conversation ` +
-        `(configured: \`${configured}\`, \`/model default\` goes back)`
-      : `**Model** — \`${configured}\`, the configured chat model of ${provider}`;
+    const models = get(modelCatalog)?.providers[provider]?.models ?? [];
     return {
       ok: true,
-      message: `Model: ${current ?? configured}`,
-      detail: lines.length > 0 ? `${head}\n\n${lines.join("\n")}${more}` : head,
+      message: "",
+      panel: modelPanel(models, { turn: current, configured, provider }, (id) => MODEL_ID.test(id)),
     };
   }
   if (wanted === "default") {
     turnModel.set(null);
-    return { ok: true, message: `Model: ${configured} (configured).` };
+    return { ok: true, message: tChat("modelConfigured", { model: configured }) };
   }
-  if (!MODEL_ID.test(wanted)) return { ok: false, message: `"${wanted}" is not a model id` };
+  if (!MODEL_ID.test(wanted)) return { ok: false, message: tChat("notModelId", { id: wanted }) };
   if (options.length > 0 && !options.some((o) => o.value === wanted)) {
-    return { ok: false, message: `${wanted} is not among ${provider}'s models — /model lists them` };
+    return { ok: false, message: tChat("notAmong", { id: wanted, provider }) };
   }
   turnModel.set(wanted);
-  return { ok: true, message: `Model for this conversation: ${wanted}.` };
+  return { ok: true, message: tChat("modelSet", { model: wanted }) };
 }
 
-/** `/effort` shows this conversation's level and the levels the chat model takes; `/effort <level>` switches,
+/** `/effort` lists the levels the chat model takes in the panel, the one in use marked; `/effort <level>` switches,
  *  `/effort default` goes back. Only Glut reads it: on another harness the command says so and changes nothing. */
 async function effort(args: string[]): Promise<CommandResult> {
   let config: ConfigView;
   try {
     config = await invokeBackend<ConfigView>("get_config");
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
   if (config.agents.chat_harness !== "axh") {
-    return { ok: false, message: "/effort is Glut's: the chat runs on another harness." };
+    return { ok: false, message: tChat("effortGlutOnly") };
   }
   if (get(modelCatalog) === null) {
     try {
@@ -478,132 +477,119 @@ async function effort(args: string[]): Promise<CommandResult> {
   const configured = config.agents.chat_effort;
   const wanted = args[0]?.toLowerCase();
   if (!wanted) {
-    const state = effortState(get(turnEffort), configured, reasoning);
-    const head =
-      state.source === "conversation"
-        ? `**Effort** — \`${state.level}\` for this conversation ` +
-          `(configured: ${configured ? `\`${configured}\`` : "not set"}, \`/effort default\` goes back)`
-        : state.source === "settings"
-          ? `**Effort** — \`${state.level}\`, the configured chat effort`
-          : `**Effort** — ${state.explanation}`;
-    const levels = levelsFor(reasoning)
-      .map((level) => (level === state.level ? `**\`${level}\`**` : `\`${level}\``))
-      .join(" ");
-    const of = reasoning
-      ? `Levels of \`${plain(model)}\` — ${defaultLabel(reasoning)}${reasoning.mandatory ? ", always reasons" : ""}:`
-      : "Levels (the catalog does not say which the model takes):";
+    const turn = get(turnEffort);
+    const state = effortState(turn, configured, reasoning);
     const note = unlistedNote(reasoning, state.level);
+    const always = reasoning?.mandatory ? ` · ${tChat("effortAlways")}` : "";
+    const silent = reasoning ? "" : ` · ${tChat("effortCatalogSilent")}`;
     return {
       ok: true,
-      message: `Effort: ${state.level ?? defaultLabel(reasoning)}`,
-      detail: `${head}\n\n${of} ${levels}${note ? `\n\n*${state.level}: ${note}*` : ""}`,
+      message: "",
+      panel: effortPanel(
+        levelsFor(reasoning),
+        state.level,
+        defaultLabel(reasoning),
+        `${state.explanation}${always}${silent}${note ? ` · ${note}` : ""}`,
+        turn !== null,
+      ),
     };
   }
   if (wanted === "default") {
     turnEffort.set(null);
     return {
       ok: true,
-      message: configured ? `Effort: ${configured} (configured).` : `Effort: back to ${defaultLabel(reasoning)}.`,
+      message: configured
+        ? tChat("effortConfigured", { level: configured })
+        : tChat("effortBack", { label: defaultLabel(reasoning) }),
     };
   }
   if (!isEffortLevel(wanted)) {
-    return { ok: false, message: `"${args[0]}" is no effort level — ${levelsFor(reasoning).join(", ")}` };
+    const levels = levelsFor(reasoning).join(", ");
+    return { ok: false, message: tChat("notEffortLevel", { level: args[0] ?? "", levels }) };
   }
   turnEffort.set(wanted);
   const note = unlistedNote(reasoning, wanted);
-  return { ok: true, message: `Effort for this conversation: ${wanted}${note ? ` — ${note}` : ""}.` };
+  return {
+    ok: true,
+    message: note ? tChat("effortSetNote", { level: wanted, note }) : tChat("effortSet", { level: wanted }),
+  };
 }
 
 /** `/compact`: the conversation's harness summarises it, the next turns build on the summary. */
 async function compact(): Promise<CommandResult> {
-  if (get(busy)) return WHILE_BUSY;
-  if (!get(sessionId)) return { ok: false, message: "Nothing to compact yet." };
+  if (get(busy)) return whileBusy();
+  if (!get(sessionId)) return { ok: false, message: tChat("nothingToCompact") };
   const reply = await send("", "chat", { kind: "compact" });
-  return reply && !reply.is_error ? { ok: true, message: "Compacted." } : { ok: false, message: "Not compacted." };
+  return reply && !reply.is_error
+    ? { ok: true, message: tChat("compacted") }
+    : { ok: false, message: tChat("notCompacted") };
 }
 
-/** `/resume` lists the earlier conversations of the chat's harness; `/resume <id>` goes on with one. */
+/** `/resume` lists the earlier conversations of the chat's harness in the panel; `/resume <id>` goes on with one. */
 async function resume(args: string[]): Promise<CommandResult> {
-  if (get(busy)) return WHILE_BUSY;
+  if (get(busy)) return whileBusy();
   let list: ChatSessionWire[];
   try {
     list = await invokeBackend<ChatSessionWire[]>("chat_sessions");
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
   const wanted = args[0];
   if (!wanted) {
-    if (list.length === 0) return { ok: true, message: "No earlier conversations." };
-    const lines = list.map((s) => {
-      const when = s.updated_at.slice(0, 16).replace("T", " ");
-      return `- \`/resume ${s.id}\` — ${s.title ? `${plain(s.title)} · ` : ""}${when} · ${s.turns} turns`;
-    });
-    return {
-      ok: true,
-      message: `${list.length} conversations — see the chat panel.`,
-      detail: `**Earlier conversations**\n\n${lines.join("\n")}`,
-    };
+    if (list.length === 0) return { ok: true, message: tChat("noEarlier") };
+    return { ok: true, message: "", panel: conversationsPanel(list, get(sessionId)) };
   }
   const found = list.find((s) => s.id === wanted);
-  if (!found) return { ok: false, message: `no earlier conversation ${wanted} — /resume lists them` };
+  if (!found) return { ok: false, message: tChat("noSuchConversation", { id: wanted }) };
   newSession();
   sessionId.set(found.id);
-  return {
-    ok: true,
-    message: "Conversation resumed.",
-    detail:
-      `Resumed **${plain(found.title || found.id)}** — ` +
-      "its earlier messages are not shown here; the agent has them.",
-  };
+  return { ok: true, message: tChat("resumed", { title: plain(found.title || found.id) }) };
 }
 
 /** `/undo`: the file changes of the conversation's latest turn, undone as its harness can. */
 async function undo(): Promise<CommandResult> {
-  if (get(busy)) return WHILE_BUSY;
+  if (get(busy)) return whileBusy();
   const id = get(sessionId);
-  if (!id) return { ok: false, message: "Nothing to undo: no conversation yet." };
+  if (!id) return { ok: false, message: tChat("nothingToUndo") };
   try {
     const done = await invokeBackend<string>("chat_undo", { sessionId: id });
-    return { ok: true, message: "Undone.", detail: done };
+    return { ok: true, message: tChat("undone"), panel: textPanel(tChat("panelUndo"), done) };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
 }
 
-/** `/cost`: what this conversation's replies cost, from the transcript (every harness reports a turn's cost). */
+/** `/cost`: what this conversation's replies cost, from the transcript (every harness reports a turn's cost), as a
+ *  small table in the panel (Q9). */
 function costOfConversation(): CommandResult {
   const replies = get(turns).filter((t) => t.role === "assistant" || t.role === "error");
-  if (replies.length === 0) return { ok: true, message: "No turns in this conversation yet." };
+  if (replies.length === 0) return { ok: true, message: tChat("noTurns") };
   const priced = replies.filter((t) => typeof t.costUsd === "number");
   const total = priced.reduce((sum, t) => sum + (t.costUsd ?? 0), 0);
   const unpriced = replies.length - priced.length;
-  const note = unpriced > 0 ? ` (${unpriced} without a price)` : "";
-  const message = `${replies.length} turns · $${total.toFixed(4)}${note}`;
-  return { ok: true, message };
+  return { ok: true, message: "", panel: costPanel(replies.length, total, unpriced) };
 }
 
 async function skills(args: string[]): Promise<CommandResult> {
   if (args[0] === "run") {
-    if (!args[1]) return { ok: false, message: "usage: /skills run <name>" };
+    if (!args[1]) return { ok: false, message: tChat("usage", { usage: "/skills run <name>" }) };
     try {
       const run = await invokeBackend<{ status: string; duration_ms: number }>("run_skill", { name: args[1] });
-      return { ok: run.status === "success", message: `/${args[1]}: ${run.status} (${run.duration_ms} ms)` };
+      return {
+        ok: run.status === "success",
+        message: tChat("skillRan", { name: args[1], status: run.status, ms: run.duration_ms }),
+      };
     } catch (err) {
-      return { ok: false, message: String(err) };
+      return { ok: false, message: messageOf(err) };
     }
   }
-  if (args.length > 0) return { ok: false, message: "usage: /skills [run <name>]" };
+  if (args.length > 0) return { ok: false, message: tChat("usage", { usage: "/skills [run <name>]" }) };
   try {
     const list = await invokeBackend<Skill[]>("list_skills");
-    if (list.length === 0) return { ok: true, message: "No skills yet." };
-    const lines = list.map((s) => `- \`${s.name}\` — ${s.description} *(${s.harness})*`);
-    return {
-      ok: true,
-      message: `${list.length} skills — see the chat panel.`,
-      detail: `**Skills**\n\n${lines.join("\n")}`,
-    };
+    if (list.length === 0) return { ok: true, message: tChat("noSkills") };
+    return { ok: true, message: "", panel: skillsPanel(list) };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
 }
 
@@ -614,23 +600,23 @@ async function tile(args: string[]): Promise<CommandResult> {
     case undefined:
       return {
         ok: false,
-        message: `usage: /tile add|remove <type> · /tile <type> <action> — types: ${listTypes()}`,
+        message: tChat("usage", { usage: `/tile add|remove <type> · /tile <type> <action> — ${listTypes()}` }),
       };
 
     case "add": {
       const type = rest[0] ?? "";
       const r = createInstance(type);
       return r.ok
-        ? { ok: true, message: `Added ${getModule(type)?.title ?? type}.` }
+        ? { ok: true, message: tChat("added", { title: titleOf(type) }) }
         : { ok: false, message: r.reason };
     }
 
     case "remove": {
       const key = rest[0] ?? "";
       const hit = get(instances).find((i) => i.type === key || (key.length >= 4 && i.id.startsWith(key)));
-      if (!hit) return { ok: false, message: `no tile matches "${key}"` };
+      if (!hit) return { ok: false, message: tChat("noTileMatches", { key }) };
       destroyInstance(hit.id);
-      return { ok: true, message: `Removed ${getModule(hit.type)?.title ?? hit.type}.` };
+      return { ok: true, message: tChat("removed", { title: titleOf(hit.type) }) };
     }
 
     default:
@@ -641,13 +627,13 @@ async function tile(args: string[]): Promise<CommandResult> {
 /** `/tile <type> <action> [json]` on the first instance of that type. */
 async function moduleAction(type: string, args: string[]): Promise<CommandResult> {
   const def = getModule(type);
-  if (!def) return { ok: false, message: `unknown tile type "${type}" — types: ${listTypes()}` };
+  if (!def) return { ok: false, message: tChat("unknownTileType", { type, types: listTypes() }) };
   const inst = get(instances).find((i) => i.type === type);
-  if (!inst) return { ok: false, message: `no "${def.title}" tile on the canvas — /tile add ${type} first` };
+  if (!inst) return { ok: false, message: tChat("noTileOnCanvas", { title: moduleTitle(def), type }) };
   const action = args[0];
   if (!action) {
-    const names = (def.actions ?? []).map((a) => `\`${a.name}\``).join(", ") || "none";
-    return { ok: false, message: `usage: /tile ${type} <action> [json] — actions: ${names}` };
+    const names = (def.actions ?? []).map((a) => a.name).join(", ") || tChat("noActions");
+    return { ok: false, message: tChat("usage", { usage: `/tile ${type} <action> [json] — ${names}` }) };
   }
   let params: unknown = {};
   const raw = args.slice(1).join(" ");
@@ -655,14 +641,16 @@ async function moduleAction(type: string, args: string[]): Promise<CommandResult
     try {
       params = JSON.parse(raw);
     } catch {
-      return { ok: false, message: "params must be JSON, e.g. {\"path\":\"notes/inbox.md\"}" };
+      return { ok: false, message: tChat("paramsJson", { example: '{"path":"notes/inbox.md"}' }) };
     }
   }
   try {
     const out = await invokeAction(inst.id, action, params);
-    const detail = out === undefined ? undefined : "```json\n" + JSON.stringify(out, null, 2) + "\n```";
-    return { ok: true, message: `/tile ${type} ${action} done.`, detail };
+    const message = tChat("tileDone", { type, action });
+    if (out === undefined) return { ok: true, message };
+    const title = tChat("panelTile", { type, action });
+    return { ok: true, message, panel: textPanel(title, JSON.stringify(out, null, 2), true) };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { ok: false, message: messageOf(err) };
   }
 }

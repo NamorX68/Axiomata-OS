@@ -8,6 +8,7 @@
 <script lang="ts">
   import { emit } from "../core/bus";
   import { animates, motion } from "../core/motion";
+  import { tCanvas } from "../i18n/canvas";
   import { hexPoints, honeycomb } from "./honeycomb";
 
   /** How many rings the comb has around its centre. */
@@ -34,9 +35,9 @@
       />
     {/each}
   </svg>
-  <p class="title">Your dashboard is empty</p>
-  <p class="text">Add a module — a calendar, your skills, the routines, the Orbit behind it all.</p>
-  <button type="button" class="ax-btn primary" onclick={() => emit("shell:add-module")}>Add a module</button>
+  <p class="title">{tCanvas("emptyTitle")}</p>
+  <p class="text">{tCanvas("emptyText")}</p>
+  <button type="button" class="ax-btn primary" onclick={() => emit("shell:add-module")}>{tCanvas("addAModule")}</button>
 </div>
 
 <style>

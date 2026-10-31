@@ -3,6 +3,7 @@
  * all, and which project the dialog offers first. Pure, so it is tested without a backend.
  */
 import type { BoardCard, BoardPlan, IdeProject } from "../core/backend";
+import { tFlow } from "../i18n/flow";
 import { runsByItself } from "./planning";
 
 /** A card is started from "ready": approved, waiting for nobody, held by nobody. The backend checks it again. */
@@ -62,11 +63,11 @@ export function roleEngine(
  */
 export function unpushedNote(status: { ahead: number; upstream: string | null }): string | null {
   if (status.ahead > 0) {
-    const target = status.upstream ?? "the upstream";
-    return `Not pushed yet: ↑${status.ahead} to ${target}. Push in the Studio's Git tab.`;
+    const target = status.upstream ?? tFlow("theUpstream");
+    return tFlow("notPushedAhead", { ahead: status.ahead, target });
   }
   if (status.upstream === null) {
-    return "Not pushed yet: the branch has no upstream yet. Pushing in the Studio's Git tab creates it.";
+    return tFlow("notPushedNoUpstream");
   }
   return null;
 }

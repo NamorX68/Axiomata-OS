@@ -7,6 +7,7 @@
   import { onMount } from "svelte";
 
   import type { BpInfo } from "./breakpoints";
+  import { tStudio } from "../i18n/studio";
 
   let {
     info,
@@ -54,23 +55,45 @@
     }
   }}
 >
-  <p class="title">Breakpoint {label}</p>
+  <p class="title">{tStudio("breakpointAt", { label })}</p>
   <label>
-    Condition
-    <input bind:this={first} type="text" bind:value={condition} placeholder="e.g. i == 3" spellcheck="false" autocomplete="off" />
+    {tStudio("condition")}
+    <input
+      bind:this={first}
+      type="text"
+      bind:value={condition}
+      placeholder={tStudio("conditionPlaceholder")}
+      spellcheck="false"
+      autocomplete="off"
+    />
   </label>
   <label>
-    Hit count
-    <input type="text" bind:value={hit} placeholder="e.g. 5, >3, % 10" spellcheck="false" autocomplete="off" />
+    {tStudio("hitCount")}
+    <input
+      type="text"
+      bind:value={hit}
+      placeholder={tStudio("hitCountPlaceholder")}
+      spellcheck="false"
+      autocomplete="off"
+    />
   </label>
   <label>
-    Log message <small>(does not stop)</small>
-    <input type="text" bind:value={log} placeholder="e.g. total = &#123;total&#125;" spellcheck="false" autocomplete="off" />
+    {tStudio("logMessage")} <small>{tStudio("doesNotStop")}</small>
+    <input type="text" bind:value={log} placeholder={tStudio("logPlaceholder")} spellcheck="false" autocomplete="off" />
   </label>
   <div class="actions">
-    <button type="submit" class="ax-btn primary">Save</button>
-    <button type="button" class="ax-btn" onclick={() => { onSave(null); onClose(); }}>Plain breakpoint</button>
-    <button type="button" class="ax-btn" onclick={onClose}>Cancel</button>
+    <button type="submit" class="ax-btn primary">{tStudio("save")}</button>
+    <button
+      type="button"
+      class="ax-btn"
+      onclick={() => {
+        onSave(null);
+        onClose();
+      }}
+    >
+      {tStudio("plainBreakpoint")}
+    </button>
+    <button type="button" class="ax-btn" onclick={onClose}>{tStudio("cancel")}</button>
   </div>
 </form>
 

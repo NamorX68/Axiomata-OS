@@ -19,6 +19,7 @@
 
   import type { FileRootInfo, IdeProject } from "../core/backend";
   import { uiScale } from "../core/uiScale";
+  import { tEditor } from "../i18n/editor";
   import IconButton from "../ui/IconButton.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
   import FileTree from "./FileTree.svelte";
@@ -186,16 +187,16 @@
     {onSetAccent}
   />
   {#if tab === "files"}
-    <SectionHead label="Files" rule level={2}>
+    <SectionHead label={tEditor("files")} rule level={2}>
       {#snippet actions()}
         <IconButton
           icon={prefs.showHidden ? "eye" : "eye-off"}
-          label={prefs.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
+          label={prefs.showHidden ? tEditor("hideHidden") : tEditor("showHidden")}
           pressed={prefs.showHidden}
           size="sm"
           onclick={() => (prefs = { ...prefs, showHidden: !prefs.showHidden })}
         />
-        <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => treeView?.refresh()} />
+        <IconButton icon="refresh-cw" label={tEditor("rereadFolders")} size="sm" onclick={() => treeView?.refresh()} />
       {/snippet}
     </SectionHead>
   {/if}
@@ -236,7 +237,7 @@
       />
       {#if roots.length === 0}
         <p class="no-project">
-          {current ? "The project folder is not available." : "No project open. Open a folder or start a new project from the bar above."}
+          {current ? tEditor("projectFolderMissing") : tEditor("noProjectOpenHint")}
         </p>
       {/if}
     </div>
@@ -245,7 +246,7 @@
         class="outline-edge"
         role="separator"
         aria-orientation="horizontal"
-        aria-label="Outline height"
+        aria-label={tEditor("outlineHeight")}
         onpointerdown={startOutlineDrag}
         onpointermove={onOutlineDrag}
         onpointerup={() => (outlineDrag = null)}
@@ -266,7 +267,7 @@
   class:dragging={widthDrag !== null}
   role="separator"
   aria-orientation="vertical"
-  aria-label="Sidebar width"
+  aria-label={tEditor("sidebarWidth")}
   onpointerdown={startWidthDrag}
   onpointermove={onWidthDrag}
   onpointerup={() => (widthDrag = null)}

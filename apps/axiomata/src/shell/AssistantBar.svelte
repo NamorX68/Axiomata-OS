@@ -3,6 +3,10 @@
   engine command and plain text go to the chat, `/do <text>` is a one-shot agent instruction, an unknown `/x` is
   refused with the nearest names. While the first word after `/` is typed, a list of matching commands opens above
   the bar: ↑/↓ move in it, Tab takes one, Enter takes it unless the line already names a command, Esc closes it.
+  Once a list command has its space (`/model `, `/skills `, `/resume `, `/help `, `/effort `), its list opens in the
+  panel above the bar (`SlashPanel.svelte`, #109) and what is typed after it filters the list; ↑/↓ choose, Enter takes
+  the row (a skill asks first), Esc or a click beside it closes it. A command's answer (`/cost`, `/undo`, a tile
+  action's output) opens there too — nothing of a command is written into the conversation.
   Otherwise ↑/↓ walk the input history.
 
   The conversation's settings sit at the bar's right end, so they can be set before the first question: Plan/Build,
@@ -22,7 +26,6 @@
     newSession,
     panelOpen,
     planMode,
-    pushInstruction,
     send,
     turns,
   } from "../core/chat";
@@ -38,11 +41,14 @@
     suggestions,
   } from "../core/commands";
   import { keyHints } from "../core/keyHints";
+  import { listQuery, shownRows, type Panel, type PanelRow } from "../core/slashLists";
+  import { tChat } from "../i18n/chat";
   import { platform } from "../core/keys";
   import { toast } from "../core/toast";
   import IconButton from "../ui/IconButton.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
   import EffortSwitch from "./EffortSwitch.svelte";
+  import SlashPanel from "./SlashPanel.svelte";
 
   /** How old the engine's list may get before typing `/` reads it again. */
   const REFRESH_AFTER_MS = 30_000;
@@ -54,11 +60,53 @@
   let dismissed = $state(false);
   let refreshedAt = 0;
 
-  const placeholder = $derived(
-    $busy ? "Agent is working…" : "Ask the agent, or /help for commands",
-  );
+  const placeholder = $derived($busy ? tChat("placeholderBusy") : tChat("placeholder"));
   const shown = $derived<CommandEntry[]>(dismissed ? [] : suggestions(input, $engineCommands));
   const listOpen = $derived(shown.length > 0);
+
+  /** The panel above the bar (#109): a list command's list, or a command's answer. */
+  let panel = $state<Panel | null>(null);
+  /** The panel follows the line (`/model …`): typing filters it, leaving the command closes it. */
+  let live = $state(false);
+  let panelPicked = $state(0);
+  /** The row whose "Run …?" is open; a second Enter on it runs it. */
+  let confirming = $state<string | null>(null);
+  /** Counts list reads, so a slow answer for a command already left behind is dropped. */
+  let listRead = 0;
+  /** The list command last asked for, so a command that gave no list is not asked again at every key. */
+  let askedFor: string | null = null;
+  let dock = $state<HTMLElement | undefined>();
+
+  const query = $derived(listQuery(input));
+  const filter = $derived(live && query && panel?.command === query.command ? query.filter : "");
+  const rows = $derived<PanelRow[]>(panel ? shownRows(panel, filter) : []);
+
+  function closePanel(): void {
+    panel = null;
+    live = false;
+    confirming = null;
+    askedFor = null;
+    listRead++;
+  }
+
+  /** Opens the list of `command` while its argument is typed; read once per command, filtered after that. */
+  async function openList(command: string): Promise<void> {
+    const mine = ++listRead;
+    askedFor = command;
+    const result = await runCommand(command, []);
+    if (mine !== listRead) return;
+    // An old list never stands for a new command: without a list of its own, the panel closes.
+    panel = null;
+    live = false;
+    if (result.panel) {
+      panel = result.panel;
+      live = true;
+      panelPicked = 0;
+      confirming = null;
+    } else if (result.message) {
+      toast(result.message, result.ok ? "info" : "warning");
+    }
+  }
 
   // A chat turn the app lost is said once at start; the chat panel offers to finish it (durable runs).
   // A harness changed in Settings changes which commands are offered (`/effort` is Glut's).
@@ -67,7 +115,7 @@
   onMount(() => {
     void loadInterruptedTurns().then(() => {
       if (get(interruptedTurns).length === 0) return;
-      toast("A chat turn stopped when the app did — open the chat to resume it.", "warning");
+      toast(tChat("turnStopped"), "warning");
     });
   });
 
@@ -81,12 +129,50 @@
   function oninput(): void {
     dismissed = false;
     picked = 0;
+    panelPicked = 0;
+    confirming = null;
     if (input.startsWith("/") && Date.now() - refreshedAt > REFRESH_AFTER_MS) refresh();
+    syncPanel();
   }
+
+  /** The panel follows the line: a list command opens its list once, any other line closes it (and drops a read). */
+  function syncPanel(): void {
+    const q = listQuery(input);
+    if (q && askedFor !== q.command) void openList(q.command);
+    else if (!q) closePanel();
+  }
+
+  /** A row taken: it runs its command line, asks first, or puts its command into the bar to be finished. */
+  function pickRow(row: PanelRow): void {
+    if (!row.line) return;
+    if (row.confirm && confirming !== row.id) {
+      confirming = row.id;
+      return;
+    }
+    if (!row.run) {
+      input = row.line;
+      closePanel();
+      oninput();
+      return;
+    }
+    closePanel();
+    input = "";
+    void execute(row.line);
+  }
+
+  // A click beside the bar and its panel closes the panel.
+  onMount(() => {
+    const away = (e: PointerEvent) => {
+      if (panel && dock && e.target instanceof Node && !dock.contains(e.target)) closePanel();
+    };
+    window.addEventListener("pointerdown", away, true);
+    return () => window.removeEventListener("pointerdown", away, true);
+  });
 
   function take(entry: CommandEntry): void {
     input = `/${entry.name} `;
     dismissed = true;
+    syncPanel();
   }
 
   /** Whether the line's first word already names a command, so Enter sends it rather than taking a suggestion. */
@@ -102,18 +188,37 @@
       if (entry) take(entry);
       return;
     }
-    const routed = route(input);
-    if (!routed) return;
-    history = [input, ...history.filter((h) => h !== input)].slice(0, 50);
+    // A list in the panel takes Enter for its picked row; with nothing matching, the line goes as typed (Q18).
+    const row = panel?.kind === "list" ? rows[panelPicked] : undefined;
+    if (row?.line) {
+      if (input.trim()) history = [input, ...history.filter((h) => h !== input)].slice(0, 50);
+      pickRow(row);
+      return;
+    }
+    const line = input;
+    if (!route(line)) return;
+    history = [line, ...history.filter((h) => h !== line)].slice(0, 50);
     cursor = -1;
     input = "";
     dismissed = false;
+    closePanel();
+    await execute(line);
+  }
 
+  /** Runs a bar line: an app command here (its answer in the panel), everything else as a chat turn. */
+  async function execute(line: string): Promise<void> {
+    const routed = route(line);
+    if (!routed) return;
     switch (routed.kind) {
       case "command": {
         const result = await runCommand(routed.name, routed.args);
-        toast(result.message, result.ok ? "info" : "warning");
-        if (result.detail) pushInstruction(result.detail);
+        if (result.message) toast(result.message, result.ok ? "info" : "warning");
+        if (result.panel) {
+          panel = result.panel;
+          live = false;
+          panelPicked = 0;
+          confirming = null;
+        }
         return;
       }
       case "unknown":
@@ -143,6 +248,20 @@
       planMode.update((planning) => !planning);
       return;
     }
+    if (panel && !listOpen) {
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows.length > 0) {
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        panelPicked = (panelPicked + step + rows.length) % rows.length;
+        confirming = null;
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Escape") {
+        closePanel();
+        e.preventDefault();
+        return;
+      }
+    }
     if (listOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         const step = e.key === "ArrowDown" ? 1 : -1;
@@ -167,11 +286,13 @@
       cursor = Math.min(cursor + 1, history.length - 1);
       input = history[cursor] ?? "";
       dismissed = true;
+      closePanel();
       e.preventDefault();
     } else if (e.key === "ArrowDown") {
       cursor = Math.max(cursor - 1, -1);
       input = cursor === -1 ? "" : (history[cursor] ?? "");
       dismissed = true;
+      closePanel();
       e.preventDefault();
     }
   }
@@ -179,10 +300,13 @@
   // The top-bar search icon opens the spotlight (`shell:spotlight`, `App.svelte`), not this chat field.
 </script>
 
-<div class="dock">
+<div class="dock" bind:this={dock}>
 <form class="bar" class:thinking={$busy} onsubmit={submit}>
+  {#if panel && !listOpen}
+    <SlashPanel {panel} {rows} {filter} picked={panelPicked} {confirming} onPick={pickRow} onClose={closePanel} />
+  {/if}
   {#if listOpen}
-    <ul id="assistant-commands" class="suggestions" role="listbox" aria-label="Commands">
+    <ul id="assistant-commands" class="suggestions" role="listbox" aria-label={tChat("commandsLabel")}>
       {#each shown as entry, index (`${entry.source}:${entry.name}`)}
         <li
           role="option"
@@ -206,11 +330,14 @@
     bind:value={input}
     type="text"
     {placeholder}
-    aria-label="Assistant input"
+    aria-label={tChat("inputLabel")}
     role="combobox"
     aria-autocomplete="list"
-    aria-controls="assistant-commands"
-    aria-expanded={listOpen}
+    aria-controls={panel && !listOpen ? "assistant-panel" : "assistant-commands"}
+    aria-expanded={listOpen || (panel?.kind === "list" && rows.length > 0)}
+    aria-activedescendant={panel?.kind === "list" && !listOpen && rows[panelPicked]
+      ? `assistant-panel-row-${panelPicked}`
+      : undefined}
     autocomplete="off"
     spellcheck="false"
     oninput={oninput}
@@ -222,32 +349,30 @@
       class="ax-btn mode"
       class:on={$planMode}
       aria-pressed={$planMode}
-      title={$planMode
-        ? "Plan mode: the agent reads and plans, changes nothing — click (or ⇧⇥ in the field) to let it build"
-        : "Build mode: the agent may change things — click (or ⇧⇥ in the field) to only plan"}
+      title={$planMode ? tChat("planTitle") : tChat("buildTitle")}
       onclick={() => planMode.update((planning) => !planning)}
     >
-      {$planMode ? "Plan" : "Build"}
+      {$planMode ? tChat("plan") : tChat("build")}
     </button>
     <EffortSwitch />
     <IconButton
       icon="square-pen"
       size="sm"
-      label="New session ({keyHints('⌘N', $platform)} in this field)"
+      label={tChat("newSession", { keys: keyHints("⌘N", $platform) })}
       disabled={!canStartOver}
       onclick={newSession}
     />
   </div>
   {#if $busy}
-    <span class="chip"><StatusMark tone="live" />working…</span>
+    <span class="chip"><StatusMark tone="live" />{tChat("working")}</span>
   {:else if $turns.length > 0}
     <button
       type="button"
       class="toggle"
-      title="{$turns.length} messages in this conversation"
+      title={tChat("messages", { n: $turns.length })}
       onclick={() => panelOpen.update((v) => !v)}
     >
-      <span class="toggle-label">{$panelOpen ? "hide chat" : "chat"}</span>
+      <span class="toggle-label">{$panelOpen ? tChat("hideChat") : tChat("showChat")}</span>
       <span class="toggle-count" aria-hidden="true">{$turns.length}</span>
     </button>
   {/if}

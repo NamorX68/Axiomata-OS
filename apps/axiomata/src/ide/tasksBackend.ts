@@ -4,6 +4,7 @@
  */
 
 import { invokeBackend as invoke } from "../core/backend";
+import { tStudio } from "../i18n/studio";
 
 export type TaskSource = "detected" | "personal" | "project";
 export type TaskGroup = "run" | "build" | "test" | "lint" | "other";
@@ -61,17 +62,18 @@ export function inputOf(task: TaskInfo): NewTaskInput {
 /** The one-line command, with its folder and environment, as the confirmation dialog shows it. */
 export function describeTask(task: TaskInfo): string {
   const env = task.env.map(([k, v]) => `${k}=${v}`).join(" ");
-  return [task.cwd ? `in ${task.cwd}:` : null, env || null, task.command].filter(Boolean).join(" ");
+  return [task.cwd ? tStudio("taskIn", { cwd: task.cwd }) : null, env || null, task.command].filter(Boolean).join(" ");
 }
 
 /** Tasks by what they are for, in the order the panel lists them. */
 export const GROUP_ORDER: TaskGroup[] = ["run", "build", "test", "lint", "other"];
-export const GROUP_LABEL: Record<TaskGroup, string> = {
-  run: "Run",
-  build: "Build",
-  test: "Test",
-  lint: "Check",
-  other: "Other",
+/** Each group's name, read in the current language. */
+export const GROUP_LABEL: Record<TaskGroup, () => string> = {
+  run: () => tStudio("groupRun"),
+  build: () => tStudio("groupBuild"),
+  test: () => tStudio("groupTest"),
+  lint: () => tStudio("groupLint"),
+  other: () => tStudio("groupOther"),
 };
 
 export function groupTasks(tasks: readonly TaskInfo[]): { group: TaskGroup; tasks: TaskInfo[] }[] {

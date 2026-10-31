@@ -11,6 +11,8 @@
  * (`setDate`), so it stays correct across DST and month/year boundaries.
  */
 
+import { formatDate, weekdayFormat } from "./format";
+
 /** One cell of the 6×7 month grid. */
 export interface DayCell {
   /** `YYYY-MM-DD` (local). */
@@ -127,15 +129,15 @@ export function monthGrid(year: number, month: number, today: string = todayIso(
   return {
     year,
     month,
-    label: first.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+    label: formatDate(first, { month: "long", year: "numeric" }),
     weeks,
   };
 }
 
-/** Seven weekday labels, Monday-first, in the runtime locale — e.g.
+/** Seven weekday labels, Monday-first, in the app's language — e.g.
  *  `["Mo","Di","Mi","Do","Fr","Sa","So"]` with `"short"`. */
 export function weekdayLabels(width: "short" | "narrow" = "short"): string[] {
-  const fmt = new Intl.DateTimeFormat(undefined, { weekday: width });
+  const fmt = weekdayFormat(width);
   // 2024-01-01 is a Monday.
   return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(2024, 0, 1 + i)));
 }

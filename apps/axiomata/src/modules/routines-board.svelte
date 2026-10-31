@@ -18,11 +18,13 @@
   mark, not an orange pill, and the times are plain figures — the fuse is the one thing here that glows.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import type { NewRoutine, Routine } from "../core/backend";
   import { relativeTime, untilTime } from "../core/format";
   import type { ModuleContext } from "../core/types";
+  import { tModules } from "../i18n/modules";
   import StatusMark from "../ui/StatusMark.svelte";
   import type { StatusTone } from "../ui/status";
   import RoutineForm, { type RoutineFormFields } from "./RoutineForm.svelte";
@@ -67,6 +69,20 @@
   // "Next" is waiting, not working: its fuse glows, its mark does not (the accent rule).
   const TONES: Record<ReturnType<typeof statusOf>, StatusTone> = { next: "ok", queued: "neutral", off: "off" };
 
+  /** A status as the row names it, in the current language. */
+  function statusLabel(st: ReturnType<typeof statusOf>): string {
+    if (st === "next") return tModules("statusNext");
+    if (st === "queued") return tModules("statusQueued");
+    return tModules("statusOff");
+  }
+
+  /** A routine's target kind as the owner reads it; the stored type stays `skill` / `prompt`. */
+  function targetLabel(type: string): string {
+    if (type === "skill") return tModules("targetSkill");
+    if (type === "prompt") return tModules("targetPrompt");
+    return type;
+  }
+
   /** A backend timestamp in ms, or `null`. */
   const ms = (text: string | null | undefined): number | null => {
     const value = text ? Date.parse(text) : NaN;
@@ -78,7 +94,7 @@
       routines = await ctx.invoke<Routine[]>("list_routines");
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -88,7 +104,7 @@
     try {
       await ctx.invoke<boolean>("set_routine_enabled", { id: r.id, enabled: !r.enabled });
     } catch (err) {
-      error = `toggle #${r.id}: ${String(err)}`;
+      error = tModules("toggleFailed", { id: r.id, error: messageOf(err) });
     } finally {
       toggling = toggling.filter((id) => id !== r.id);
       await refresh();
@@ -101,7 +117,7 @@
     try {
       await ctx.invoke<boolean>("delete_routine", { id: r.id });
     } catch (err) {
-      error = `delete #${r.id}: ${String(err)}`;
+      error = tModules("deleteFailed", { id: r.id, error: messageOf(err) });
     } finally {
       deleting = deleting.filter((id) => id !== r.id);
       await refresh();
@@ -123,7 +139,7 @@
       await ctx.invoke("update_routine", { id: r.id, new: updated });
       editingId = null;
     } catch (err) {
-      error = `edit #${r.id}: ${String(err)}`;
+      error = tModules("editFailed", { id: r.id, error: messageOf(err) });
     } finally {
       saving = false;
       await refresh();
@@ -142,28 +158,38 @@
     <p class="error">{error}</p>
   {/if}
   {#if visible.length === 0 && !error}
-    <p class="muted">{routines.length === 0 ? "No routines yet — add one on the flip side." : "All routines are disabled."}</p>
+    <p class="muted">{routines.length === 0 ? tModules("noRoutines") : tModules("allDisabled")}</p>
   {:else}
     <table>
       <thead>
-        <tr><th>Time</th><th>Routine</th><th>Status</th><th></th></tr>
+        <tr>
+          <th>{tModules("colTime")}</th><th>{tModules("colRoutine")}</th><th>{tModules("colStatus")}</th><th></th>
+        </tr>
       </thead>
       <tbody>
         {#each visible as r (r.id)}
           {@const st = statusOf(r)}
-          <tr class={st} title="{r.cron_expr} · {r.target.type}: {r.target.value} · last {relativeTime(r.last_fired_at)}">
+          <tr
+            class={st}
+            title={tModules("rowTitle", {
+              cron: r.cron_expr,
+              type: targetLabel(r.target.type),
+              value: r.target.value,
+              when: relativeTime(r.last_fired_at),
+            })}
+          >
             <td class="time">{r.enabled ? untilTime(r.next_fire_at) : "—"}</td>
             <td class="name">
               {r.name}
-              <span class="target">{r.target.type === "skill" ? `/${r.target.value}` : "prompt"}</span>
+              <span class="target">{r.target.type === "skill" ? `/${r.target.value}` : tModules("targetPrompt")}</span>
             </td>
-            <td class="status"><span class="state {st}"><StatusMark tone={TONES[st]} />{st}</span></td>
+            <td class="status"><span class="state {st}"><StatusMark tone={TONES[st]} />{statusLabel(st)}</span></td>
             <td class="act">
               <button
                 type="button"
                 class="edit"
-                aria-label={`Edit ${r.name}`}
-                title="Edit"
+                aria-label={tModules("editName", { name: r.name })}
+                title={tModules("edit")}
                 onclick={() => (editingId = editingId === r.id ? null : r.id)}
               >
                 ✎
@@ -172,8 +198,8 @@
                 type="button"
                 class="del"
                 disabled={deleting.includes(r.id)}
-                aria-label={`Delete ${r.name}`}
-                title="Delete"
+                aria-label={tModules("deleteName", { name: r.name })}
+                title={tModules("delete")}
                 onclick={() => void remove(r)}
               >
                 {deleting.includes(r.id) ? "…" : "✕"}
@@ -181,11 +207,13 @@
               <button
                 type="button"
                 disabled={toggling.includes(r.id)}
-                aria-label={r.enabled ? `Disable ${r.name}` : `Enable ${r.name}`}
-                title={r.enabled ? "Disable" : "Enable"}
+                aria-label={r.enabled
+                  ? tModules("disableName", { name: r.name })
+                  : tModules("enableName", { name: r.name })}
+                title={r.enabled ? tModules("disable") : tModules("enable")}
                 onclick={() => toggle(r)}
               >
-                {r.enabled ? "on" : "off"}
+                {r.enabled ? tModules("on") : tModules("off")}
               </button>
             </td>
           </tr>
@@ -206,7 +234,7 @@
                     targetValue: r.target.value,
                     backend: r.backend ?? '',
                   }}
-                  submitLabel={saving ? 'Saving…' : 'Save'}
+                  submitLabel={saving ? tModules("saving") : tModules("save")}
                   busy={saving}
                   onSubmit={(fields) => void saveEdit(r, fields)}
                   onCancel={() => (editingId = null)}

@@ -14,6 +14,7 @@
   import Terminal from "../../modules/terminal.svelte";
   import IconButton from "../../ui/IconButton.svelte";
   import { taskRuns } from "../taskRuns";
+  import { tStudio } from "../../i18n/studio";
 
   let {
     tabId,
@@ -41,9 +42,9 @@
 <div class="task-pane">
   <div class="bar">
     <span class="label" title={label}>{label}</span>
-    <span class="hint">{keyHints("⌘-click a file:line to open it", $platform)}</span>
-    <IconButton icon="square" label="Stop (Ctrl-C)" size="sm" onclick={() => terminal?.interrupt()} />
-    <IconButton icon="rotate-ccw" label="Run again" size="sm" onclick={onRestart} />
+    <span class="hint">{keyHints(tStudio("clickToOpen"), $platform)}</span>
+    <IconButton icon="square" label={tStudio("stopTask")} size="sm" onclick={() => terminal?.interrupt()} />
+    <IconButton icon="rotate-ccw" label={tStudio("runAgain")} size="sm" onclick={onRestart} />
   </div>
   <div class="body">
     {#if run && context}
@@ -51,7 +52,7 @@
         <Terminal bind:this={terminal} ctx={context} initialCommand={run.line} {onLink} />
       {/key}
     {:else}
-      <p class="none">This task was started in an earlier session. Run it again from the Run view.</p>
+      <p class="none">{tStudio("taskEarlier")}</p>
     {/if}
   </div>
 </div>

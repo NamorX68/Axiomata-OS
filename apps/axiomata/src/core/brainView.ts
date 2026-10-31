@@ -8,6 +8,7 @@
 import { writable, type Writable } from "svelte/store";
 
 import { turns, type MotionLevel } from "./motion";
+import { tSettings } from "../i18n/settings";
 
 export interface BrainView {
   /** Radians per second the cloud turns by; the slider's value. */
@@ -30,10 +31,10 @@ export interface BrainView {
  */
 export type BrainLayout = "bundle" | "map" | "hex";
 
-export const BRAIN_LAYOUTS: readonly { id: BrainLayout; label: string }[] = [
-  { id: "bundle", label: "Bundle" },
-  { id: "map", label: "Map" },
-  { id: "hex", label: "Hex" },
+export const BRAIN_LAYOUTS: readonly { id: BrainLayout; label: () => string }[] = [
+  { id: "bundle", label: () => tSettings("layoutBundle") },
+  { id: "map", label: () => tSettings("layoutMap") },
+  { id: "hex", label: () => tSettings("layoutHex") },
 ];
 
 const isLayout = (value: unknown): value is BrainLayout => BRAIN_LAYOUTS.some((x) => x.id === value);
@@ -47,10 +48,10 @@ function readLayout(value: unknown): BrainLayout | undefined {
 /** The hex cells' shimmer: `calm` holds still, `twinkle` breathes each cell, `metal` lights each by its tilt. */
 export type Shine = "calm" | "twinkle" | "metal";
 
-export const SHINES: readonly { id: Shine; label: string }[] = [
-  { id: "calm", label: "Calm" },
-  { id: "twinkle", label: "Twinkle" },
-  { id: "metal", label: "Metal" },
+export const SHINES: readonly { id: Shine; label: () => string }[] = [
+  { id: "calm", label: () => tSettings("shineCalm") },
+  { id: "twinkle", label: () => tSettings("shineTwinkle") },
+  { id: "metal", label: () => tSettings("shineMetal") },
 ];
 
 export const DEFAULT_BRAIN_VIEW: BrainView = {

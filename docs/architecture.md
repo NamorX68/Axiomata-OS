@@ -1154,6 +1154,32 @@ An agent is **role × tier × engine**, computed, never stored (Q7). Where each 
 - **UI**: the Studio's "Models & roles…" pane (`ide/panes/RosterPane.svelte`: `ModelsSection`, `RolesSection` with the
   migration notice) replaced "Engines & roles"; the handbook page is `docs/handbook/modelle-rollen.md`.
 
+### German and English (`docs/plans/i18n.md`, I1–I9, built 2026-10-30/31)
+
+- **Catalogs** (`apps/axiomata/src/i18n/`): one per area (`chat`, `settings`, `shell`, `tags`, `storage`, `flow`,
+  `agents`, `studio`, `editor`, `kanban`, `brain`, `modules`, `canvas`, `format`, `errors`), made with
+  `texts(area, en, de)`: English is the source, German has exactly the same shape (`Shape<typeof en>` — svelte-check
+  fails on a missing German text), values are named (`{name}`), counts have `{ one, other }`. `t(key)` reads the
+  language from rune state (`lang.svelte.ts`), so markup and `$derived` follow a switch at once; label lists became
+  functions or getters for the same reason. German says "du" and never genders (`catalogs.test.ts`); names stay
+  English (Studio, Canvas, Flow, Kanban, Skills, Routines, Light/Medium/Heavy, role names, git words).
+- **Language**: Settings → Appearance → Language (`system` | `de` | `en`), stored in `dashboard.json`; `system` is the
+  first of `navigator.languages` the app speaks. Dates, numbers and dollars only through `core/format.ts`
+  (`de-DE` / `en-GB`, `formatUsd`). `coverage.test.ts` checks that no component draws text of its own.
+- **What stays English**: everything a model reads (roles, start prompts, skills, the chat's `APP_GUIDE`, module
+  actions, `englishOf` for a failed action's answer), the CLI, logs and stored data (card texts, pane titles, column
+  names). The chat is told "The owner's language is …; answer in it" in its manifest (`bridge::OwnerLanguage`).
+- **Refusals by code**: `AxiomataError::Coded { code, params, message }` (`error::coded`) — Display is the English
+  sentence; only the Tauri boundary (`commands::ui` → `for_ui`) sends `␟code␟{json}␟sentence`, which
+  `core/errors.ts` `messageOf` writes from `i18n/errors.ts` (unknown code → the English). Every error display goes
+  through `messageOf` (`errorDisplay.test.ts`).
+- **Handbook**: `docs/handbook/` (German) and `docs/handbook/en/` (English), one name list in `handbook.rs` (`PAGES`,
+  `PAGES_EN`, `page_in`, `contents_in`); the Help panel asks in the app's language, the CLI's `app handbook` and the
+  chat's app tool use `handbook::owner_language()` (the stored setting, else the system's via `glut::lang::detect`).
+  A visible change updates both pages in the same commit (AGENTS.md).
+- **Left English for now**: the editor engine's own messages (`src/editor/` imports nothing from the app — Vi, find,
+  diff-hunk labels), backend refusals not yet coded, `core/lifecycle.ts` reasons (the chat reads them too).
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the

@@ -7,6 +7,7 @@
 <script lang="ts">
   import { activeTheme } from "../core/stores";
   import { THEMES, applyTheme } from "../core/themes";
+  import { tShell } from "../i18n/shell";
   import ThemePreview from "../ui/ThemePreview.svelte";
 
   let { onClose }: { onClose: () => void } = $props();
@@ -39,7 +40,7 @@
 
 <svelte:window onkeydowncapture={onKeydown} onpointerdown={onPointerDown} />
 
-<div class="picker" role="dialog" aria-label="Theme" bind:this={root}>
+<div class="picker" role="dialog" aria-label={tShell("theme")} bind:this={root}>
   <ul>
     {#each THEMES as t (t.id)}
       <li>
@@ -47,7 +48,7 @@
           type="button"
           class="theme"
           class:active={$activeTheme === t.id}
-          title={t.blurb}
+          title={t.blurb()}
           onclick={() => choose(t.id)}
         >
           <ThemePreview theme={t.id} />

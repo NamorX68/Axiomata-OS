@@ -56,6 +56,7 @@
   import { BUNDLED_FONTS } from "./terminalFonts";
   import { DEFAULT_THEME, THEMES } from "./terminalThemes";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
+  import { tCanvas } from "../i18n/canvas";
 
   let { ctx }: { ctx: ModuleContext } = $props();
 
@@ -67,7 +68,7 @@
    *  hand-maintained list) so a palette can't exist in one place but not
    *  the other. */
   const THEME_LABELS: Record<string, string> = {
-    xterm: "xterm (default)",
+    xterm: "xterm",
     "solarized-dark": "Solarized Dark",
     dracula: "Dracula",
     nord: "Nord",
@@ -121,16 +122,17 @@
    *  does something: the browser falls back to its own standard
    *  nearest-available-weight matching, the same as any other web font
    *  weight choice, not a broken/no-op setting. */
-  const FONT_WEIGHTS: { value: number; label: string }[] = [
-    { value: 100, label: "100 – Thin" },
-    { value: 200, label: "200 – Extra Light" },
-    { value: 300, label: "300 – Light" },
-    { value: 400, label: "400 – Regular" },
-    { value: 500, label: "500 – Medium" },
-    { value: 600, label: "600 – Semi Bold" },
-    { value: 700, label: "700 – Bold" },
-    { value: 800, label: "800 – Extra Bold" },
-    { value: 900, label: "900 – Black" },
+  // `label` reads the current language when drawn.
+  const FONT_WEIGHTS: { value: number; label: () => string }[] = [
+    { value: 100, label: () => `100 – ${tCanvas("weight100")}` },
+    { value: 200, label: () => `200 – ${tCanvas("weight200")}` },
+    { value: 300, label: () => `300 – ${tCanvas("weight300")}` },
+    { value: 400, label: () => `400 – ${tCanvas("weight400")}` },
+    { value: 500, label: () => `500 – ${tCanvas("weight500")}` },
+    { value: 600, label: () => `600 – ${tCanvas("weight600")}` },
+    { value: 700, label: () => `700 – ${tCanvas("weight700")}` },
+    { value: 800, label: () => `800 – ${tCanvas("weight800")}` },
+    { value: 900, label: () => `900 – ${tCanvas("weight900")}` },
   ];
 
   function setFontWeight(e: Event) {
@@ -153,7 +155,7 @@
    *  feedback: the placeholder text read as broken/confusing inside a
    *  `type="number"` field, not as a helpful hint. Falls back to the text
    *  form only if the token can't be resolved for some reason. */
-  let fontSizeDefaultHint = $state("theme default");
+  let fontSizeDefaultHint = $state("");
   /** `true` once `terminalSettings` has actually loaded — gates the form
    *  behind a brief "Loading…" (see the template) so the free-text fields'
    *  local `$state` (below) gets seeded from the *real* loaded values, not
@@ -275,21 +277,26 @@
 </script>
 
 {#if !settingsReady}
-  <p class="muted">Loading…</p>
+  <p class="muted">{tCanvas("loading")}</p>
 {:else}
   <div class="settings">
     <section>
-      <h3>Session</h3>
+      <h3>{tCanvas("session")}</h3>
       <label class="field">
-        <span>Shell</span>
-        <input type="text" placeholder="$SHELL" bind:value={shellText} onchange={setShell} />
+        <span>{tCanvas("shell")}</span>
+        <input type="text" placeholder={"$SHELL"} bind:value={shellText} onchange={setShell} />
       </label>
       <label class="field">
-        <span>Start directory</span>
-        <input type="text" placeholder={workspaceRootHint || "app default"} bind:value={cwdText} onchange={setCwd} />
+        <span>{tCanvas("startDirectory")}</span>
+        <input
+          type="text"
+          placeholder={workspaceRootHint || tCanvas("appDefault")}
+          bind:value={cwdText}
+          onchange={setCwd}
+        />
       </label>
       <label class="field">
-        <span>Scrollback (lines)</span>
+        <span>{tCanvas("scrollbackLines")}</span>
         <input
           type="number"
           min="0"
@@ -299,37 +306,34 @@
         />
       </label>
       <label class="field field-block">
-        <span>Environment variables</span>
+        <span>{tCanvas("envVars")}</span>
         <textarea rows="3" placeholder={"KEY=value\nANOTHER=value"} bind:value={envText} onchange={setEnv}></textarea>
       </label>
       <label class="field">
-        <span>Visual bell</span>
+        <span>{tCanvas("visualBell")}</span>
         <input type="checkbox" checked={$terminalSettings.bellEnabled !== false} onchange={setBellEnabled} />
       </label>
-      <p class="hint">
-        Shell, start directory, scrollback, environment variables, and visual bell apply to the next terminal
-        spawned in any tile — not the one currently running.
-      </p>
+      <p class="hint">{tCanvas("sessionHint")}</p>
     </section>
 
     <section>
-      <h3>Font</h3>
+      <h3>{tCanvas("font")}</h3>
       <label class="field">
-        <span>Font</span>
+        <span>{tCanvas("font")}</span>
         <select
           value={bundledFontNames.includes(fontFamilyText) || installedMonoNames.includes(fontFamilyText)
             ? fontFamilyText
             : ""}
           onchange={pickBundledFont}
         >
-          <option value="">Custom…</option>
-          <optgroup label="Bundled">
+          <option value="">{tCanvas("customFont")}</option>
+          <optgroup label={tCanvas("bundledFonts")}>
             {#each bundledFontNames as name (name)}
               <option value={name}>{name}</option>
             {/each}
           </optgroup>
           {#if installedMonoNames.length > 0}
-            <optgroup label="Installed on this Mac (monospaced)">
+            <optgroup label={tCanvas("installedMono")}>
               {#each installedMonoNames as name (name)}
                 <option value={name}>{name}</option>
               {/each}
@@ -338,30 +342,35 @@
         </select>
       </label>
       <label class="field">
-        <span>Font family</span>
-        <input type="text" placeholder="theme default" bind:value={fontFamilyText} onchange={setFontFamily} />
+        <span>{tCanvas("fontFamily")}</span>
+        <input
+          type="text"
+          placeholder={tCanvas("themeDefaultHint")}
+          bind:value={fontFamilyText}
+          onchange={setFontFamily}
+        />
       </label>
       <div class="field-row">
         <label class="field">
-          <span>Size (px)</span>
+          <span>{tCanvas("sizePx")}</span>
           <input
             type="number"
             min={MIN_FONT_PX}
             max={MAX_FONT_PX}
-            placeholder={fontSizeDefaultHint}
+            placeholder={fontSizeDefaultHint || tCanvas("themeDefaultHint")}
             value={typeof $terminalSettings.fontSizePx === "number" ? $terminalSettings.fontSizePx : ""}
             onchange={setFontSize}
           />
         </label>
         <label class="field">
-          <span>Weight</span>
+          <span>{tCanvas("weight")}</span>
           <select
             value={typeof $terminalSettings.fontWeight === "number" ? String($terminalSettings.fontWeight) : ""}
             onchange={setFontWeight}
           >
-            <option value="">Theme default</option>
+            <option value="">{tCanvas("themeDefault")}</option>
             {#each FONT_WEIGHTS as w (w.value)}
-              <option value={w.value}>{w.label}</option>
+              <option value={w.value}>{w.label()}</option>
             {/each}
           </select>
         </label>
@@ -369,17 +378,21 @@
     </section>
 
     <section>
-      <h3>Appearance</h3>
+      <h3>{tCanvas("appearance")}</h3>
       <label class="field">
-        <span>Theme</span>
+        <span>{tCanvas("theme")}</span>
         <select value={typeof $terminalSettings.theme === "string" ? $terminalSettings.theme : DEFAULT_THEME} onchange={setTheme}>
           {#each themeNames as name (name)}
-            <option value={name}>{THEME_LABELS[name] ?? name}</option>
+            <option value={name}
+              >{name === DEFAULT_THEME
+                ? tCanvas("themeIsDefault", { name: THEME_LABELS[name] ?? name })
+                : (THEME_LABELS[name] ?? name)}</option
+            >
           {/each}
         </select>
       </label>
       <label class="field">
-        <span>Background opacity</span>
+        <span>{tCanvas("bgOpacity")}</span>
         <input
           type="range"
           min="0"
@@ -390,31 +403,27 @@
       </label>
       <div class="field-row">
         <label class="field">
-          <span>Cursor style</span>
+          <span>{tCanvas("cursorStyle")}</span>
           <select
             value={typeof $terminalSettings.cursorStyle === "string" ? $terminalSettings.cursorStyle : DEFAULT_CURSOR_STYLE}
             onchange={setCursorStyle}
           >
-            <option value="block">Block</option>
-            <option value="outline">Outline</option>
-            <option value="underline">Underline</option>
-            <option value="bar">Bar</option>
+            <option value="block">{tCanvas("cursorBlock")}</option>
+            <option value="outline">{tCanvas("cursorOutline")}</option>
+            <option value="underline">{tCanvas("cursorUnderline")}</option>
+            <option value="bar">{tCanvas("cursorBar")}</option>
           </select>
         </label>
         <label class="field">
-          <span>Cursor blink</span>
+          <span>{tCanvas("cursorBlink")}</span>
           <input type="checkbox" checked={$terminalSettings.cursorBlink !== false} onchange={setCursorBlink} />
         </label>
       </div>
       <label class="field">
-        <span>Bold text in bright colour</span>
+        <span>{tCanvas("boldBright")}</span>
         <input type="checkbox" checked={$terminalSettings.boldIsBright !== false} onchange={setBoldIsBright} />
       </label>
-      <p class="hint">
-        Everything on this page applies live to every open terminal — no reopen or new session needed except where
-        noted above. All settings are shared by every Terminal tile and saved to terminal-settings.json, not to
-        this one tile.
-      </p>
+      <p class="hint">{tCanvas("appearanceHint")}</p>
     </section>
   </div>
 {/if}

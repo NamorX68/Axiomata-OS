@@ -24,10 +24,12 @@
  *   `paneCwd.ts`; a stored `cwd` outlives the fact it was copied from.
  */
 
+import { messageOf } from "../core/errors";
 import { get, writable, type Readable } from "svelte/store";
 
 import type { AgentSpec, IdeAgent, IdeProject } from "../core/backend";
 import { toast } from "../core/toast";
+import { tStudio } from "../i18n/studio";
 
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
@@ -86,7 +88,7 @@ export const session: Readable<ProjectSession> = { subscribe: state.subscribe };
 let sequence = 0;
 
 function report(err: unknown): void {
-  toast(err instanceof Error ? err.message : String(err), "danger");
+  toast(messageOf(err), "danger");
 }
 
 /** A fresh terminal pane. Its id is the module's `instanceId` for its lifetime. */
@@ -138,7 +140,7 @@ export function workspaceFor(project: IdeProject): Workspace {
     flow: startingFlowLayout,
   });
   if (!parsed) {
-    toast(`The stored layout for “${project.name}” could not be read; starting fresh.`, "warning");
+    toast(tStudio("layoutUnreadable", { name: project.name }), "warning");
     return starting();
   }
   // The Flow always has its planning and team panels: a closed one would have no way back.

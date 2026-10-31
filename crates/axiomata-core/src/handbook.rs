@@ -1,6 +1,7 @@
-//! The app's handbook (`docs/plans/chat-knows-app.md`, CH1): one German Markdown page per area of Axiomata, kept in
-//! the project (`docs/handbook/`) and compiled into the build, so the pages always describe the binary that carries
-//! them.
+//! The app's handbook (`docs/plans/chat-knows-app.md`, CH1): one Markdown page per area of Axiomata, in German
+//! (`docs/handbook/`) and in English (`docs/handbook/en/`, same file names — `docs/plans/i18n.md`, Q4, Q22), kept in
+//! the project and compiled into the build, so the pages always describe the binary that carries them. Both languages
+//! come from one list of names: a page missing in either folder fails the build.
 //!
 //! Every page is embedded with `include_str!`: a page missing from `docs/handbook/` fails the build, and a page the
 //! list below does not name fails [`tests::every_file_in_the_folder_is_a_listed_page`]. At the app's start
@@ -12,6 +13,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::bridge::OwnerLanguage;
 use crate::error::AxiomataError;
 use crate::paths;
 
@@ -23,20 +25,33 @@ pub struct Page {
     pub text: &'static str,
 }
 
-/// Embeds `docs/handbook/<name>.md` for every name, in the given order.
+/// Embeds `docs/handbook/<dir><name>.md` for every name, in the given order.
 macro_rules! pages {
-    ($($name:literal),* $(,)?) => {
+    ($dir:literal; $($name:literal),* $(,)?) => {
         &[$(Page {
             name: $name,
-            text: include_str!(concat!("../../../docs/handbook/", $name, ".md")),
+            text: include_str!(concat!("../../../docs/handbook/", $dir, $name, ".md")),
         }),*]
     };
 }
 
-/// The pages in the order of the plan's §3 table — the table of contents keeps it. A new area of the app gets a page
-/// here and a file in `docs/handbook/` in the same commit (AGENTS.md); the frontend's map from ring entries and
-/// settings tabs to pages (`core/handbook.ts`) names only pages of this list.
-pub const PAGES: &[Page] = pages![
+/// Both languages' pages from the one list of names below.
+macro_rules! handbook {
+    ($($name:literal),* $(,)?) => {
+        /// The German pages in the order of the plan's §3 table — the table of contents keeps it. A new area of the
+        /// app gets a page in both folders in the same commit (AGENTS.md); the frontend's map from ring entries and
+        /// settings tabs to pages (`core/handbook.ts`) names only pages of this list.
+        pub const PAGES: &[Page] = pages!["";
+            $($name),*
+        ];
+        /// The same pages in English (`docs/handbook/en/`).
+        pub const PAGES_EN: &[Page] = pages!["en/";
+            $($name),*
+        ];
+    };
+}
+
+handbook![
     "index",
     "orbit",
     "second-brain",
@@ -63,6 +78,10 @@ pub const PAGES: &[Page] = pages![
 /// The folder's own note, written beside the pages: the folder belongs to the build and is replaced, so it is no place
 /// for the owner's notes (those belong in the vault). Not a page: it is in no table of contents.
 pub const README: &str = include_str!("../../../docs/handbook/README.md");
+/// The same note for the English folder.
+pub const README_EN: &str = include_str!("../../../docs/handbook/en/README.md");
+/// The English pages' folder inside the handbook's folder.
+const EN_DIR: &str = "en";
 const README_NAME: &str = "README.md";
 
 /// Longest summary sentence the table of contents carries; a longer first paragraph is cut there.
@@ -109,20 +128,65 @@ impl Page {
     }
 }
 
-/// The page named `name`, if the build has one. The only lookup there is: a name is matched against the list, never
-/// turned into a path, so no caller can reach a file through it.
-pub fn page(name: &str) -> Option<&'static Page> {
-    let name = name.trim().trim_end_matches(".md");
-    PAGES.iter().find(|page| page.name == name)
+/// The pages in `language`.
+pub fn pages(language: OwnerLanguage) -> &'static [Page] {
+    match language {
+        OwnerLanguage::De => PAGES,
+        OwnerLanguage::En => PAGES_EN,
+    }
 }
 
-/// The table of contents: one line per page, `` - `name` — Title: summary ``, in [`PAGES`] order. The chat's prompt
-/// carries it instead of the pages themselves (Q2).
+/// The German page named `name`, if the build has one. The only lookup there is: a name is matched against the list,
+/// never turned into a path, so no caller can reach a file through it.
+pub fn page(name: &str) -> Option<&'static Page> {
+    page_in(name, OwnerLanguage::De)
+}
+
+/// The page named `name` in `language` — the same names in both.
+pub fn page_in(name: &str, language: OwnerLanguage) -> Option<&'static Page> {
+    let name = name.trim().trim_end_matches(".md");
+    pages(language).iter().find(|page| page.name == name)
+}
+
+/// The German table of contents (see [`contents_in`]).
 pub fn contents() -> String {
-    PAGES
+    contents_in(OwnerLanguage::De)
+}
+
+/// The table of contents in `language`: one line per page, `` - `name` — Title: summary ``, in [`PAGES`] order. The
+/// chat's prompt carries it instead of the pages themselves (Q2).
+pub fn contents_in(language: OwnerLanguage) -> String {
+    pages(language)
         .iter()
         .map(|page| format!("- `{}` — {}: {}\n", page.name, page.title(), page.summary()))
         .collect()
+}
+
+/// The language the owner reads the app in, for a reader outside the app's window — the CLI's `app handbook` and the
+/// chat's app tool: the "language" the app stored in `dashboard.json` (`system`, `de`, `en`), "system" resolved as
+/// Glut resolves it (`glut::lang::detect`); English when the app never stored one and the system is not German.
+pub fn owner_language() -> OwnerLanguage {
+    let stored = fs::read_to_string(paths::dashboard_state_path())
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|state| state["settings"]["language"].as_str().map(str::to_owned));
+    match stored.as_deref() {
+        Some("de") => OwnerLanguage::De,
+        Some("en") => OwnerLanguage::En,
+        _ => system_language(),
+    }
+}
+
+/// The system's language as Glut reads it — once per process: on a Mac it asks `defaults`, which may take a moment.
+fn system_language() -> OwnerLanguage {
+    static SYSTEM: std::sync::OnceLock<OwnerLanguage> = std::sync::OnceLock::new();
+    *SYSTEM.get_or_init(|| {
+        if glut::lang::detect() == glut::lang::Lang::De {
+            OwnerLanguage::De
+        } else {
+            OwnerLanguage::En
+        }
+    })
 }
 
 /// Brings `dir` to the build's handbook: every page and the README written where the file is missing or differs (an
@@ -131,15 +195,20 @@ pub fn contents() -> String {
 ///
 /// Errors: [`AxiomataError::Io`] at the first file that cannot be read, written or removed.
 pub fn install_into(dir: &Path) -> Result<usize, AxiomataError> {
+    Ok(install_pages(dir, PAGES, README)? + install_pages(&dir.join(EN_DIR), PAGES_EN, README_EN)?)
+}
+
+/// [`install_into`] for one language's folder.
+fn install_pages(dir: &Path, pages: &[Page], readme: &'static str) -> Result<usize, AxiomataError> {
     let io = |path: &Path| {
         let path = path.to_path_buf();
         move |source| AxiomataError::Io { path, source }
     };
     fs::create_dir_all(dir).map_err(io(dir))?;
-    let wanted: Vec<(String, &str)> = PAGES
+    let wanted: Vec<(String, &str)> = pages
         .iter()
         .map(|page| (page.file_name(), page.text))
-        .chain(std::iter::once((README_NAME.to_owned(), README)))
+        .chain(std::iter::once((README_NAME.to_owned(), readme)))
         .collect();
     let mut changed = 0;
     for (name, text) in &wanted {
@@ -220,6 +289,58 @@ mod tests {
     }
 
     #[test]
+    fn every_page_is_there_in_english_with_the_same_name_title_and_summary() {
+        let german: Vec<&str> = PAGES.iter().map(|page| page.name).collect();
+        let english: Vec<&str> = PAGES_EN.iter().map(|page| page.name).collect();
+        assert_eq!(english, german);
+        for page in PAGES_EN {
+            assert!(
+                !page.title().is_empty(),
+                "en/{}.md must open with `# Title`",
+                page.name
+            );
+            assert!(
+                page.summary().chars().count() >= 10,
+                "en/{}.md needs a summary sentence",
+                page.name
+            );
+        }
+        assert!(README_EN.starts_with("# "));
+        assert_eq!(
+            page_in("kanban", OwnerLanguage::En).map(|p| p.text),
+            Some(PAGES_EN[9].text)
+        );
+        assert_ne!(
+            contents_in(OwnerLanguage::En),
+            contents_in(OwnerLanguage::De)
+        );
+    }
+
+    #[test]
+    fn the_owners_language_is_the_one_the_app_stored() {
+        let _guard = crate::test_support::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let home = unique_temp_dir("axiomata-test-handbook-lang");
+        fs::create_dir_all(&home).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe { std::env::set_var(paths::AXIOMATA_HOME_ENV, &home) };
+        let store = |language: &str| {
+            fs::write(
+                paths::dashboard_state_path(),
+                format!(r#"{{"settings":{{"language":"{language}"}}}}"#),
+            )
+            .unwrap()
+        };
+        store("de");
+        assert_eq!(owner_language(), OwnerLanguage::De);
+        store("en");
+        assert_eq!(owner_language(), OwnerLanguage::En);
+        unsafe { std::env::remove_var(paths::AXIOMATA_HOME_ENV) };
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn every_page_has_a_title_and_a_summary_sentence() {
         for page in PAGES {
             assert!(
@@ -235,6 +356,21 @@ mod tests {
             );
         }
         assert!(README.starts_with("# "), "README.md opens with a title");
+    }
+
+    #[test]
+    fn every_file_in_the_english_folder_is_a_listed_page() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/handbook/en");
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name.strip_suffix(".md") else {
+                continue;
+            };
+            assert!(
+                name == README_NAME || page_in(stem, OwnerLanguage::En).is_some(),
+                "docs/handbook/en/{name} is in no table of contents"
+            );
+        }
     }
 
     #[test]
@@ -286,7 +422,15 @@ mod tests {
     #[test]
     fn install_replaces_what_differs_and_removes_stale_pages() {
         let dir = unique_temp_dir("axiomata-test-handbook");
-        assert_eq!(install_into(&dir).unwrap(), PAGES.len() + 1);
+        assert_eq!(
+            install_into(&dir).unwrap(),
+            2 * (PAGES.len() + 1),
+            "both languages"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("en/studio.md")).unwrap(),
+            page_in("studio", OwnerLanguage::En).unwrap().text
+        );
         assert_eq!(
             install_into(&dir).unwrap(),
             0,

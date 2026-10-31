@@ -7,9 +7,12 @@
   Markdown is rendered by `core/markdown.ts`, which sanitises it, so `{@html}` only ever shows what DOMPurify kept.
 -->
 <script lang="ts">
+  import { lang } from "../i18n/lang.svelte";
+  import { messageOf } from "../core/errors";
   import { renderMarkdown } from "../core/markdown";
   import { listHandbook, pageOfLink, readHandbookPage, withPageLinks, type HandbookEntry } from "../core/handbook";
   import { registerShellView } from "../core/openViews";
+  import { tShell } from "../i18n/shell";
   import Window from "./Window.svelte";
 
   let {
@@ -35,18 +38,27 @@
   let article = $state<HTMLElement | null>(null);
 
   const known = $derived(new Set(entries.map((entry) => entry.name)));
-  const title = $derived(entries.find((entry) => entry.name === current)?.title ?? "Handbook");
+  const title = $derived(entries.find((entry) => entry.name === current)?.title ?? tShell("handbook"));
 
   // Known as open to the chat's `close_view` (CH5); a page being read loses nothing by closing.
   $effect(() =>
-    open ? registerShellView("handbook", { title: `Handbook — ${title}`, close: () => (open = false) }) : undefined,
+    open
+      ? registerShellView("handbook", { title: tShell("handbookView", { title }), close: () => (open = false) })
+      : undefined,
   );
 
+  /** The language the table of contents was read in: a switch reads it again (titles differ by language). */
+  let entriesLang = $state<string | null>(null);
+
   $effect(() => {
-    if (!open || entries.length > 0) return;
+    const language = lang();
+    if (!open || entriesLang === language) return;
     listHandbook()
-      .then((list) => (entries = list))
-      .catch((err) => (failure = String(err)));
+      .then((list) => {
+        entries = list;
+        entriesLang = language;
+      })
+      .catch((err) => (failure = messageOf(err)));
   });
 
   // A page asked for from outside wins over the one last shown.
@@ -65,7 +77,7 @@
         article?.scrollTo({ top: 0 });
       })
       .catch((err) => {
-        if (name === current) failure = String(err);
+        if (name === current) failure = messageOf(err);
       });
   });
 
@@ -81,7 +93,7 @@
 
 {#if open}
   <Window
-    title="Handbook"
+    title={tShell("handbook")}
     subtitle={title}
     onClose={() => (open = false)}
     movable
@@ -90,7 +102,7 @@
     defaultSize={PANEL_SIZE}
   >
     <div class="handbook">
-      <nav class="pages" aria-label="Handbook pages">
+      <nav class="pages" aria-label={tShell("handbookPages")}>
         {#each entries as entry (entry.name)}
           <button
             type="button"

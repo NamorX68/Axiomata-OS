@@ -9,6 +9,7 @@
 
 import { type BoardCard, type RunSummary, type SpendSummary, runFailed } from "./backend";
 import type { StatusTone } from "../ui/status";
+import { tShell } from "../i18n/shell";
 
 /** One spark on the strip. */
 export interface Beat {
@@ -52,7 +53,7 @@ export function beatsFromRuns(runs: readonly RunSummary[], now: number): Beat[] 
       key: `run:${run.id}`,
       kind: "run",
       id: run.id,
-      label: run.source === "routine" ? `${run.skill_name} (routine)` : run.skill_name,
+      label: run.source === "routine" ? tShell("beatRoutine", { name: run.skill_name }) : run.skill_name,
       start,
       end: start + Math.max(0, run.duration_ms),
       tone: run.status === "running" ? "live" : runFailed(run.status) ? "bad" : "ok",
@@ -103,11 +104,12 @@ export function beatsFromCards(cards: readonly BoardCard[], now: number, openCar
 /** A spark's length in words for the list: "40 s", "12 min", "2 h 5 min"; still going on counts up to `now`. */
 export function durationText(beat: Beat, now: number): string {
   const seconds = Math.max(0, Math.round(((beat.end ?? now) - beat.start) / 1000));
-  if (seconds < 60) return `${seconds} s`;
+  if (seconds < 60) return tShell("durSeconds", { n: seconds });
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return tShell("durMinutes", { n: minutes });
+  const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest === 0 ? `${Math.floor(minutes / 60)} h` : `${Math.floor(minutes / 60)} h ${rest} min`;
+  return rest === 0 ? tShell("durHours", { h: hours }) : tShell("durHoursMinutes", { h: hours, m: rest });
 }
 
 /** The card ids of an `open_card_sessions` answer; anything that is not one counts as none. */

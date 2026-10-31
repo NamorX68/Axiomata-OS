@@ -15,6 +15,7 @@
  * text as sent (`textForSave`), a closed file's text on disk.
  */
 
+import { messageOf } from "../core/errors";
 import { writable } from "svelte/store";
 
 import { run, UNWRAPPED } from "../editor/commands";
@@ -22,6 +23,7 @@ import { bodyForStore } from "../editor/detect";
 import type { Change, EditorDocument } from "../editor/document";
 import { applyTextEdits, textChanges, type TextEdit } from "../editor/textEdits";
 import type { FileVersion } from "../core/backend";
+import { tEditor } from "../i18n/editor";
 
 /** Bumped when a document was changed from outside its editor, so every surface redraws if it is its own. */
 export const docTouched = writable(0);
@@ -75,7 +77,7 @@ export async function applyWorkspaceEdit(edits: Map<string, TextEdit[]>, ports: 
     }
     const file = ports.fileOf(uri);
     if (!file) {
-      outcome.skipped.push({ file: uri, reason: "outside the project" });
+      outcome.skipped.push({ file: uri, reason: tEditor("editOutsideProject") });
       continue;
     }
     try {
@@ -83,8 +85,8 @@ export async function applyWorkspaceEdit(edits: Map<string, TextEdit[]>, ports: 
       closed.push({ ...file, content, version, edits: fileEdits });
     } catch (err) {
       const kind = (err as { kind?: string } | null)?.kind;
-      const why = kind === "NotFound" ? "it would create" : "it cannot read";
-      return { changed: 0, skipped: [], refused: `${why} ${file.rel}` };
+      const refused = tEditor(kind === "NotFound" ? "editWouldCreate" : "editCannotRead", { file: file.rel });
+      return { changed: 0, skipped: [], refused };
     }
   }
   let touched = false;
@@ -104,7 +106,8 @@ export async function applyWorkspaceEdit(edits: Map<string, TextEdit[]>, ports: 
       outcome.changed++;
     } catch (err) {
       const kind = (err as { kind?: string } | null)?.kind;
-      outcome.skipped.push({ file: file.rel, reason: kind === "Conflict" ? "changed on disk meanwhile" : String(err) });
+      const reason = kind === "Conflict" ? tEditor("editChangedOnDisk") : messageOf(err);
+      outcome.skipped.push({ file: file.rel, reason });
     }
   }
   if (touched) docTouched.update((n) => n + 1);

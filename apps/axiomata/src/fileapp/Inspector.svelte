@@ -8,6 +8,7 @@
 </script>
 
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
   import IconButton from "../ui/IconButton.svelte";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import ShortcutsPanel from "./ShortcutsPanel.svelte";
@@ -23,22 +24,22 @@
 
   let { tab, surface, onTab, onClose }: Props = $props();
 
-  const TABS: { id: InspectorTab; label: string }[] = [
-    { id: "settings", label: "Settings" },
-    { id: "shortcuts", label: "Shortcuts" },
+  const TABS: { id: InspectorTab; label: () => string }[] = [
+    { id: "settings", label: () => tEditor("inspectorSettings") },
+    { id: "shortcuts", label: () => tEditor("inspectorShortcuts") },
   ];
 </script>
 
-<aside class="inspector ax-glass-pane" aria-label="Inspector">
+<aside class="inspector ax-glass-pane" aria-label={tEditor("inspector")}>
   <header>
-    <div class="tabs" role="tablist" aria-label="Inspector">
+    <div class="tabs" role="tablist" aria-label={tEditor("inspector")}>
       {#each TABS as t (t.id)}
         <button type="button" role="tab" class:active={tab === t.id} aria-selected={tab === t.id} onclick={() => onTab(t.id)}>
-          {t.label}
+          {t.label()}
         </button>
       {/each}
     </div>
-    <IconButton icon="x" label="Close the inspector" onclick={onClose} />
+    <IconButton icon="x" label={tEditor("closeInspector")} onclick={onClose} />
   </header>
   {#if tab === "settings"}
     <EditorSettingsPanel {surface} />

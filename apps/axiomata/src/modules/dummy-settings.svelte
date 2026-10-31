@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ModuleContext } from "../core/types";
+  import { tCanvas } from "../i18n/canvas";
 
   // Flip-side settings for the step-2 dummy: proves per-instance config
   // round-trips through `ctx.config`.
@@ -17,7 +18,7 @@
 <div class="settings">
   <label>
     <input type="checkbox" checked={$config.compact === true} onchange={setCompact} />
-    Compact layout
+    {tCanvas("compactLayout")}
   </label>
 </div>
 

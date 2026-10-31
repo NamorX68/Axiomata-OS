@@ -14,6 +14,7 @@
   chips at the top (concept note Q6, 2026-10-29); a chip is a tag's click too.
 -->
 <script lang="ts">
+  import { tEditor } from "../i18n/editor";
   import { KEEP_SCROLL } from "./keepScroll";
   import { invokeBackend } from "../core/backend";
   import { frontmatterTags } from "../core/frontmatterTags";
@@ -129,12 +130,12 @@
   onclick={onClick}
 >
   {#if chips.length > 0}
-    <div class="front-tags" role="group" aria-label="Tags">
+    <div class="front-tags" role="group" aria-label={tEditor("tags")}>
       {#each chips as tag (tag)}
         <button
           type="button"
           class="chip"
-          title="Show the notes tagged #{tag} in the Second Brain"
+          title={tEditor("showTagged", { tag })}
           onclick={() => onTag?.(tag)}>#{tag}</button
         >
       {/each}

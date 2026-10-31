@@ -13,7 +13,9 @@ import type {
   PlanSpend,
   PlanStatus,
 } from "../core/backend";
+import { formatNumber, formatUsd } from "../core/format";
 import type { Role } from "../core/roster";
+import { tFlow } from "../i18n/flow";
 import {
   addTab,
   allGroups,
@@ -35,10 +37,15 @@ import { GRAPH_PANE, PLAN_PANE, TEAM_PANE, graphTab, planTab, teamTab } from "./
 /** The role kinds that do not take cards: a reviewer judges them, a planner makes them. */
 const NOT_ASSIGNABLE = new Set(["review", "plan", "grill"]);
 
-const STATUS_LABEL: Record<PlanStatus, string> = { draft: "draft", approved: "released", closed: "closed" };
-
 export function planStatusLabel(status: PlanStatus): string {
-  return STATUS_LABEL[status];
+  switch (status) {
+    case "draft":
+      return tFlow("statusDraft");
+    case "approved":
+      return tFlow("statusReleased");
+    case "closed":
+      return tFlow("statusClosed");
+  }
 }
 
 /** The plans newest first: the one the owner made last is the one they want to see. */
@@ -311,7 +318,7 @@ export function needsCandidates(
 /** What the Studio calls a proposal whose card has no title worth reading (a planner may send an empty line). */
 export function proposalTitle(card: Pick<BoardCard, "id" | "title">): string {
   const first = card.title.split("\n")[0].trim();
-  return first === "" ? `Card #${card.id}` : first;
+  return first === "" ? tFlow("cardFallback", { id: card.id }) : first;
 }
 
 /**
@@ -469,59 +476,60 @@ export function resetFlowPanes(layout: Layout): Layout {
 export function runEventNote(event: PlanRunEvent): { text: string; tone: "info" | "warning" } | null {
   switch (event.event) {
     case "started":
-      return { text: `Plan #${event.plan_id}: card #${event.card_id} starts by itself.`, tone: "info" };
+      return { text: tFlow("eventStarted", { plan: event.plan_id, card: event.card_id }), tone: "info" };
     case "integrated":
       if (event.outcome === "done") {
-        return { text: `Card #${event.card_id} is integrated into plan #${event.plan_id}.`, tone: "info" };
+        return { text: tFlow("eventIntegrated", { card: event.card_id, plan: event.plan_id }), tone: "info" };
       }
       if (event.outcome === "conflict") {
-        const files = event.files.join(", ");
+        const params = { card: event.card_id, files: event.files.join(", ") };
         return event.gave_up
-          ? {
-              text: `Card #${event.card_id} does not fit the plan the second time either (${files}); it stays as it is. You decide.`,
-              tone: "warning",
-            }
-          : {
-              text: `Card #${event.card_id} no longer fit the plan (${files}) and will be redone on the new state.`,
-              tone: "warning",
-            };
+          ? { text: tFlow("eventGaveUp", params), tone: "warning" }
+          : { text: tFlow("eventRedo", params), tone: "warning" };
       }
       return null;
     case "blocked":
-      return { text: `Card #${event.card_id} made no progress: ${event.reason}`, tone: "warning" };
+      return { text: tFlow("eventBlocked", { card: event.card_id, reason: event.reason }), tone: "warning" };
     case "ready_to_take_over":
-      return { text: `The plan “${event.name}” is finished: all cards are integrated. Ready to take over.`, tone: "info" };
+      return { text: tFlow("eventReady", { name: event.name }), tone: "info" };
     case "escalated":
       return {
-        text: `Card #${event.card_id} was returned twice: “${event.role}” on “${event.engine_id}” takes over from “${event.from_role}” (same worktree, same branch). If that does not work either, you decide.`,
+        text: tFlow("eventEscalated", {
+          card: event.card_id,
+          role: event.role,
+          engine: event.engine_id,
+          from: event.from_role,
+        }),
         tone: "info",
       };
     case "paused":
-      return {
-        text: `Plan “${event.name}” is paused: ${event.reason}. Nothing new starts until you say “Continue” in the Flow.`,
-        tone: "warning",
-      };
+      return { text: tFlow("eventPaused", { name: event.name, reason: event.reason }), tone: "warning" };
     case "day_cap_reached":
-      return {
-        text: `Daily limit of the Studio sessions reached (${event.reason}). Nothing new starts until tomorrow or until you raise it in the config.`,
-        tone: "warning",
-      };
+      return { text: tFlow("eventDayCap", { reason: event.reason }), tone: "warning" };
   }
 }
 
 /** Tokens in the owner's reading size: `1.2 M`, `340 k`. */
 export function tokensLabel(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)} M`;
-  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)} k`;
-  return String(tokens);
+  const one = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
+  if (tokens >= 1_000_000) return `${formatNumber(tokens / 1_000_000, one)} M`;
+  if (tokens >= 1_000) return `${formatNumber(Math.round(tokens / 1_000))} k`;
+  return formatNumber(tokens);
 }
 
 /** One line for a plan's spending: tokens and — only when something was priced — dollars, each against its limit. */
 export function spendLine(spend: Pick<PlanSpend, "spent" | "limits">): string {
-  const tokens = `${tokensLabel(spend.spent.tokens)} of ${tokensLabel(spend.limits.max_tokens)} tokens`;
+  const tokens = tFlow("spendTokens", {
+    spent: tokensLabel(spend.spent.tokens),
+    limit: tokensLabel(spend.limits.max_tokens),
+  });
   // A subscription engine has no dollar figure: nothing is shown rather than "$0.00", which would read as "free".
   if (spend.spent.cost_usd <= 0) return tokens;
-  return `${tokens} · $${spend.spent.cost_usd.toFixed(2)} of $${spend.limits.max_cost_usd.toFixed(2)}`;
+  const cost = tFlow("spendCost", {
+    spent: formatUsd(spend.spent.cost_usd),
+    limit: formatUsd(spend.limits.max_cost_usd),
+  });
+  return `${tokens} · ${cost}`;
 }
 
 /**

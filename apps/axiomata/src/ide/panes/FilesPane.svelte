@@ -8,6 +8,7 @@
 <script lang="ts">
   import type { FileRootInfo } from "../../core/backend";
   import { toast } from "../../core/toast";
+  import { tStudio } from "../../i18n/studio";
   import FileTree from "../../fileapp/FileTree.svelte";
   import type { FileRef } from "../../fileapp/tabs";
   import { getDock } from "../dockContext";
@@ -45,15 +46,15 @@
 
 <div class="files-pane">
   <div class="bar">
-    <span>Files</span>
+    <span>{tStudio("paneFiles")}</span>
     <IconButton
       icon={config.showHidden ? "eye" : "eye-off"}
-      label={config.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
+      label={config.showHidden ? tStudio("hideHidden") : tStudio("showHidden")}
       pressed={config.showHidden}
       size="sm"
       onclick={() => onConfig({ ...config, showHidden: !config.showHidden })}
     />
-    <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => tree?.refresh()} />
+    <IconButton icon="refresh-cw" label={tStudio("readFolders")} size="sm" onclick={() => tree?.refresh()} />
   </div>
   <FileTree
     bind:this={tree}

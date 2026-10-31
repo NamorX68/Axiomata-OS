@@ -10,11 +10,14 @@
    * The card treatment is here for the same reason — it is set once and then left alone — and applies to the whole
    * application (`kanbanPrefs.ts`).
    */
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
 
   import { invokeBackend as invoke, type Board } from "../core/backend";
   import { emit } from "../core/bus";
   import { forgetBoard, refreshBoard } from "../core/boardStore";
+  import { tFlow } from "../i18n/flow";
+  import { tKanban as t } from "../i18n/kanban";
   import { refreshAgents } from "../ide/projectSession";
   import { cardStripes, setCardStripes } from "./kanbanPrefs";
 
@@ -34,6 +37,9 @@
     onChanged?: () => void;
   } = $props();
 
+  /** A mark, not a word: the same in every language. */
+  const MARK_DELETE = "✕";
+
   let boards = $state<Board[]>([]);
   let error = $state("");
   let busy = $state(false);
@@ -46,7 +52,7 @@
       boards = await invoke<Board[]>("list_boards");
       error = "";
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -63,7 +69,7 @@
       await load();
       onChanged();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       busy = false;
     }
@@ -77,7 +83,7 @@
       await Promise.all([load(), refreshBoard(board.id)]);
       onChanged();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -87,7 +93,7 @@
       const cards = await invoke<number>("count_board_cards", { boardId: board.id });
       confirming = { id: board.id, cards };
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -105,7 +111,7 @@
       onChanged();
       if (current === id) onDeleted();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     } finally {
       busy = false;
     }
@@ -113,14 +119,14 @@
 </script>
 
 <div class="boards">
-  <h3>Boards</h3>
+  <h3>{t("boards")}</h3>
 
   {#if error}
     <p class="error">{error}</p>
   {/if}
 
   {#if boards.length === 0}
-    <p class="hint">No board created yet.</p>
+    <p class="hint">{t("noBoardCreated")}</p>
   {/if}
 
   <ul>
@@ -136,24 +142,22 @@
           <input
             class="name"
             value={board.name}
-            aria-label="Name of the board"
+            aria-label={t("boardName")}
             onblur={(event) => rename(board, event.currentTarget.value)}
           />
         </label>
-        <button class="remove" onclick={() => askDelete(board)} aria-label="Delete the board">✕</button>
+        <button class="remove" onclick={() => askDelete(board)} aria-label={t("deleteBoard")}>{MARK_DELETE}</button>
       </li>
 
       {#if confirming?.id === board.id}
         <li class="confirm">
           <span>
-            {confirming.cards === 0
-              ? "Delete the board?"
-              : `${confirming.cards} ${confirming.cards === 1 ? "card is" : "cards are"} deleted with it.`}
+            {confirming.cards === 0 ? t("deleteBoardQuestion") : t("cardsDeletedWith", { n: confirming.cards })}
           </span>
           <button class="danger" disabled={busy} onclick={() => confirmDelete(board.id)}>
-            Löschen
+            {tFlow("delete")}
           </button>
-          <button onclick={() => (confirming = null)}>Cancel</button>
+          <button onclick={() => (confirming = null)}>{tFlow("cancel")}</button>
         </li>
       {/if}
     {/each}
@@ -165,16 +169,16 @@
       void create();
     }}
   >
-    <input placeholder="New board …" bind:value={newName} aria-label="Name of the new board" />
-    <button type="submit" disabled={busy || newName.trim() === ""}>Anlegen</button>
+    <input placeholder={t("newBoard")} bind:value={newName} aria-label={t("newBoardName")} />
+    <button type="submit" disabled={busy || newName.trim() === ""}>{t("create")}</button>
   </form>
 
-  <h3>Cards</h3>
+  <h3>{t("cards")}</h3>
   <label class="stripes">
     <input type="checkbox" checked={$cardStripes} onchange={(e) => setCardStripes(e.currentTarget.checked)} />
-    <span>Colour stripe by the first label</span>
+    <span>{t("colourStripe")}</span>
   </label>
-  <p class="hint">Applies to all boards.</p>
+  <p class="hint">{t("allBoards")}</p>
 </div>
 
 <style>

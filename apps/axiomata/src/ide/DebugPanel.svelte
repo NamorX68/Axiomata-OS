@@ -9,6 +9,7 @@
   editor's.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
   import { get } from "svelte/store";
 
@@ -34,6 +35,7 @@
   import { debugKeyAction, KEY_LABEL } from "./debugKeys";
   import { EMPTY_FORM, formOf, splitArgs, toNewConfig, type DebugForm } from "./debugForm";
   import type { DebugVariable } from "./debugBackend";
+  import { tStudio } from "../i18n/studio";
 
   let {
     root,
@@ -95,7 +97,7 @@
       listed = await listDebugConfigs(root);
     } catch (err) {
       listed = null;
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
   }
 
@@ -111,7 +113,7 @@
       await trustDebugFile(root, listed.project_file.hash);
       reviewing = false;
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
     await refresh();
   }
@@ -144,19 +146,19 @@
       choice = `named:${saved.name}`;
       picked = true;
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     } finally {
       saving = false;
     }
   }
 
   async function remove(c: DebugConfigInfo): Promise<void> {
-    if (!root || !window.confirm(`Remove “${c.name}” from the project's debug.json?`)) return;
+    if (!root || !window.confirm(tStudio("removeConfig", { name: c.name }))) return;
     try {
       await removeDebugConfig(root, c.name);
       await refresh();
     } catch (err) {
-      onError((err as { message?: string }).message ?? String(err));
+      onError(messageOf(err));
     }
   }
 
@@ -170,7 +172,7 @@
     // The project's own ways to start come first (an app is debugged from its entry point, not from
     // whichever file is open); the file in front is the fallback.
     for (const c of listed?.configs ?? []) out.push({ value: `named:${c.name}`, label: c.name, disabled: locked(c) });
-    if (fileRel) out.push({ value: "file", label: `Current file — ${fileRel}`, disabled: false });
+    if (fileRel) out.push({ value: "file", label: tStudio("currentFile", { rel: fileRel }), disabled: false });
     return out;
   });
   /** The owner picked something themselves; until then the first way to start the project is the choice. */
@@ -186,8 +188,18 @@
   let argsByChoice = $state<Record<string, string>>({});
   const argsPlaceholder = $derived.by(() => {
     const own = chosen?.args ?? [];
-    return own.length > 0 ? `Arguments — ${own.join(" ")}` : "Arguments (optional)";
+    return own.length > 0 ? tStudio("argumentsOwn", { args: own.join(" ") }) : tStudio("argumentsOptional");
   });
+
+  /** Why the program paused, as the adapter says it (its words, not ours): ` — breakpoint: …`, or nothing. */
+  const stopDetail = $derived.by(() => {
+    const stop = $ds.stop;
+    if (!stop) return "";
+    return stop.text ? ` — ${stop.reason}: ${stop.text}` : ` — ${stop.reason}`;
+  });
+
+  /** The project's own file, named as it is on disk in every language. */
+  const PROJECT_FILE = ".axiomata/debug.json";
 
   const busy = $derived($ds.phase === "starting" || $ds.phase === "running" || $ds.phase === "stopped");
   /** The session's mark: alive while it runs, waiting on the owner while paused, still once it ended. */
@@ -271,16 +283,16 @@
 {/snippet}
 
 <div class="panel">
-  <SectionHead label="Debug" rule level={2}>
+  <SectionHead label={tStudio("debug")} rule level={2}>
     {#snippet actions()}
       {#if $ds.phase === "idle" || $ds.phase === "ended"}
-        <IconButton icon="refresh-cw" label="Read the configurations again" size="sm" onclick={() => void refresh()} />
+        <IconButton icon="refresh-cw" label={tStudio("readConfigs")} size="sm" onclick={() => void refresh()} />
       {/if}
     {/snippet}
   </SectionHead>
   <div class="body">
     {#if !root}
-      <p class="note">Open a project to debug it.</p>
+      <p class="note">{tStudio("openToDebug")}</p>
     {:else}
       {#if listed?.project_file && !listed.project_file.trusted && $ds.phase !== "running" && $ds.phase !== "stopped"}
         {#snippet review()}
@@ -288,21 +300,20 @@
             {#each projectConfigs as c (c.name)}<li><code>{c.name}: {describe(c)}</code></li>{/each}
           </ul>
           <div class="actions">
-            <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these</button>
-            <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
+            <button type="button" class="ax-btn primary" onclick={() => void allow()}>{tStudio("allowThese")}</button>
+            <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>{tStudio("cancel")}</button>
           </div>
         {/snippet}
         <div class="notice-slot">
-          <Notice title="Project debug setups need your review" alert children={reviewing ? review : undefined}>
+          <Notice title={tStudio("debugReview")} alert children={reviewing ? review : undefined}>
             {#snippet details()}
               <p>
-                This project has its own <code>.axiomata/debug.json</code>. It starts programs from the repository, so it
-                stays off until you have looked at them.
+                {tStudio("debugReviewBefore")} <code>{PROJECT_FILE}</code>. {tStudio("debugReviewAfter")}
               </p>
             {/snippet}
             {#snippet action()}
               {#if !reviewing}
-                <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
+                <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>{tStudio("review")}</button>
               {/if}
             {/snippet}
           </Notice>
@@ -312,29 +323,49 @@
       {#if !busy}
         <section class="plate g-start">
           <h3>
-            <span class="swatch" aria-hidden="true"></span>Start
+            <span class="swatch" aria-hidden="true"></span>{tStudio("start")}
             {#if chosen && !chosen.detected && !locked(chosen)}
               <span class="head-actions">
-                <IconButton icon="pencil" label="Edit {chosen.name}" size="sm" onclick={() => startEdit(chosen)} />
-                <IconButton icon="trash-2" label="Remove {chosen.name}" size="sm" onclick={() => void remove(chosen)} />
+                <IconButton
+                  icon="pencil"
+                  label={tStudio("editNamed", { name: chosen.name })}
+                  size="sm"
+                  onclick={() => startEdit(chosen)}
+                />
+                <IconButton
+                  icon="trash-2"
+                  label={tStudio("removeNamed", { name: chosen.name })}
+                  size="sm"
+                  onclick={() => void remove(chosen)}
+                />
               </span>
             {/if}
           </h3>
           <div class="launch">
             <div class="start">
               <span class="picker">
-                <select bind:value={choice} onchange={() => (picked = true)} aria-label="What to debug" disabled={choices.length === 0}>
+                <select
+                  bind:value={choice}
+                  onchange={() => (picked = true)}
+                  aria-label={tStudio("whatToDebug")}
+                  disabled={choices.length === 0}
+                >
                   {#each choices as c (c.value)}<option value={c.value} disabled={c.disabled}>{c.label}</option>{/each}
                 </select>
                 <span class="picker-caret" aria-hidden="true"><Icon name="chevron-down" size="sm" /></span>
               </span>
-              <button type="button" class="ax-btn primary go" disabled={!choice || !folder} onclick={() => void start()}>
-                <Icon name="bug" size="sm" /> Debug
+              <button
+                type="button"
+                class="ax-btn primary go"
+                disabled={!choice || !folder}
+                onclick={() => void start()}
+              >
+                <Icon name="bug" size="sm" /> {tStudio("debug")}
               </button>
             </div>
             {#if chosen}<p class="what">{describe(chosen) || chosen.name}</p>{/if}
             <label class="field">
-              Arguments
+              {tStudio("arguments")}
               <input
                 class="mono"
                 type="text"
@@ -348,18 +379,20 @@
             <label class="toggle" class:on={inTerminal}>
               <input type="checkbox" bind:checked={inTerminal} />
               <span class="toggle-text">
-                Run in a terminal
-                <small>For a TUI or a program that reads the keyboard</small>
+                {tStudio("runInTerminal")}
+                <small>{tStudio("runInTerminalHint")}</small>
               </span>
               <span class="switch" aria-hidden="true"></span>
             </label>
           </div>
         </section>
         {#if choices.length === 0 && editing === null}
-          <p class="note">Nothing to debug found. Say what to start with “New configuration…”.</p>
+          <p class="note">{tStudio("nothingToDebug")}</p>
         {/if}
         {#if editing === null}
-          <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> New configuration…</button>
+          <button type="button" class="add" onclick={startNew}>
+            <Icon name="plus" size="sm" /> {tStudio("newConfigButton")}
+          </button>
         {:else}
           <form
             class="config"
@@ -368,27 +401,44 @@
               void submit();
             }}
           >
-            <p class="form-title">{editing === "" ? "New configuration" : "Edit configuration"}</p>
+            <p class="form-title">{editing === "" ? tStudio("newConfig") : tStudio("editConfig")}</p>
             <label class="field">
-              Name
-              <input type="text" bind:value={form.name} placeholder="e.g. OChaT app" spellcheck="false" />
+              {tStudio("name")}
+              <input
+                type="text"
+                bind:value={form.name}
+                placeholder={tStudio("configNamePlaceholder")}
+                spellcheck="false"
+              />
             </label>
             <label class="field">
-              File or module
-              <input class="mono" type="text" bind:value={form.target} placeholder="src/ocht/main.py or ocht.cli" spellcheck="false" />
+              {tStudio("fileOrModule")}
+              <input
+                class="mono"
+                type="text"
+                bind:value={form.target}
+                placeholder={tStudio("fileOrModulePlaceholder")}
+                spellcheck="false"
+              />
             </label>
             <label class="field">
-              Arguments <small>optional</small>
+              {tStudio("arguments")} <small>{tStudio("optional")}</small>
               <input class="mono" type="text" bind:value={form.args} spellcheck="false" />
             </label>
             <label class="field">
-              Working folder <small>inside the project, optional</small>
+              {tStudio("workingFolder")} <small>{tStudio("insideOptional")}</small>
               <input class="mono" type="text" bind:value={form.cwd} spellcheck="false" />
             </label>
-            <p class="hint">Kept in <code>.axiomata/debug.json</code> of this project.</p>
+            <p class="hint">{tStudio("keptInBefore")} <code>{PROJECT_FILE}</code> {tStudio("keptInAfter")}</p>
             <div class="actions">
-              <button type="submit" class="ax-btn primary" disabled={saving || !form.name.trim() || !form.target.trim()}>Save</button>
-              <button type="button" class="ax-btn" onclick={() => (editing = null)}>Cancel</button>
+              <button
+                type="submit"
+                class="ax-btn primary"
+                disabled={saving || !form.name.trim() || !form.target.trim()}
+              >
+                {tStudio("save")}
+              </button>
+              <button type="button" class="ax-btn" onclick={() => (editing = null)}>{tStudio("cancel")}</button>
             </div>
           </form>
         {/if}
@@ -400,26 +450,57 @@
           <div class="session-head">
             <StatusMark tone={sessionTone} />
             <span class="session-text">
-              {#if $ds.phase === "starting"}Starting <b>{$ds.configName}</b>…
-              {:else if $ds.phase === "running"}Running <b>{$ds.configName}</b>
-              {:else if $ds.phase === "stopped"}Paused{$ds.stop ? ` — ${$ds.stop.reason}${$ds.stop.text ? `: ${$ds.stop.text}` : ""}` : ""}
-              {:else if $ds.phase === "ended"}Ended{$ds.exitCode !== null ? ` — exit code ${$ds.exitCode}` : ""}
+              {#if $ds.phase === "starting"}{tStudio("starting")} <b>{$ds.configName}</b>…
+              {:else if $ds.phase === "running"}{tStudio("running")} <b>{$ds.configName}</b>
+              {:else if $ds.phase === "stopped"}{tStudio("paused")}{stopDetail}
+              {:else if $ds.phase === "ended"}{tStudio("ended")}{$ds.exitCode !== null
+                  ? ` — ${tStudio("exitCode", { code: $ds.exitCode })}`
+                  : ""}
               {/if}
             </span>
           </div>
           {#if busy}
-            <div class="toolbar" role="toolbar" aria-label="Debugger">
+            <div class="toolbar" role="toolbar" aria-label={tStudio("debugger")}>
               {#if $ds.phase === "stopped"}
-                <IconButton icon="play" label="Continue ({KEY_LABEL.continue})" size="sm" onclick={() => void debug.control("continue")} />
+                <IconButton
+                  icon="play"
+                  label={tStudio("continue", { key: KEY_LABEL.continue })}
+                  size="sm"
+                  onclick={() => void debug.control("continue")}
+                />
               {:else}
-                <IconButton icon="pause" label="Pause" size="sm" disabled={$ds.phase !== "running"} onclick={() => void debug.control("pause")} />
+                <IconButton
+                  icon="pause"
+                  label={tStudio("pause")}
+                  size="sm"
+                  disabled={$ds.phase !== "running"}
+                  onclick={() => void debug.control("pause")}
+                />
               {/if}
               <span class="sep" aria-hidden="true"></span>
-              <IconButton icon="step-forward" label="Step over ({KEY_LABEL.next})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("next")} />
-              <IconButton icon="arrow-down-to-line" label="Step into ({KEY_LABEL.step_in})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_in")} />
-              <IconButton icon="arrow-up-from-line" label="Step out ({KEY_LABEL.step_out})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_out")} />
+              <IconButton
+                icon="step-forward"
+                label={tStudio("stepOver", { key: KEY_LABEL.next })}
+                size="sm"
+                disabled={$ds.phase !== "stopped"}
+                onclick={() => void debug.control("next")}
+              />
+              <IconButton
+                icon="arrow-down-to-line"
+                label={tStudio("stepInto", { key: KEY_LABEL.step_in })}
+                size="sm"
+                disabled={$ds.phase !== "stopped"}
+                onclick={() => void debug.control("step_in")}
+              />
+              <IconButton
+                icon="arrow-up-from-line"
+                label={tStudio("stepOut", { key: KEY_LABEL.step_out })}
+                size="sm"
+                disabled={$ds.phase !== "stopped"}
+                onclick={() => void debug.control("step_out")}
+              />
               <span class="sep" aria-hidden="true"></span>
-              <IconButton icon="square" label="Stop" size="sm" onclick={() => void debug.stop()} />
+              <IconButton icon="square" label={tStudio("stop")} size="sm" onclick={() => void debug.stop()} />
             </div>
           {/if}
         </section>
@@ -429,7 +510,11 @@
 
       {#if $ds.phase === "stopped"}
         <section class="plate">
-          <h3><span class="swatch" aria-hidden="true"></span>Call stack<span class="n">{$ds.frames.length}</span></h3>
+          <h3>
+            <span class="swatch" aria-hidden="true"></span>{tStudio("callStack")}<span class="n"
+              >{$ds.frames.length}</span
+            >
+          </h3>
           <ul class="rows">
             {#each $ds.frames as f (f.id)}
               <li>
@@ -438,7 +523,7 @@
                   class="frame"
                   class:on={f.id === $ds.frameId}
                   class:outside={!folder || absoluteInside(f.path, folder) === null}
-                  title={f.path ?? "No source file"}
+                  title={f.path ?? tStudio("noSource")}
                   onclick={() => void debug.selectFrame(f.id)}
                 >
                   <span class="fname">{f.name}</span>
@@ -449,7 +534,7 @@
           </ul>
         </section>
         <section class="plate">
-          <h3><span class="swatch" aria-hidden="true"></span>Variables</h3>
+          <h3><span class="swatch" aria-hidden="true"></span>{tStudio("variables")}</h3>
           <div class="vars">
             {#each $ds.scopes as s (s.scope.variables_reference)}
               {@const ref = s.scope.variables_reference}
@@ -467,7 +552,9 @@
       {/if}
 
       <section class="plate g-watch">
-        <h3><span class="swatch" aria-hidden="true"></span>Watch<span class="n">{$ds.watches.length}</span></h3>
+        <h3>
+          <span class="swatch" aria-hidden="true"></span>{tStudio("watch")}<span class="n">{$ds.watches.length}</span>
+        </h3>
         {#if $ds.watches.length > 0}
           <ul class="rows">
             {#each $ds.watches as w, i (w.expr)}
@@ -477,7 +564,12 @@
                   {w.error !== null ? w.error : (w.value ?? ($ds.phase === "stopped" ? "…" : ""))}
                 </span>
                 <span class="row-actions">
-                  <IconButton icon="x" label="Remove {w.expr}" size="sm" onclick={() => removeWatch(i)} />
+                  <IconButton
+                    icon="x"
+                    label={tStudio("removeNamed", { name: w.expr })}
+                    size="sm"
+                    onclick={() => removeWatch(i)}
+                  />
                 </span>
               </li>
             {/each}
@@ -492,19 +584,30 @@
           }}
         >
           <Icon name="plus" size="sm" />
-          <input type="text" bind:value={watchInput} placeholder="Add a watch expression…" spellcheck="false" autocomplete="off" />
+          <input
+            type="text"
+            bind:value={watchInput}
+            placeholder={tStudio("addWatch")}
+            spellcheck="false"
+            autocomplete="off"
+          />
         </form>
       </section>
 
       <section class="plate g-bp">
         <h3>
-          <span class="swatch" aria-hidden="true"></span>Breakpoints<span class="n">{total}</span>
+          <span class="swatch" aria-hidden="true"></span>{tStudio("breakpoints")}<span class="n">{total}</span>
           {#if total > 0 && root}
-            <IconButton icon="trash-2" label="Remove all breakpoints" size="sm" onclick={() => clearBreakpoints(root)} />
+            <IconButton
+              icon="trash-2"
+              label={tStudio("removeAllBreakpoints")}
+              size="sm"
+              onclick={() => clearBreakpoints(root)}
+            />
           {/if}
         </h3>
         {#if total === 0}
-          <p class="plate-note">Click a line number in a Python or Rust file to set one.</p>
+          <p class="plate-note">{tStudio("breakpointsHint")}</p>
         {:else}
           <ul class="rows">
             {#each files as [rel, lines] (rel)}
@@ -518,19 +621,24 @@
                     <span class="row-actions">
                       <IconButton
                         icon="pencil"
-                        label="Condition, hit count, log message"
+                        label={tStudio("breakpointExtras")}
                         size="sm"
                         onclick={() => (editingBp = editingBp?.rel === rel && editingBp.line === line ? null : { rel, line })}
                       />
-                      <IconButton icon="x" label="Remove" size="sm" onclick={() => root && toggleDebugBreakpoint(root, rel, line)} />
+                      <IconButton
+                        icon="x"
+                        label={tStudio("remove")}
+                        size="sm"
+                        onclick={() => root && toggleDebugBreakpoint(root, rel, line)}
+                      />
                     </span>
                   </div>
                   {#if infoOf($breakpointInfo, root ?? "", rel, line)}
                     {@const extra = infoOf($breakpointInfo, root ?? "", rel, line)}
                     <p class="bp-extra">
-                      {#if extra?.condition}when <code>{extra.condition}</code>{/if}
-                      {#if extra?.hit}hit <code>{extra.hit}</code>{/if}
-                      {#if extra?.log}logs <code>{extra.log}</code>{/if}
+                      {#if extra?.condition}{tStudio("bpWhen")} <code>{extra.condition}</code>{/if}
+                      {#if extra?.hit}{tStudio("bpHit")} <code>{extra.hit}</code>{/if}
+                      {#if extra?.log}{tStudio("bpLogs")} <code>{extra.log}</code>{/if}
                     </p>
                   {/if}
                   {#if editingBp?.rel === rel && editingBp.line === line && root}
@@ -552,13 +660,12 @@
 
       {#if $ds.tui}
         <p class="problem">
-          This program draws a full-screen interface, which a console cannot show. Stop it and start again with
-          “Run in a terminal” ticked — breakpoints and stepping work the same there.
+          {tStudio("tuiNote")}
         </p>
       {/if}
       {#if busy || $ds.output.length > 0}
         <section class="plate">
-          <h3><span class="swatch" aria-hidden="true"></span>Console</h3>
+          <h3><span class="swatch" aria-hidden="true"></span>{tStudio("console")}</h3>
           <div class="console" bind:this={consoleEl}>
             {#each $ds.output as line, i (i)}<span class="out {line.category}">{line.text}</span>{/each}
           </div>
@@ -572,7 +679,13 @@
               }}
             >
               <Icon name="chevron-right" size="sm" />
-              <input type="text" bind:value={expression} placeholder="Evaluate in this frame…" spellcheck="false" autocomplete="off" />
+              <input
+                type="text"
+                bind:value={expression}
+                placeholder={tStudio("evaluate")}
+                spellcheck="false"
+                autocomplete="off"
+              />
             </form>
           {/if}
         </section>

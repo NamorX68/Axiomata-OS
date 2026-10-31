@@ -14,8 +14,10 @@
  * written back a moment after the keys settle (`viStateChanged`).
  */
 
+import { messageOf } from "../core/errors";
 import { invokeBackend } from "../core/backend";
 import { toast } from "../core/toast";
+import { tEditor } from "../i18n/editor";
 import type { ClipboardPort } from "../editor/vi/registers";
 import { ViShared } from "../editor/vi/machine";
 import { editorSettings } from "./editorSettings";
@@ -72,6 +74,6 @@ function saveNow(): void {
   }
   const json = JSON.stringify(snapshotVi(shared));
   void invokeBackend<void>("save_editor_vi_state", { json }).catch((err) =>
-    toast(`Could not save editor-vi.json: ${String(err)}`, "danger"),
+    toast(tEditor("viSaveFailed", { error: messageOf(err) }), "danger"),
   );
 }

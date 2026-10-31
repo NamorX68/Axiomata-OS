@@ -4,10 +4,10 @@ Wie man eine neue Notiz schreibt, wie der Agent sie beim Speichern in den passen
 
 ## Was es ist
 
-Der **Vault** ist der Ordner mit deinen Markdown-Notizen (Pfad unter Settings → Workspace → „Vault“). Jeder oberste
+Der **Vault** ist der Ordner mit deinen Markdown-Notizen (Pfad unter Einstellungen → Workspace → „Vault“). Jeder oberste
 Ordner ist ein **Bereich**; in ihm und im Vault selbst liegt eine `AGENTS.md` mit einer erzeugten Karte der Dateien
-(der „Router“), damit Agenten sich zurechtfinden. Die Kachel **„Memory“** zeigt, ob diese Karten aktuell sind
-(„fresh“ / „stale“), und „Sync“ schreibt sie neu.
+(der „Router“), damit Agenten sich zurechtfinden. Die Kachel **„Gedächtnis“** zeigt, ob diese Karten aktuell sind
+(„aktuell“ / „veraltet“), und „Synchronisieren“ schreibt sie neu.
 
 Eine **neue Notiz** schreibst du, ohne einen Ordner zu wählen: beim ersten Speichern sucht ein Agenten-Zug den
 passenden Bereich, einen Dateinamen, Tags aus der Tag-Liste und verwandte Notizen. Passt kein vorhandener Bereich, darf
@@ -16,20 +16,21 @@ nicht Einsortiertes; der Skill `inbox-sort` räumt sie auf.
 
 ## Wo die Knöpfe sind
 
-- **Neue Notiz:** Dock „Note“, ⌘K „New note“ oder im Studio ⌘N. Es öffnet sich das schwebende Dateifenster „New
-  note“ zum Schreiben; unten steht „New note — ⌘S files it“.
-- **Ablegen:** ⌘S. Während der Agent arbeitet: „Filing the note…“; danach öffnet sich die Notiz lesend an ihrem
+- **Neue Notiz:** Dock „Notiz“, ⌘K „Neue Notiz“ oder im Studio ⌘N. Es öffnet sich das schwebende Dateifenster „Neue
+  Notiz“ zum Schreiben; unten steht „Neue Notiz — ⌘S legt sie ab“.
+- **Ablegen:** ⌘S. Während der Agent arbeitet: „Die Notiz wird abgelegt…“; danach öffnet sich die Notiz lesend an ihrem
   neuen Platz.
-- **Schließen, ohne abzulegen:** die Frage „This note is not filed yet.“ mit „File it“ / „Discard“ / „Cancel“.
+- **Schließen, ohne abzulegen:** die Frage „Diese Notiz ist noch nicht abgelegt.“ mit „Ablegen“ / „Verwerfen“ /
+  „Abbrechen“.
 - **Inbox sortieren:** im Skills Deck `inbox-sort` ▶ (oder als Routine).
 - **Leere Datei an festem Ort:** `/newfile <pfad>` im Chat.
 
 ## Häufige Handgriffe
 
-1. **Schnell etwas festhalten:** Dock „Note“ → schreiben → ⌘S. Der Agent legt ab.
+1. **Schnell etwas festhalten:** Dock „Notiz“ → schreiben → ⌘S. Der Agent legt ab.
 2. **Inbox leeren:** `inbox-sort` starten; er verschiebt nur klare Fälle, versieht sie mit Tags und bis zu drei
    verwandten Links und listet unter „Fragen“, was er nicht zuordnen konnte.
-3. **Router auffrischen:** in der Kachel „Memory“ auf „Sync“, wenn sie „stale“ zeigt.
+3. **Router auffrischen:** in der Kachel „Gedächtnis“ auf „Synchronisieren“, wenn sie „veraltet“ zeigt.
 
 ## Fallen
 

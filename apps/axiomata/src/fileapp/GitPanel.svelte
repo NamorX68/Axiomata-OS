@@ -16,6 +16,7 @@
   import { onDestroy } from "svelte";
 
   import { messageOf } from "../core/errors";
+  import { tEditor } from "../i18n/editor";
   import EmptyState from "../ui/EmptyState.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -135,8 +136,8 @@
   async function revert(row: GitRow): Promise<void> {
     const name = row.entry.path;
     const question = row.untracked
-      ? `Delete ${name}? It is not in git, so it cannot be brought back.`
-      : `Throw away the unstaged changes in ${name}? They are not saved anywhere and cannot be brought back.`;
+      ? tEditor("deleteUntrackedConfirm", { name })
+      : tEditor("discardChangesConfirm", { name });
     if (!confirm(question)) return;
     await act(() => gitApi.discard(root!, [name]));
   }
@@ -205,7 +206,7 @@
       await gitApi.push(root);
       error = "";
     } catch (err) {
-      error = `Committed, but not pushed: ${messageOf(err)}`;
+      error = tEditor("committedNotPushed", { error: messageOf(err) });
     } finally {
       busy = false;
       pushing = false;
@@ -272,8 +273,10 @@
           type="button"
           class="toggle revert"
           disabled={busy}
-          aria-label={row.untracked ? `Delete ${row.entry.path}` : `Discard changes in ${row.entry.path}`}
-          title={row.untracked ? "Delete this untracked file" : "Discard the unstaged changes"}
+          aria-label={row.untracked
+            ? tEditor("deletePath", { path: row.entry.path })
+            : tEditor("discardChangesIn", { name: row.entry.path })}
+          title={row.untracked ? tEditor("deleteUntracked") : tEditor("discardUnstaged")}
           onclick={() => void revert(row)}><Icon name="undo-2" size="sm" /></button
         >
       {/if}
@@ -281,8 +284,8 @@
         type="button"
         class="toggle"
         disabled={busy}
-        aria-label={side === "staged" ? `Unstage ${row.entry.path}` : `Stage ${row.entry.path}`}
-        title={side === "staged" ? "Unstage" : "Stage"}
+        aria-label={tEditor(side === "staged" ? "unstagePath" : "stagePath", { path: row.entry.path })}
+        title={side === "staged" ? tEditor("unstage") : tEditor("stage")}
         onclick={() => void (side === "staged" ? unstage(row) : stage(row))}
         ><Icon name={side === "staged" ? "x" : "plus"} size="sm" /></button
       >
@@ -290,18 +293,23 @@
   {/each}
 {/snippet}
 
-<section class="git" aria-label="Git">
+<section class="git" aria-label={tEditor("git")}>
   {#if !root}
-    <EmptyState compact title="No project open" text="Open one from the project bar above." />
+    <EmptyState compact title={tEditor("noProjectOpen")} text={tEditor("noProjectOpenGit")} />
   {:else if notARepo}
-    <EmptyState compact title="Not a git repository" text="This project folder has no history yet.">
+    <EmptyState compact title={tEditor("notGitRepo")} text={tEditor("noHistoryYet")}>
       {#snippet action()}
-        <button type="button" class="ax-btn primary" disabled={busy} onclick={() => void createRepo()}>Create repository</button>
+        <button
+          type="button"
+          class="ax-btn primary"
+          disabled={busy}
+          onclick={() => void createRepo()}
+        >{tEditor("createRepo")}</button>
       {/snippet}
     </EmptyState>
     {#if error}<p class="problem" role="alert">{error}</p>{/if}
   {:else if !status}
-    <p class="note">{error || "Reading the repository…"}</p>
+    <p class="note">{error || tEditor("readingRepo")}</p>
   {:else}
     <header>
       <span class="branch" bind:this={branchBox}>
@@ -309,16 +317,16 @@
           type="button"
           class="branch-button"
           aria-expanded={branchMenu}
-          title={status.upstream ? `Follows ${status.upstream} — switch branch` : "No upstream — switch branch"}
+          title={status.upstream ? tEditor("followsUpstream", { upstream: status.upstream }) : tEditor("noUpstream")}
           onclick={() => void openBranches()}
         >
           <Icon name="git-branch" size="sm" />
-          <span class="name">{status.branch ?? `detached at ${status.head ?? "?"}`}</span>
+          <span class="name">{status.branch ?? tEditor("detachedAt", { head: status.head ?? "?" })}</span>
           <span class="caret" class:turned={branchMenu}><Icon name="chevron-down" size="sm" /></span>
         </button>
         <!-- With a push button the ahead count is on it; without one (no remote) it stands here. -->
-        {#if status.ahead > 0 && !push}<span class="count" title="Commits not on the upstream">↑ {status.ahead}</span>{/if}
-        {#if status.behind > 0}<span class="count" title="Commits on the upstream you do not have">↓ {status.behind}</span>{/if}
+        {#if status.ahead > 0 && !push}<span class="count" title={tEditor("aheadTitle")}>↑ {status.ahead}</span>{/if}
+        {#if status.behind > 0}<span class="count" title={tEditor("behindTitle")}>↓ {status.behind}</span>{/if}
         {#if branchMenu}
           <div class="branch-menu" role="menu">
             <div class="new-branch">
@@ -326,13 +334,18 @@
               <input
                 type="text"
                 spellcheck="false"
-                placeholder="New branch from here"
+                placeholder={tEditor("newBranchHere")}
                 bind:value={newBranch}
                 onkeydown={(e) => {
                   if (e.key === "Enter") void makeBranch();
                 }}
               />
-              <button type="button" class="ax-btn" disabled={!newBranch.trim()} onclick={() => void makeBranch()}>Create</button>
+              <button
+                type="button"
+                class="ax-btn"
+                disabled={!newBranch.trim()}
+                onclick={() => void makeBranch()}
+              >{tEditor("create")}</button>
             </div>
             {#each branchList as branch (branch.name)}
               <button
@@ -354,7 +367,7 @@
         <IconButton
           icon="refresh-cw"
           size="sm"
-          label="Fetch from the remote (only reads)"
+          label={tEditor("fetchRemote")}
           disabled={fetching}
           onclick={() => void fetchRemote()}
         />
@@ -364,7 +377,7 @@
             class="ax-btn push"
             disabled={!push.enabled || pushing || busy}
             title={push.title}
-            onclick={() => void pushBranch()}>{pushing ? "Pushing…" : push.label}</button
+            onclick={() => void pushBranch()}>{pushing ? tEditor("pushing") : push.label}</button
           >
         {/if}
       </span>
@@ -378,11 +391,11 @@
             type="button"
             class="fold"
             aria-expanded={outgoingOpen}
-            title="What a push would publish"
+            title={tEditor("outgoingTitle")}
             onclick={() => (outgoingOpen = !outgoingOpen)}
           >
             <span class="caret" class:turned={outgoingOpen}><Icon name="chevron-right" size="sm" /></span>
-            To push <span class="n">{outgoing.length}</span>
+            {tEditor("toPush")} <span class="n">{outgoing.length}</span>
           </button>
         </div>
         {#if outgoingOpen}
@@ -397,11 +410,16 @@
                 >
                   <span class="sha">{commit.id}</span>
                   <span class="subject">{commit.subject}</span>
-                  <small>{commit.when} · {commit.files.length} {commit.files.length === 1 ? "file" : "files"}</small>
+                  <small
+                    >{commit.when} · {tEditor("fileCount", {
+                      n: commit.files.length,
+                      count: commit.files.length,
+                    })}</small
+                  >
                 </button>
                 {#if openCommits[commit.id]}
                   <ul class="files">
-                    {#if commit.files.length === 0}<li class="muted">No file changes (a merge).</li>{/if}
+                    {#if commit.files.length === 0}<li class="muted">{tEditor("noFileChanges")}</li>{/if}
                     {#each commit.files as file (file.path)}
                       <li><span class="mark">{file.status}</span> {file.path}</li>
                     {/each}
@@ -415,24 +433,34 @@
       {/if}
       <div class="plate staged-plate">
         <div class="group-head">
-          <span class="title">Staged <span class="n">{groups.staged.length}</span></span>
+          <span class="title">{tEditor("gitStaged")} <span class="n">{groups.staged.length}</span></span>
           {#if groups.staged.length > 0}
-            <button type="button" class="link" disabled={busy} onclick={() => void unstageAll()}>Unstage all</button>
+            <button
+              type="button"
+              class="link"
+              disabled={busy}
+              onclick={() => void unstageAll()}
+            >{tEditor("unstageAll")}</button>
           {/if}
         </div>
-        {#if groups.staged.length === 0}<p class="empty">Nothing staged yet — the + on a change adds it.</p>{/if}
+        {#if groups.staged.length === 0}<p class="empty">{tEditor("nothingStaged")}</p>{/if}
         {@render rows(groups.staged, "staged")}
       </div>
 
       <div class="plate">
         <div class="group-head">
-          <span class="title">Changes <span class="n">{groups.changes.length}</span></span>
+          <span class="title">{tEditor("gitChanges")} <span class="n">{groups.changes.length}</span></span>
           {#if groups.changes.length > 0}
-            <button type="button" class="link" disabled={busy} onclick={() => void stageAll()}>Stage all</button>
+            <button
+              type="button"
+              class="link"
+              disabled={busy}
+              onclick={() => void stageAll()}
+            >{tEditor("stageAll")}</button>
           {/if}
         </div>
         {#if groups.changes.length === 0}
-          <p class="empty clean"><Icon name="circle-check" size="sm" /> The working tree is clean.</p>
+          <p class="empty clean"><Icon name="circle-check" size="sm" /> {tEditor("treeClean")}</p>
         {/if}
         {@render rows(groups.changes, "unstaged")}
       </div>
@@ -441,7 +469,7 @@
     <div class="commit">
       <textarea
         rows="3"
-        placeholder={suggesting ? "Writing a message from the staged diff…" : "Commit message  (⌘↩ commits)"}
+        placeholder={suggesting ? tEditor("writingMessage") : tEditor("commitPlaceholder")}
         spellcheck="true"
         bind:value={message}
         disabled={suggesting}
@@ -455,24 +483,23 @@
       <div class="commit-buttons">
         <IconButton
           icon="sparkles"
-          label={groups.staged.length === 0
-            ? "Stage changes to have a message written"
-            : "Write a message: sends the staged diff (not .env or key files) to the skill provider's model — one paid call"}
+          label={groups.staged.length === 0 ? tEditor("suggestNeedsStaged") : tEditor("suggestMessage")}
           disabled={suggesting || busy || groups.staged.length === 0}
           pressed={suggesting}
           onclick={() => void suggestMessage()}
         />
         <button type="button" class="ax-btn primary" disabled={!commitReady || busy || suggesting} onclick={() => void commit()}>
-          <Icon name="git-commit-horizontal" size="sm" /> Commit {groups.staged.length > 0 ? `(${groups.staged.length})` : ""}
+          <Icon name="git-commit-horizontal" size="sm" />
+          {groups.staged.length > 0 ? tEditor("commitN", { n: groups.staged.length }) : tEditor("commit")}
         </button>
         <button
           type="button"
           class="ax-btn"
           disabled={!commitReady || busy || pushing || suggesting || status.branch === null}
-          title={status.branch === null ? "HEAD is detached; switch to a branch to push" : "Commit what is staged, then push the branch (never forced)"}
+          title={status.branch === null ? tEditor("pushDetached") : tEditor("commitPushTitle")}
           onclick={() => void commitAndPush()}
         >
-          <Icon name="arrow-up-from-line" size="sm" /> Commit &amp; Push
+          <Icon name="arrow-up-from-line" size="sm" /> {tEditor("commitPush")}
         </button>
       </div>
     </div>

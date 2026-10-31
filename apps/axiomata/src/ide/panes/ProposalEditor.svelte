@@ -11,6 +11,7 @@
   import { messageOf } from "../../core/errors";
   import { fieldsOf } from "../../core/kanban";
   import type { Role } from "../../core/roster";
+  import { tFlow } from "../../i18n/flow";
   import { assignableRoles, cardEditable, needsCandidates, needsDiff, proposalForm, proposalSavable, proposalTitle } from "../planning";
 
   let {
@@ -68,7 +69,7 @@
       let have: number[] = [];
       if (card) {
         const fresh = (await freshCard(card.id)) ?? card;
-        if (!cardEditable(fresh)) throw new Error("The card is already in progress or done; it can no longer be changed here.");
+        if (!cardEditable(fresh)) throw new Error(tFlow("cardInProgress"));
         await invoke("update_card", {
           id: card.id,
           fields: {
@@ -83,7 +84,7 @@
         id = card.id;
         have = fresh.depends_on;
       } else {
-        if (columnId === null) throw new Error("The board has no column for it.");
+        if (columnId === null) throw new Error(tFlow("noColumn"));
         const created = await invoke<BoardCard>("create_card", {
           new: {
             column_id: columnId,
@@ -125,36 +126,41 @@
   }}
 >
   <label>
-    Title
-    <input bind:value={form.title} aria-label="Title" maxlength="200" />
+    {tFlow("title")}
+    <input bind:value={form.title} aria-label={tFlow("title")} maxlength="200" />
   </label>
   <label>
-    Description
-    <textarea bind:value={form.body} rows="4" aria-label="Description"></textarea>
+    {tFlow("description")}
+    <textarea bind:value={form.body} rows="4" aria-label={tFlow("description")}></textarea>
   </label>
   <label>
-    Acceptance criteria
-    <textarea bind:value={form.acceptance} rows="3" aria-label="Acceptance criteria" placeholder="How do you tell the card is done?"></textarea>
+    {tFlow("acceptance")}
+    <textarea
+      bind:value={form.acceptance}
+      rows="3"
+      aria-label={tFlow("acceptance")}
+      placeholder={tFlow("acceptancePlaceholder")}
+    ></textarea>
   </label>
   <div class="two">
     <label>
-      Role
-      <select bind:value={form.agent} aria-label="Role">
+      {tFlow("role")}
+      <select bind:value={form.agent} aria-label={tFlow("role")}>
         <option value="">—</option>
         {#each assignableRoles(roles, form.agent || null) as name (name)}<option value={name}>{name}</option>{/each}
       </select>
     </label>
     <label>
-      Level
-      <select bind:value={form.tier} aria-label="Level">
+      {tFlow("level")}
+      <select bind:value={form.tier} aria-label={tFlow("level")}>
         {#each TIERS as tier (tier.id)}<option value={tier.id}>{tier.label}</option>{/each}
       </select>
     </label>
   </div>
   <fieldset>
-    <legend>Needs first</legend>
+    <legend>{tFlow("needsFirst")}</legend>
     {#if candidates.length === 0}
-      <p class="muted">The plan has no other card this one could wait for.</p>
+      <p class="muted">{tFlow("noCandidates")}</p>
     {/if}
     {#each candidates as id (id)}
       <label class="check">
@@ -166,9 +172,9 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
     <button class="ax-btn primary" type="submit" disabled={busy || !proposalSavable(form)}>
-      {card ? "Save" : "Add card"}
+      {card ? tFlow("save") : tFlow("addCard")}
     </button>
-    <button class="ax-btn" type="button" disabled={busy} onclick={onCancel}>Cancel</button>
+    <button class="ax-btn" type="button" disabled={busy} onclick={onCancel}>{tFlow("cancel")}</button>
   </div>
 </form>
 

@@ -9,6 +9,7 @@ import { writable } from "svelte/store";
 import { messageOf } from "../core/errors";
 import { listEngines, type EngineEntry } from "../core/roster";
 import { toast } from "../core/toast";
+import { tAgents } from "../i18n/agents";
 
 const store = writable<EngineEntry[]>([]);
 
@@ -34,7 +35,7 @@ export async function refreshEngines(): Promise<EngineEntry[]> {
     store.set(engines);
     return engines;
   } catch (err) {
-    toast(`Could not load the engines: ${messageOf(err)}`, "warning");
+    toast(tAgents("enginesUnreadable", { error: messageOf(err) }), "warning");
     return [];
   }
 }
@@ -42,5 +43,5 @@ export async function refreshEngines(): Promise<EngineEntry[]> {
 /** What an engine is called in a picker: its label, and what it runs when the label does not say. */
 export function engineLine(engine: Pick<EngineEntry, "harness" | "model">): string {
   const harness = engine.harness === "claude_code" ? "Claude Code" : engine.harness === "glut" ? "Glut" : "Opencode";
-  return `${harness} · ${engine.model ?? "default model"}`;
+  return `${harness} · ${engine.model ?? tAgents("defaultModel")}`;
 }

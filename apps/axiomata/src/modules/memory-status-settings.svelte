@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ModuleContext } from "../core/types";
+  import { tBrain } from "../i18n/brain";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -15,7 +16,7 @@
 <div class="settings">
   <label>
     <input type="checkbox" checked={$config.compact === true} onchange={setCompact} />
-    Compact (badge line only)
+    {tBrain("compact")}
   </label>
 </div>
 

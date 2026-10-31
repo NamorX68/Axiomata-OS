@@ -16,14 +16,15 @@ import {
   type IdeAgent,
   type ProvisionedAgent,
 } from "../core/backend";
+import { tAgents } from "../i18n/agents";
 
 /**
  * The harnesses a new engine can run on, in the order a picker should offer them. Opencode is only the Agents panel's
  * plain master tile now (`docs/plans/opencode-exit.md`, O1).
  */
-export const HARNESSES: { id: Harness; label: string; hint: string }[] = [
-  { id: "claude_code", label: "Claude Code", hint: "Anthropic's CLI" },
-  { id: "glut", label: "Glut", hint: "Axiomata's own harness: sandbox, network gate, refusal limits" },
+export const HARNESSES: { id: Harness; label: string; hint: () => string }[] = [
+  { id: "claude_code", label: "Claude Code", hint: () => tAgents("claudeCodeHint") },
+  { id: "glut", label: "Glut", hint: () => tAgents("glutHint") },
 ];
 
 // There is deliberately no copy of the harness-to-default-command table here.

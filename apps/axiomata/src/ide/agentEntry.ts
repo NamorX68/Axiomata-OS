@@ -2,6 +2,7 @@
  * How the Inbox tab words a session's MCP entry (A2A CP-A5): pure, so the wording is tested without a component.
  */
 import type { AgentEntry } from "../core/backend";
+import { tFlow } from "../i18n/flow";
 
 export type EntryTone = "ok" | "warn" | "none";
 
@@ -14,21 +15,21 @@ export interface EntryView {
 
 /** What the owner reads about the entry. `null` is a session that is still being prepared. */
 export function describeEntry(entry: AgentEntry | null): EntryView {
-  if (!entry) return { label: "Preparing…", tone: "none", detail: "" };
+  if (!entry) return { label: tFlow("entryPreparing"), tone: "none", detail: "" };
   switch (entry.status) {
     case "registered":
       return {
-        label: "Team tools connected",
+        label: tFlow("entryConnected"),
         tone: "ok",
-        detail: "This session can reach the other sessions and the board through the tools below.",
+        detail: tFlow("entryConnectedDetail"),
       };
     case "unavailable":
       return {
-        label: "Team tools unavailable",
+        label: tFlow("entryUnavailable"),
         tone: "warn",
-        detail: entry.note ?? "The session runs without them.",
+        detail: entry.note ?? tFlow("entryUnavailableDetail"),
       };
     case "not_applicable":
-      return { label: "Team tools off", tone: "none", detail: entry.note ?? "" };
+      return { label: tFlow("entryOff"), tone: "none", detail: entry.note ?? "" };
   }
 }

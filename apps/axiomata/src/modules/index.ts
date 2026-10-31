@@ -18,6 +18,7 @@ import { completeReminderTask, createReminderTask, deleteReminderTask, loadLates
 import { resolveSkillName } from "../core/skillRun";
 import { type BoardColumn, cardRefusal, type FlowCard, targetRefusal } from "../core/kanbanAgentRules";
 import type { ModuleAction, ModuleContext } from "../core/types";
+import { tCanvas } from "../i18n/canvas";
 import { prepareRoutine, prepareSkillRun, registerChatActions, routineParams } from "./chatActions";
 import {
   addTodo,
@@ -170,6 +171,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "memory-status",
     title: "Memory",
+    label: () => tCanvas("modMemory"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><path d='M3 2.5h7l3 3v8H3z'/><path d='M10 2.5v3h3M5.5 8.5h5M5.5 11h5'/></svg>",
     component: MemoryStatus,
     settings: MemoryStatusSettings,
@@ -198,6 +200,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "skills-deck",
     title: "Skills Deck",
+    label: () => tCanvas("modSkillsDeck"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><path d='M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z'/></svg>",
     component: SkillsDeck,
     settings: SkillsDeckSettings,
@@ -227,6 +230,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "routines-board",
     title: "Routines",
+    label: () => tCanvas("modRoutines"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round'><circle cx='8' cy='8' r='6'/><path d='M8 4.5V8l2.5 1.5'/></svg>",
     component: RoutinesBoard,
     settings: RoutinesBoardSettings,
@@ -349,6 +353,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "second-brain",
     title: "Second Brain",
+    label: () => tCanvas("modSecondBrain"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.3'><circle cx='8' cy='8' r='6.2'/><circle cx='8' cy='8' r='3'/><circle cx='8' cy='8' r='0.9' fill='currentColor'/></svg>",
     component: SecondBrain,
     defaultSize: { w: 0, h: 0 },
@@ -393,6 +398,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: FILE_PANEL,
     title: "File",
+    label: () => tCanvas("modFile"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><path d='M4 1.5h5.5L13 5v9.5H4z'/><path d='M9.5 1.5V5H13'/></svg>",
     component: FilePanel,
     defaultSize: { w: 900, h: 640 },
@@ -420,6 +426,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "todo",
     title: "ToDo",
+    label: () => tCanvas("modTodo"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='2.5' width='11' height='11' rx='2'/><path d='m5 8 2.2 2.2L11 6'/></svg>",
     component: Todo,
     settings: TodoSettings,
@@ -494,6 +501,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "calendar",
     title: "Calendar",
+    label: () => tCanvas("modCalendar"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='3' width='12' height='11' rx='1.5'/><path d='M2 6.5h12M5 1.5v3M11 1.5v3'/></svg>",
     component: Calendar,
     settings: CalendarSettings,
@@ -614,6 +622,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "reminders",
     title: "Reminders",
+    label: () => tCanvas("modReminders"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2.5' y='2' width='11' height='12' rx='1.5'/><path d='M5.5 5.5h5M5.5 8h5M5.5 10.5h3'/></svg>",
     component: Reminders,
     settings: RemindersSettings,
@@ -739,6 +748,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "mail",
     title: "Mail",
+    label: () => tCanvas("modMail"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='1.5' y='3' width='13' height='10' rx='1.5'/><path d='M2 4.5l6 4.5 6-4.5'/></svg>",
     component: Mail,
     settings: MailSettings,
@@ -777,6 +787,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "terminal",
     title: "Terminal",
+    label: () => tCanvas("modTerminal"),
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><rect x='1.5' y='2.5' width='13' height='11' rx='1.5'/><path d='M4 6.5 6.5 9 4 11.5M8 11.5h4'/></svg>",
     component: Terminal,
     settings: TerminalSettings,
@@ -824,6 +835,7 @@ export function registerBuiltins(): void {
   registerModule({
     type: "kanban",
     title: "Kanban",
+    label: () => tCanvas("modKanban"),
     icon:
       "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'>" +
       "<rect x='2' y='3' width='3.2' height='10'/><rect x='6.4' y='3' width='3.2' height='7'/>" +
@@ -980,6 +992,7 @@ export function registerBuiltins(): void {
     registerModule({
       type: "dummy",
       title: "Dummy",
+      label: () => tCanvas("modDummy"),
       icon: DUMMY_ICON,
       component: Dummy,
       settings: DummySettings,
@@ -999,6 +1012,7 @@ export function registerBuiltins(): void {
     registerModule({
       type: "dummy-singleton",
       title: "Dummy (single)",
+      label: () => tCanvas("modDummySingle"),
       icon: DUMMY_ICON,
       component: Dummy,
       defaultSize: { w: 220, h: 120 },

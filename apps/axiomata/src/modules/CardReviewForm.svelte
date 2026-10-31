@@ -12,6 +12,8 @@
   import { listRoles, type Role } from "../core/roster";
   import { roleEngine } from "../ide/cardStart";
   import { engineCatalog, engineLine, refreshEngines } from "../ide/rosterStore";
+  import { tFlow } from "../i18n/flow";
+  import { tKanban as t } from "../i18n/kanban";
 
   let { card, onDone }: { card: BoardCard; onDone: () => void } = $props();
 
@@ -55,7 +57,7 @@
         engineId: engineId || null,
         allowAgentConfig,
       });
-      toast(`Card #${card.id} is being reviewed by ${session.agent.name}.`, "info");
+      toast(t("beingReviewed", { id: card.id, name: session.agent.name }), "info");
       emit("shell:agent", { projectId: session.agent.project_id, agentId: session.agent.id });
       onDone();
     } catch (err) {
@@ -74,10 +76,12 @@
   }}
 >
   <label>
-    Engine des Reviewers
-    <select bind:value={engineId} aria-label="Engine des Reviewers">
+    {t("reviewerEngine")}
+    <select bind:value={engineId} aria-label={t("reviewerEngine")}>
       {#if ownEngine !== null}
-        <option value="">The reviewer role's own{ownEngineLabel ? ` (${ownEngineLabel})` : ""}</option>
+        <option value=""
+          >{ownEngineLabel ? t("reviewerOwnEngineWith", { engine: ownEngineLabel }) : t("reviewerOwnEngine")}</option
+        >
       {/if}
       {#each $engineCatalog as engine (engine.id)}
         <option value={engine.id}>{engine.label} — {engineLine(engine)}</option>
@@ -86,12 +90,12 @@
   </label>
   <label class="check">
     <input type="checkbox" bind:checked={allowAgentConfig} />
-    Auch wenn die Arbeit die Konfiguration von Agenten ändert (.claude, .mcp.json, opencode.json, AGENTS.md …)
+    {t("allowAgentConfig")}
   </label>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
-    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? "Starting …" : "Start review"}</button>
-    <button class="ax-btn" type="button" onclick={onDone}>Cancel</button>
+    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? t("starting") : t("startReview")}</button>
+    <button class="ax-btn" type="button" onclick={onDone}>{tFlow("cancel")}</button>
   </div>
 </form>
 

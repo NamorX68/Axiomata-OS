@@ -15,9 +15,10 @@
   import { busy, send } from "../core/chat";
   import { coverGround } from "../core/cover";
   import { toast } from "../core/toast";
-  import { GROUP_LABEL, rankItems, type SpotlightSources } from "../core/spotlight";
+  import { groupLabel, rankItems, type SpotlightSources } from "../core/spotlight";
   import { withContentHits, type SpotlightAction } from "../core/spotlightItems";
   import { loadInstantSources, runSpotlightAction, searchFileContents } from "../core/spotlightRun";
+  import { tShell } from "../i18n/shell";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -115,7 +116,7 @@
     if (!message) return;
     close(false);
     if (get(busy)) {
-      toast("The agent is still answering — ask again in a moment.", "warning");
+      toast(tShell("stillAnswering"), "warning");
       return;
     }
     void send(message, "chat");
@@ -153,27 +154,27 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="scrim" onpointerdown={(event) => event.target === event.currentTarget && close()}>
-    <div class="spot" role="dialog" aria-modal="true" aria-label="Search">
+    <div class="spot" role="dialog" aria-modal="true" aria-label={tShell("search")}>
       <input
         bind:this={input}
         bind:value={query}
         class="pill"
         type="text"
         role="combobox"
-        aria-label="Search"
+        aria-label={tShell("search")}
         aria-expanded={total > 0}
         aria-controls="spotlight-list"
         aria-activedescendant={total > 0 ? `spotlight-row-${active}` : undefined}
-        placeholder="Search, or ask Axiomata …"
+        placeholder={tShell("searchPlaceholder")}
         autocomplete="off"
         spellcheck="false"
         onkeydown={onKeydown}
       />
       {#if total > 0}
-        <ul id="spotlight-list" class="results" role="listbox" aria-label="Results" bind:this={list}>
+        <ul id="spotlight-list" class="results" role="listbox" aria-label={tShell("results")} bind:this={list}>
           {#each rows as row, index (row.group + ":" + row.item.id)}
             {#if row.groupStart}
-              <li class="group" role="presentation">{GROUP_LABEL[row.group]}</li>
+              <li class="group" role="presentation">{groupLabel(row.group)}</li>
             {/if}
             <li
               id="spotlight-row-{index}"
@@ -190,7 +191,7 @@
             </li>
           {/each}
           {#if question}
-            {#if rows.length > 0}<li class="group" role="presentation">Ask</li>{/if}
+            {#if rows.length > 0}<li class="group" role="presentation">{tShell("askGroup")}</li>{/if}
             <li
               id="spotlight-row-{rows.length}"
               class="row ask"
@@ -202,12 +203,12 @@
               ondblclick={ask}
             >
               <span class="ask-mark ax-hex" aria-hidden="true"></span>
-              <span class="title">Ask Axiomata</span>
-              <span class="sub">“{question}”</span>
+              <span class="title">{tShell("askAxiomata")}</span>
+              <span class="sub">{tShell("quoted", { text: question })}</span>
             </li>
           {/if}
         </ul>
-        {#if searching}<p class="busy">Searching files …</p>{/if}
+        {#if searching}<p class="busy">{tShell("searchingFiles")}</p>{/if}
       {/if}
     </div>
   </div>

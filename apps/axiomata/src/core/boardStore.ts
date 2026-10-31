@@ -15,6 +15,7 @@
  * going through `refreshBoard`.
  */
 
+import { messageOf } from "./errors";
 import { get, writable, type Readable } from "svelte/store";
 
 import {
@@ -99,7 +100,7 @@ async function load(boardId: number): Promise<void> {
     ]);
     store.set({ board, columns, cards, plans, error: "", loading: false });
   } catch (err) {
-    store.update((data) => ({ ...data, error: String(err), loading: false }));
+    store.update((data) => ({ ...data, error: messageOf(err), loading: false }));
   }
 }
 

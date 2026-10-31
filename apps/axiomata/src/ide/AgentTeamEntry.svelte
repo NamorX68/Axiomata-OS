@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
   import type { AgentEntry } from "../core/backend";
+  import { tFlow } from "../i18n/flow";
   import { describeEntry } from "./agentEntry";
 
   let { entry }: { entry: AgentEntry | null } = $props();
@@ -13,9 +14,9 @@
   const view = $derived(describeEntry(entry));
 </script>
 
-<section class="team" aria-label="Team tools">
+<section class="team" aria-label={tFlow("teamTools")}>
   <header>
-    <h3>Team tools</h3>
+    <h3>{tFlow("teamTools")}</h3>
     <span class="state {view.tone}">{view.label}</span>
   </header>
   {#if view.detail}
@@ -29,7 +30,7 @@
     </ul>
   {/if}
   {#if entry?.command}
-    <p class="command" title="The program the harness starts as the {entry.server} MCP server">{entry.command}</p>
+    <p class="command" title={tFlow("entryCommandTitle", { server: entry.server })}>{entry.command}</p>
   {/if}
 </section>
 

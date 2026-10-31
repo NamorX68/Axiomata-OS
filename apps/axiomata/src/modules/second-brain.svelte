@@ -25,6 +25,7 @@
   wo ich auf den Hintergrund klicke ich im Brain lande"). The speed and the labels come from `core/brainView.ts`, whether it moves from `core/motion.ts`.
 -->
 <script lang="ts">
+  import { messageOf } from "../core/errors";
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import { openPath } from "@tauri-apps/plugin-opener";
@@ -59,6 +60,8 @@
   import TimeTravel from "./TimeTravel.svelte";
   import { waitingAgents } from "../core/agentWaiting";
   import WaitingBadge from "../ui/WaitingBadge.svelte";
+  import { tBrain } from "../i18n/brain";
+  import { lang } from "../i18n/lang.svelte";
 
   const REFRESH_MS = 30_000;
   /** The most sparks one burst of changed notes sends flying; the rest take their glow without one. */
@@ -98,7 +101,18 @@
   // proxy-wrap the assigned node, breaking that comparison silently.
   let hover = $state.raw<GraphNode | null>(null);
   let error = $state("");
-  let summary = $state("");
+  /** The vault's counts under the Orbit, kept as numbers so the line follows a language switch. */
+  let counts = $state<{ files: number; areas: number; links: number; truncated: boolean } | null>(null);
+  const summary = $derived.by(() => {
+    if (!counts) return "";
+    const parts = [
+      tBrain("files", { n: counts.files }),
+      tBrain("areaCount", { n: counts.areas }),
+      tBrain("links", { n: counts.links }),
+    ];
+    if (counts.truncated) parts.push(tBrain("truncated"));
+    return parts.join(" · ");
+  });
 
   /** Open right-click menu on a user-app node, or `null`. Positioned in
    *  viewport px (`AppContextMenu` is `position: fixed`), already clamped
@@ -126,6 +140,16 @@
   /** A change the Orbit must draw although it holds still under a covering view (core/cover.ts): a resize clears the
    *  canvas, a rebuild takes effect only on the next frame. */
   let redraw = true;
+
+  // A language switch renames the App Ring's nodes and groups (baked into the model by `rebuild()`) and the canvas
+  // captions and age badges (drawn per frame, but the Orbit holds still under a covering view) — rebuild and redraw.
+  // The first run is skipped: the subscriptions in `onMount` already build once.
+  let langSeen = false;
+  $effect(() => {
+    lang();
+    if (langSeen) rebuild();
+    langSeen = true;
+  });
 
   function rebuild() {
     redraw = true;
@@ -167,7 +191,12 @@
     );
     renderer.model = model;
     span = travelSpan(graph.files.map((f) => f.created ?? f.modified), Date.now());
-    summary = `${graph.files.length} files · ${graph.areas.length} areas · ${graph.links.length} links${graph.truncated ? " · truncated" : ""}`;
+    counts = {
+      files: graph.files.length,
+      areas: graph.areas.length,
+      links: graph.links.length,
+      truncated: graph.truncated,
+    };
   }
 
   async function load() {
@@ -176,7 +205,7 @@
       error = "";
       rebuild();
     } catch (err) {
-      error = String(err);
+      error = messageOf(err);
     }
   }
 
@@ -307,7 +336,7 @@
    *  toast, same as `ModulePicker`'s own failed-create path. */
   function handleAppClick(n: GraphNode): void {
     if (n.userApp) {
-      if (n.appPath) void openPath(n.appPath).catch((err) => toast(String(err), "warning"));
+      if (n.appPath) void openPath(n.appPath).catch((err) => toast(messageOf(err), "warning"));
       return;
     }
     if (!n.appType) return;
@@ -577,7 +606,7 @@
   {#if error}
     <p class="error">{error}</p>
   {:else if !$brainActive}
-    <p class="hint" style:top="calc(50% + {discR * 0.72}px)">{hover ? hover.label : "CLICK TO OPEN SECOND BRAIN"}</p>
+    <p class="hint" style:top="calc(50% + {discR * 0.72}px)">{hover ? hover.label : tBrain("clickToOpen")}</p>
     <p class="summary" style:top="calc(50% + {discR * 0.72 + 20}px)">{summary}</p>
   {/if}
   <button
@@ -587,8 +616,8 @@
     style:width="{addAppD}px"
     style:height="{addAppD}px"
     style:font-size="{addAppD * 0.55}px"
-    aria-label="Add app"
-    title="Add app"
+    aria-label={tBrain("addApp")}
+    title={tBrain("addApp")}
     onclick={(e) => {
       e.stopPropagation();
       dialogOpen = true;

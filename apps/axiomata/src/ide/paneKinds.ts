@@ -8,6 +8,7 @@
  */
 
 import type { FileRef } from "../fileapp/tabs";
+import { tStudio } from "../i18n/studio";
 import { folderKey, renamedPath } from "../fileapp/treeModel";
 import {
   activateTab,
@@ -181,6 +182,35 @@ export function filePaneConfig(tab: PaneTab): FilePaneConfig | null {
     untitled: c.untitled === true,
     reopen: typeof c.reopen === "number" ? c.reopen : 0,
   };
+}
+
+/** How a watch pane's stored title starts; the name of the watched session follows. */
+const WATCH_PREFIX = "Watch ";
+
+/** The titles of the panes whose title is fixed by their kind, read in the current language. */
+const KIND_TITLE: Readonly<Record<string, () => string>> = {
+  [SEARCH_PANE]: () => tStudio("paneSearch"),
+  [FILES_PANE]: () => tStudio("paneFiles"),
+  [GIT_PANE]: () => tStudio("paneGit"),
+  [TEAM_PANE]: () => tStudio("paneAgents"),
+  [PLAN_PANE]: () => tStudio("panePlanning"),
+  [GRAPH_PANE]: () => tStudio("paneFlowView"),
+  [ROSTER_PANE]: () => tStudio("paneRoster"),
+};
+
+/**
+ * What a tab's head shows. A stored `title` is data, written in whatever language was set when the tab was made, so a
+ * pane whose title its kind fixes (and a new note) is named anew when drawn; every other tab shows its stored title.
+ */
+export function paneTitle(tab: PaneTab): string {
+  if (Object.prototype.hasOwnProperty.call(KIND_TITLE, tab.kind)) return KIND_TITLE[tab.kind]();
+  if (filePaneConfig(tab)?.untitled) return tStudio("paneNewNote");
+  // A watch pane is stored as `Watch <session>` (`IdeView.svelte`'s `openWatch`, which reads the name back from it).
+  const watched = tab.kind === TASK_PANE && String(tab.config?.taskId ?? "").startsWith("watch:");
+  if (watched && tab.title.startsWith(WATCH_PREFIX)) {
+    return tStudio("watchTitle", { name: tab.title.slice(WATCH_PREFIX.length) });
+  }
+  return tab.title;
 }
 
 /** Whether `tab` shows the file `root`/`rel`. */

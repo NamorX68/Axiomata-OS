@@ -7,7 +7,6 @@ import {
   chatHarness,
   commandEntries,
   engineCommands,
-  helpText,
   nearest,
   refreshChatHarness,
   refreshEngineCommands,
@@ -132,22 +131,28 @@ describe("the command list", () => {
     expect(nearest("zzzzzz", ["model"])).toEqual([]);
   });
 
-  it("/help shows the three levels and the placeable tile types, read when asked", () => {
-    const text = helpText(ENGINE);
-    expect(text).toContain("**Conversation**");
-    expect(text).toContain("`/tile add|remove <type>");
-    expect(text).toContain("`memory-status`");
-    expect(text).not.toContain("`file`");
-    expect(text).toContain("`/oc:help` — the engine's help *(oc)*");
-    expect(helpText([])).toContain("its commands appear once the chat knows them");
+  it("/help lists the three levels and the placeable tile types in the panel, read when asked", async () => {
+    engineCommands.set(ENGINE);
+    const panel = (await runCommand("help", [])).panel;
+    const cells = panel?.rows.map((r) => r.cells.join(" | ")) ?? [];
+    expect(panel?.rows.map((r) => r.group)).toContain("Conversation");
+    const tile = cells.find((c) => c.startsWith("/tile add|remove <type>"));
+    expect(tile).toContain("memory-status");
+    expect(tile).not.toMatch(/\bfile\b/);
+    expect(cells).toContain("/oc:help | the engine's help | oc");
+    engineCommands.set([]);
+    const later = (await runCommand("help", [])).panel?.rows.map((r) => r.cells[0]);
+    expect(later).toContain("its commands appear once the chat knows them");
   });
 });
 
 describe("runCommand", () => {
-  it("/help returns the command list as detail", async () => {
+  it("/help opens the command list in the panel, never in the conversation", async () => {
     const r = await runCommand("help", []);
     expect(r.ok).toBe(true);
-    expect(r.detail).toContain("/tile");
+    expect(r.panel?.kind).toBe("list");
+    const tile = r.panel?.rows.find((row) => row.cells[0]?.startsWith("/tile"));
+    expect(tile).toMatchObject({ line: "/tile ", run: false });
   });
 
   it("/help <topic> opens that handbook page, an unknown topic lists the pages", async () => {
@@ -159,7 +164,7 @@ describe("runCommand", () => {
       expect(opened).toEqual([{ page: "studio" }]);
       const unknown = await runCommand("help", ["nothing", "here"]);
       expect(unknown.ok).toBe(false);
-      expect(unknown.detail).toContain("`/help kanban`");
+      expect(unknown.panel?.rows).toContainEqual(expect.objectContaining({ line: "/help kanban", run: true }));
       expect(opened).toHaveLength(1);
     } finally {
       off();
@@ -185,7 +190,13 @@ describe("runCommand", () => {
       { id: 2, role: "assistant", text: "b", at: 0, costUsd: 0.0125 },
       { id: 3, role: "assistant", text: "c", at: 0, costUsd: null },
     ]);
-    expect((await runCommand("cost", [])).message).toBe("2 turns · $0.0125 (1 without a price)");
+    const cost = await runCommand("cost", []);
+    expect(cost.panel?.kind).toBe("info");
+    expect(cost.panel?.rows.map((r) => r.cells)).toEqual([
+      ["Turns", "2"],
+      ["Cost", "$0.0125"],
+      ["Without a price", "1"],
+    ]);
   });
 
   it("/skills lists the skills, /skills run runs one", async () => {
@@ -193,7 +204,11 @@ describe("runCommand", () => {
     const spy = vi.spyOn(backend, "invokeBackend");
     spy.mockResolvedValueOnce([{ name: "news-web", description: "the news", backend: null, harness: "axh" }]);
     const list = await runCommand("skills", []);
-    expect(list.detail).toContain("`news-web` — the news *(axh)*");
+    expect(list.panel?.rows[0]).toMatchObject({
+      cells: ["news-web", "the news", "axh"],
+      line: "/skills run news-web",
+      confirm: "Run news-web? ⏎ yes · Esc no",
+    });
     spy.mockResolvedValueOnce({ status: "success", duration_ms: 12 });
     expect(await runCommand("skills", ["run", "news-web"])).toMatchObject({
       ok: true,
@@ -256,12 +271,13 @@ describe("runCommand", () => {
     await runCommand("tile", ["add", "memory-status"]);
     const usage = await runCommand("tile", ["memory-status"]);
     expect(usage.ok).toBe(false);
-    expect(usage.message).toMatch(/actions: `sync`, `status`/);
+    expect(usage.message).toMatch(/— sync, status/);
     const badJson = await runCommand("tile", ["memory-status", "status", "{nope"]);
     expect(badJson.ok).toBe(false);
     const ok = await runCommand("tile", ["memory-status", "status"]);
     expect(ok.ok).toBe(true);
-    expect(ok.detail).toContain("tracked_files");
+    expect(ok.panel).toMatchObject({ kind: "info", code: true });
+    expect(ok.panel?.text).toContain("tracked_files");
     const unknown = await runCommand("tile", ["memory-status", "explode"]);
     expect(unknown.ok).toBe(false);
     expect(unknown.message).toMatch(/no action "explode"/);
@@ -309,13 +325,18 @@ describe("the conversation commands that reach the backend (#108)", () => {
     const spy = await backend();
     spy.mockResolvedValue(config);
     const shown = await runCommand("model", []);
-    expect(shown.detail).toContain("`configured/model`, the configured chat model of open_router");
-    expect(shown.detail).toContain("- `allowed/one` — 128k ctx");
+    expect(shown.panel?.note).toBe("configured/model, the configured chat model of open_router");
+    expect(shown.panel?.rows[0]).toMatchObject({ cells: ["One · allowed/one", "—", "128k"], line: "/model allowed/one" });
+    expect(shown.panel?.takesTyped?.("some/model")).toBe("/model some/model");
+    expect(shown.panel?.takesTyped?.("-p")).toBeNull();
     expect((await runCommand("model", ["not/listed"])).message).toMatch(/not among open_router's models/);
     expect((await runCommand("model", ["-p"])).ok).toBe(false);
     expect((await runCommand("model", ["allowed/two"])).ok).toBe(true);
     expect(get(turnModel)).toBe("allowed/two");
-    expect((await runCommand("model", [])).detail).toContain("`allowed/two` for this conversation");
+    const again = (await runCommand("model", [])).panel;
+    expect(again?.note).toContain("allowed/two for this conversation");
+    expect(again?.rows.find((r) => r.current)?.id).toBe("allowed/two");
+    expect(again?.rows[0]?.line).toBe("/model default");
     await runCommand("model", ["default"]);
     expect(get(turnModel)).toBeNull();
     spy.mockRestore();
@@ -326,12 +347,12 @@ describe("the conversation commands that reach the backend (#108)", () => {
     const glut = { ...config, agents: { ...config.agents, chat_harness: "axh", chat_effort: "medium" } };
     spy.mockResolvedValue(glut);
     turnEffort.set(null);
-    expect((await runCommand("effort", [])).detail).toContain("`medium`, the configured chat effort");
+    expect((await runCommand("effort", [])).panel?.note).toContain("medium, the configured chat effort");
     expect((await runCommand("effort", ["hard"])).message).toMatch(/no effort level/);
     expect(get(turnEffort)).toBeNull();
     expect((await runCommand("effort", ["XHigh"])).ok).toBe(true);
     expect(get(turnEffort)).toBe("xhigh");
-    expect((await runCommand("effort", [])).detail).toContain("`xhigh` for this conversation");
+    expect((await runCommand("effort", [])).panel?.note).toContain("xhigh for this conversation");
     await runCommand("effort", ["default"]);
     expect(get(turnEffort)).toBeNull();
     turnEffort.set("low");
@@ -361,16 +382,17 @@ describe("the conversation commands that reach the backend (#108)", () => {
       },
     } as never);
     turnEffort.set(null);
-    const shown = await runCommand("effort", []);
-    expect(shown.message).toBe("Effort: default (high)");
-    expect(shown.detail).toContain("model's default (high)");
-    expect(shown.detail).toContain("Levels of `configured/model` — default (high): `none` `low` `high` `max`");
+    const shown = (await runCommand("effort", [])).panel;
+    expect(shown?.note).toContain("model's default (high)");
+    expect(shown?.rows.map((r) => r.id)).toEqual(["none", "low", "high", "max"]);
     await runCommand("effort", ["low"]);
-    expect((await runCommand("effort", [])).detail).toContain("`none` **`low`** `high`");
+    const marked = (await runCommand("effort", [])).panel;
+    expect(marked?.rows.find((r) => r.current)?.id).toBe("low");
+    expect(marked?.rows[0]).toMatchObject({ cells: ["default (high)"], line: "/effort default" });
     const unlisted = await runCommand("effort", ["medium"]);
     expect(unlisted.ok).toBe(true);
     expect(unlisted.message).toMatch(/does not list medium/);
-    expect((await runCommand("effort", ["hard"])).message).toBe('"hard" is no effort level — none, low, high, max');
+    expect((await runCommand("effort", ["hard"])).message).toBe("“hard” is no effort level — none, low, high, max");
     expect((await runCommand("effort", ["default"])).message).toBe("Effort: back to default (high).");
     expect(get(turnEffort)).toBeNull();
     spy.mockRestore();
@@ -404,11 +426,11 @@ describe("the conversation commands that reach the backend (#108)", () => {
     expect(route("/CC:REVIEW", engine)).toMatchObject({ kind: "engine", name: "Review" });
   });
 
-  it("/resume shows a harness's title as plain text", async () => {
+  it("/resume shows a harness's title as text in its row, never as markup", async () => {
     const spy = await backend();
     const title = "[click](http://x) `code`";
     spy.mockResolvedValue([{ id: "ses_x", title, updated_at: "2026-10-20T08:00:00Z", turns: 1 }]);
-    expect((await runCommand("resume", [])).detail).toContain("— click(http://x) code ·");
+    expect((await runCommand("resume", [])).panel?.rows[0]?.cells[0]).toBe(title);
     spy.mockRestore();
   });
 
@@ -427,7 +449,9 @@ describe("the conversation commands that reach the backend (#108)", () => {
     const spy = await backend();
     spy.mockResolvedValue([{ id: "ses_old", title: "fix the tests", updated_at: "2026-10-20T08:12:00Z", turns: 3 }]);
     const listed = await runCommand("resume", []);
-    expect(listed.detail).toContain("`/resume ses_old` — fix the tests · 2026-10-20 08:12 · 3 turns");
+    expect(listed.panel?.rows[0]).toMatchObject({ line: "/resume ses_old", run: true });
+    expect(listed.panel?.rows[0]?.cells[0]).toBe("fix the tests");
+    expect(listed.panel?.rows[0]?.cells[2]).toBe("3 turns");
     expect((await runCommand("resume", ["ses_other"])).ok).toBe(false);
     turns.set([{ id: 1, role: "user", text: "now", at: 0 }]);
     expect((await runCommand("resume", ["ses_old"])).ok).toBe(true);
@@ -443,7 +467,7 @@ describe("the conversation commands that reach the backend (#108)", () => {
     spy.mockResolvedValueOnce("Undid the file changes of the last turn.");
     expect(await runCommand("undo", [])).toMatchObject({
       ok: true,
-      detail: "Undid the file changes of the last turn.",
+      panel: { kind: "info", text: "Undid the file changes of the last turn." },
     });
     expect(spy).toHaveBeenLastCalledWith("chat_undo", { sessionId: "axh-1" });
     spy.mockRejectedValueOnce("Claude Code cannot undo");

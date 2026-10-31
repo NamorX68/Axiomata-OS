@@ -94,7 +94,7 @@ Axiomata — a view, a button, a setting, a skill, how something works — only 
 below. If neither says it, say so plainly and offer to note it as a gap in the handbook; never guess a name, a menu \
 or a step.
 
-**The handbook** (German, one page per area). Read a page with `{cli} app handbook <name>`; \
+**The handbook** (one page per area, in the owner's language). Read a page with `{cli} app handbook <name>`; \
 `{cli} app handbook` lists them. The pages:
 
 {contents}
@@ -118,17 +118,39 @@ workspace and `~/.axiomata/skills/`.
 
 ";
 
-/// Renders the manifest Markdown: the [`APP_GUIDE`] with the handbook's table of contents, then the mounted modules'
-/// actions. `cli` is how the agent should invoke the CLI (a bare name on PATH or an absolute path).
-pub fn render_manifest(entries: &[ManifestEntry], cli: &str) -> String {
+/// The language the owner reads the app in (`docs/plans/i18n.md`, Q16): the chat answers in it. Everything else it is
+/// told stays English (Q1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OwnerLanguage {
+    #[default]
+    En,
+    De,
+}
+
+impl OwnerLanguage {
+    /// The line the chat's guide ends with.
+    fn line(self) -> &'static str {
+        match self {
+            OwnerLanguage::En => "**The owner's language is English; answer in it.**\n\n",
+            OwnerLanguage::De => "**The owner's language is German; answer in it.**\n\n",
+        }
+    }
+}
+
+/// Renders the manifest Markdown: the [`APP_GUIDE`] with the handbook's table of contents and the owner's language,
+/// then the mounted modules' actions. `cli` is how the agent should invoke the CLI (a bare name on PATH or an absolute
+/// path).
+pub fn render_manifest(entries: &[ManifestEntry], cli: &str, language: OwnerLanguage) -> String {
     let mut out = String::new();
     out.push_str(MANIFEST_START);
     out.push('\n');
     out.push_str(
         &APP_GUIDE
-            .replace("{contents}", &handbook::contents())
+            .replace("{contents}", &handbook::contents_in(language))
             .replace("{cli}", cli),
     );
+    out.push_str(language.line());
     out.push_str("# Axiomata-OS dashboard modules\n\n");
     out.push_str(
         "The user's Axiomata-OS dashboard is running with the module instances listed \
@@ -184,9 +206,12 @@ pub fn cli_invocation() -> String {
 
 /// Renders and atomically writes `~/.axiomata/module-context.md`. Returns
 /// `true` if the file changed.
-pub fn write_manifest(entries: &[ManifestEntry]) -> Result<bool, AxiomataError> {
+pub fn write_manifest(
+    entries: &[ManifestEntry],
+    language: OwnerLanguage,
+) -> Result<bool, AxiomataError> {
     let path = paths::module_context_path();
-    let text = render_manifest(entries, &cli_invocation());
+    let text = render_manifest(entries, &cli_invocation(), language);
     if fs::read_to_string(&path).ok().as_deref() == Some(text.as_str()) {
         return Ok(false);
     }
@@ -443,8 +468,28 @@ mod tests {
     }
 
     #[test]
+    fn the_chat_is_told_the_owners_language_and_reads_the_handbook_in_it() {
+        let english = render_manifest(&[], "axiomata-cli", OwnerLanguage::En);
+        let german = render_manifest(&[], "axiomata-cli", OwnerLanguage::De);
+        assert!(english.contains("The owner's language is English; answer in it."));
+        assert!(german.contains("The owner's language is German; answer in it."));
+        assert!(english.contains(&handbook::contents_in(OwnerLanguage::En)));
+        assert!(german.contains(&handbook::contents_in(OwnerLanguage::De)));
+        assert_eq!(
+            german
+                .replace(OwnerLanguage::De.line(), OwnerLanguage::En.line())
+                .replace(
+                    &handbook::contents_in(OwnerLanguage::De),
+                    &handbook::contents_in(OwnerLanguage::En)
+                ),
+            english,
+            "the language line and the table of contents differ; the guide itself stays English (i18n.md, Q1)"
+        );
+    }
+
+    #[test]
     fn manifest_renders_entries_and_neutralises_markers() {
-        let text = render_manifest(&[entry()], "axiomata-cli");
+        let text = render_manifest(&[entry()], "axiomata-cli", OwnerLanguage::En);
         assert!(text.starts_with(MANIFEST_START));
         assert!(text.trim_end().ends_with(MANIFEST_END));
         assert!(text.contains("instance `inst-1`"));
@@ -457,8 +502,8 @@ mod tests {
 
     #[test]
     fn the_guide_carries_the_handbooks_contents_and_the_rule_to_answer_from_it() {
-        let text = render_manifest(&[], "/opt/axiomata-cli");
-        assert!(text.contains(&handbook::contents()));
+        let text = render_manifest(&[], "/opt/axiomata-cli", OwnerLanguage::En);
+        assert!(text.contains(&handbook::contents_in(OwnerLanguage::En)));
         assert!(text.contains("/opt/axiomata-cli app handbook <name>"));
         assert!(text.contains(
             "/opt/axiomata-cli app studio|spend|runs|routines|board|storage|settings|tags"
@@ -471,10 +516,10 @@ mod tests {
     #[test]
     fn write_manifest_is_idempotent() {
         with_temp_home(|home| {
-            assert!(write_manifest(&[entry()]).unwrap());
-            assert!(!write_manifest(&[entry()]).unwrap());
+            assert!(write_manifest(&[entry()], OwnerLanguage::En).unwrap());
+            assert!(!write_manifest(&[entry()], OwnerLanguage::En).unwrap());
             assert!(home.join("module-context.md").is_file());
-            assert!(write_manifest(&[]).unwrap());
+            assert!(write_manifest(&[], OwnerLanguage::En).unwrap());
             let text = fs::read_to_string(home.join("module-context.md")).unwrap();
             assert!(text.contains("No module instances"));
         });

@@ -16,7 +16,7 @@ import { removeMemberFromAllGroups } from "./appGroups";
 import { migrateRingTypes } from "./ringTypes";
 
 export { migrateRingTypes, RETIRED_RING_TYPES } from "./ringTypes";
-import { listModules } from "./registry";
+import { listModules, moduleTitle } from "./registry";
 import type { ModuleDefinition } from "./types";
 
 /** A registry module shown on the ring's left (in-app) side. No `icon` field
@@ -25,6 +25,7 @@ import type { ModuleDefinition } from "./types";
  *  `ModuleDefinition.icon` SVG, so there is nothing here to carry it in. */
 export interface BuiltinApp {
   type: string;
+  /** The name in the current language, read when the list is made. */
   title: string;
 }
 
@@ -82,7 +83,7 @@ export function ringViewFor(type: string): RingView | undefined {
 export function listAllRingEligibleBuiltins(): BuiltinApp[] {
   const modules = listModules()
     .filter(isRingEligible)
-    .map((def) => ({ type: def.type, title: def.title }));
+    .map((def) => ({ type: def.type, title: moduleTitle(def) }));
   const views = RING_VIEWS.map(({ type, title }) => ({ type, title }));
   return [...modules, ...views];
 }

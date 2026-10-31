@@ -3,6 +3,7 @@
 //! embedded in this build (`axiomata_core::handbook`) — the webview never names a path, and what it shows is the
 //! build's own text even if `~/.axiomata/handbook/` was edited.
 
+use axiomata_core::bridge::OwnerLanguage;
 use axiomata_core::handbook;
 use serde::Serialize;
 
@@ -22,8 +23,8 @@ pub struct HandbookPage {
     pub text: &'static str,
 }
 
-fn entries() -> Vec<HandbookEntry> {
-    handbook::PAGES
+fn entries(language: OwnerLanguage) -> Vec<HandbookEntry> {
+    handbook::pages(language)
         .iter()
         .map(|page| HandbookEntry {
             name: page.name,
@@ -33,8 +34,9 @@ fn entries() -> Vec<HandbookEntry> {
         .collect()
 }
 
-fn page(name: &str) -> Result<HandbookPage, String> {
-    let page = handbook::page(name).ok_or_else(|| format!("the handbook has no page {name:?}"))?;
+fn page(name: &str, language: OwnerLanguage) -> Result<HandbookPage, String> {
+    let page = handbook::page_in(name, language)
+        .ok_or_else(|| format!("the handbook has no page {name:?}"))?;
     Ok(HandbookPage {
         name: page.name,
         title: page.title(),
@@ -42,19 +44,24 @@ fn page(name: &str) -> Result<HandbookPage, String> {
     })
 }
 
-/// Every page, in the handbook's order.
+/// Every page, in the handbook's order, in the app's language (English without one, the source language).
 #[tauri::command]
-pub async fn handbook_pages() -> Result<Vec<HandbookEntry>, String> {
+pub async fn handbook_pages(language: Option<OwnerLanguage>) -> Result<Vec<HandbookEntry>, String> {
+    let language = language.unwrap_or_default();
     // Cheap, but kept off the event loop like every other command that reads.
-    tokio::task::spawn_blocking(entries)
+    tokio::task::spawn_blocking(move || entries(language))
         .await
         .map_err(|err| format!("the handbook could not be read: {err}"))
 }
 
-/// One page by its name; an unknown name is an error, never a file looked up.
+/// One page by its name, in the app's language; an unknown name is an error, never a file looked up.
 #[tauri::command]
-pub async fn handbook_page(name: String) -> Result<HandbookPage, String> {
-    tokio::task::spawn_blocking(move || page(&name))
+pub async fn handbook_page(
+    name: String,
+    language: Option<OwnerLanguage>,
+) -> Result<HandbookPage, String> {
+    let language = language.unwrap_or_default();
+    tokio::task::spawn_blocking(move || page(&name, language))
         .await
         .map_err(|err| format!("the handbook could not be read: {err}"))?
 }
@@ -65,11 +72,12 @@ mod tests {
 
     #[test]
     fn pages_are_served_by_name_from_the_build() {
-        assert_eq!(entries().len(), handbook::PAGES.len());
+        assert_eq!(entries(OwnerLanguage::De).len(), handbook::PAGES.len());
+        assert_eq!(entries(OwnerLanguage::En).len(), handbook::PAGES.len());
         assert_eq!(
-            page("kanban").unwrap().text,
+            page("kanban", OwnerLanguage::De).unwrap().text,
             handbook::page("kanban").unwrap().text
         );
-        assert!(page("../../config.toml").is_err());
+        assert!(page("../../config.toml", OwnerLanguage::En).is_err());
     }
 }

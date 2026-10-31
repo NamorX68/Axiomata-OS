@@ -4,28 +4,24 @@
  */
 
 import type { KeyUpdate, WebSettingsUpdate, WebSettingsView } from "./backend";
+import { tSettings } from "../i18n/settings";
 
 export type WebKeyId = "exa" | "tinyfish" | "tavily";
 
 export interface WebKeyMeta {
   id: WebKeyId;
   label: string;
-  /** What the field says about the provider. */
-  hint: string;
+  /** What the field says about the provider, in the current language. */
+  hint: () => string;
   /** Whether a key is stored, from the redacted view. */
   stored: (view: WebSettingsView) => boolean;
 }
 
 /** The providers in the order `web_search` asks them. */
 export const WEB_KEYS: readonly WebKeyMeta[] = [
-  { id: "exa", label: "Exa", hint: "Works without a key (rate limited); a key raises the limit", stored: (v) => v.has_exa_key },
-  { id: "tinyfish", label: "TinyFish", hint: "Asked when Exa is limited or fails", stored: (v) => v.has_tinyfish_key },
-  {
-    id: "tavily",
-    label: "Tavily",
-    hint: "Asked last, only up to the monthly limit below (the account holds a card)",
-    stored: (v) => v.has_tavily_key,
-  },
+  { id: "exa", label: "Exa", hint: () => tSettings("webExaHint"), stored: (v) => v.has_exa_key },
+  { id: "tinyfish", label: "TinyFish", hint: () => tSettings("webTinyfishHint"), stored: (v) => v.has_tinyfish_key },
+  { id: "tavily", label: "Tavily", hint: () => tSettings("webTavilyHint"), stored: (v) => v.has_tavily_key },
 ] as const;
 
 /** A key field the owner did not touch keeps the stored key; an emptied one clears it; a value replaces it. */

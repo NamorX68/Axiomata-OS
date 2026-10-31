@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import type { IdeProject } from "../core/backend";
+  import { tEditor } from "../i18n/editor";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import { folderNameProblem, otherProjects } from "./projectModel";
@@ -53,7 +54,7 @@
   let nameField = $state<HTMLInputElement | undefined>();
 
   function removeWithQuestion(project: IdeProject): void {
-    if (!confirm(`Remove “${project.name}” from the list? The folder itself is left alone.`)) return;
+    if (!confirm(tEditor("removeProjectConfirm", { name: project.name }))) return;
     open = false;
     onRemove(project.id);
   }
@@ -84,9 +85,9 @@
     {#if current}
       {#if accentColor(current.accent_slot, $swatches)}<span class="dot" style:background={accentColor(current.accent_slot, $swatches)}></span>{/if}
       <span class="name" title={current.repo_root}>{current.name}</span>
-      {#if !current.root_exists}<span class="missing">folder missing</span>{/if}
+      {#if !current.root_exists}<span class="missing">{tEditor("folderMissing")}</span>{/if}
     {:else}
-      <span class="name none">No project</span>
+      <span class="name none">{tEditor("noProject")}</span>
     {/if}
     <span class="caret" aria-hidden="true"><Icon name="chevron-down" size="sm" /></span>
   </button>
@@ -115,13 +116,13 @@
               <div class="row-actions">
                 <IconButton
                   icon="folder-open"
-                  label="Change the folder of {project.name}…"
+                  label={tEditor("changeFolderOf", { name: project.name })}
                   size="sm"
                   onclick={() => (onChangeFolder(project.id), (open = false))}
                 />
                 <IconButton
                   icon="trash-2"
-                  label="Remove {project.name} from the list (the folder is left alone)"
+                  label={tEditor("removeFromListOf", { name: project.name })}
                   size="sm"
                   onclick={() => removeWithQuestion(project)}
                 />
@@ -138,21 +139,21 @@
           onclick={() => {
             open = false;
             onOpenFolder();
-          }}><Icon name="folder-open" size="sm" /> Open project…</button
+          }}><Icon name="folder-open" size="sm" /> {tEditor("openProject")}</button
         >
         <button type="button" role="menuitem" class="action" onclick={() => (adding = true)}
-          ><Icon name="plus" size="sm" /> New project…</button
+          ><Icon name="plus" size="sm" /> {tEditor("newProjectDots")}</button
         >
         {#if current && onSetAccent}
-          <div class="accent-row" role="group" aria-label="Marker colour of {current.name}">
-            <span class="label">Marker</span>
+          <div class="accent-row" role="group" aria-label={tEditor("markerColourOf", { name: current.name })}>
+            <span class="label">{tEditor("marker")}</span>
             <button
               type="button"
               class="slot none"
               class:chosen={current.accent_slot === null}
-              aria-label="No marker colour"
+              aria-label={tEditor("noMarkerColour")}
               aria-pressed={current.accent_slot === null}
-              title="No marker"
+              title={tEditor("noMarker")}
               onclick={() => onSetAccent(current.id, null)}
             ></button>
             {#each { length: ACCENT_SLOTS } as _, slot (slot)}
@@ -161,7 +162,7 @@
                 class="slot"
                 class:chosen={current.accent_slot === slot}
                 style:background={accentColor(slot, $swatches)}
-                aria-label="Marker colour {slot + 1}"
+                aria-label={tEditor("markerColourN", { n: slot + 1 })}
                 aria-pressed={current.accent_slot === slot}
                 onclick={() => onSetAccent(current.id, slot)}
               ></button>
@@ -176,7 +177,7 @@
             onclick={() => {
               open = false;
               onClose();
-            }}><Icon name="x" size="sm" /> Close project</button
+            }}><Icon name="x" size="sm" /> {tEditor("closeProject")}</button
           >
           <button
             type="button"
@@ -185,32 +186,32 @@
             onclick={() => {
               open = false;
               onChangeFolder(current.id);
-            }}><Icon name="folder-open" size="sm" /> Change folder…</button
+            }}><Icon name="folder-open" size="sm" /> {tEditor("changeFolder")}</button
           >
           <button type="button" role="menuitem" class="action" onclick={() => removeWithQuestion(current)}
-            ><Icon name="trash-2" size="sm" /> Remove from list</button
+            ><Icon name="trash-2" size="sm" /> {tEditor("removeFromList")}</button
           >
         {/if}
       {:else}
         <!-- No <form>: the buttons act on click, so nothing depends on how the webview treats a submit. -->
         <div class="new-form">
-          <p class="label">New project</p>
+          <p class="label">{tEditor("newProject")}</p>
           <input
             type="text"
             spellcheck="false"
             bind:this={nameField}
             bind:value={name}
             oninput={() => (problem = null)}
-            placeholder="Project name"
+            placeholder={tEditor("projectName")}
             onkeydown={(event) => {
               if (event.key === "Enter") submit();
             }}
           />
           {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
-          <label class="check"><input type="checkbox" bind:checked={git} /> Start a git repository</label>
+          <label class="check"><input type="checkbox" bind:checked={git} /> {tEditor("startGitRepo")}</label>
           <div class="form-actions">
-            <button type="button" class="ax-btn primary" onclick={submit}>Choose where…</button>
-            <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
+            <button type="button" class="ax-btn primary" onclick={submit}>{tEditor("chooseWhere")}</button>
+            <button type="button" class="ax-btn" onclick={() => (adding = false)}>{tEditor("cancel")}</button>
           </div>
         </div>
       {/if}
