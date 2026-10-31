@@ -44,8 +44,9 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (`docs/plans/durable.md`: a journal per run, resume on click), and Opencode's exit (2026-10-23,
   `docs/plans/opencode-exit.md`: everything on Glut or Claude Code, a plain Opencode master tile stays), and
   "Engines, roles, agents" (2026-10-30, `docs/plans/agents-model.md` AM1–AM7: tiers per model, automatic engines,
-  roles without engines, the new Agents tab, the one-time migration; built on branch `agents-model`, not merged; open:
-  the owner sees the tabs live). LocalBrain was built, measured and not taken over
+  roles without engines, the new Agents tab, the one-time migration; merged), and German and English (2026-10-31,
+  `docs/plans/i18n.md`: typed catalogs in `src/i18n/`, coded errors, the handbook in both languages, slash lists in a
+  panel, #126 + #109). LocalBrain was built, measured and not taken over
   (`docs/plans/localbrain.md`, "Outcome").
   Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
